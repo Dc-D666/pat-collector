@@ -11,14 +11,13 @@ import NavBar from '../components/NavBar.astro';
     <mdui-card variant="outlined" clickable id="dropZone"
       style="padding:32px;text-align:center;margin-bottom:24px;cursor:pointer;border-style:dashed;">
       <mdui-icon name="cloud_upload" style="font-size:48px;color:var(--mdui-color-primary);"></mdui-icon>
-      <p style="font-size:16px;font-weight:500;margin:12px 0 4px;color:var(--mdui-color-on-surface);">拖拽文件到此处上�?/p>
-      <p style="font-size:13px;color:var(--mdui-color-on-surface-variant);">或点击选择文件 · 支持多文�?· 最�?00MB</p>
+      <p style="font-size:16px;font-weight:500;margin:12px 0 4px;color:var(--mdui-color-on-surface);">拖拽文件到此处上传</p>
+      <p style="font-size:13px;color:var(--mdui-color-on-surface-variant);">或点击选择文件 - 支持多文件 - 最大500MB</p>
       <input type="file" id="fileInput" multiple style="display:none;" />
       <mdui-linear-progress id="uploadProgress" style="margin-top:16px;display:none;"></mdui-linear-progress>
       <p id="progressText" style="font-size:13px;color:var(--mdui-color-on-surface-variant);margin-top:8px;"></p>
     </mdui-card>
 
-    <!-- 操作�?-->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
       <h2 style="margin:0;font-size:20px;font-weight:600;">
         <mdui-icon name="folder" style="vertical-align:middle;margin-right:4px;"></mdui-icon>
@@ -27,29 +26,25 @@ import NavBar from '../components/NavBar.astro';
       <mdui-button-icon icon="refresh" id="refreshBtn"></mdui-button-icon>
     </div>
 
-    <!-- 文件列表 -->
     <mdui-list id="fileList" style="border-radius:12px;overflow:hidden;">
-      <mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载�?..</mdui-list-item>
+      <mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载中...</mdui-list-item>
     </mdui-list>
 
-    <!-- 空状�?-->
     <div id="emptyState" style="display:none;text-align:center;padding:48px 16px;">
       <mdui-icon name="inbox" style="font-size:64px;color:var(--mdui-color-outline-variant);"></mdui-icon>
-      <p style="color:var(--mdui-color-on-surface-variant);">还没有上传任何文�?/p>
-      <p style="font-size:13px;color:var(--mdui-color-outline);">拖拽文件到上方区域开始上�?/p>
+      <p style="color:var(--mdui-color-on-surface-variant);">还没有上传任何文件</p>
+      <p style="font-size:13px;color:var(--mdui-color-outline);">拖拽文件到上方区域开始上传</p>
     </div>
 
-    <!-- 删除确认对话�?-->
     <mdui-dialog id="deleteDialog" icon="delete" headline="确认删除" close-on-overlay-click>
-      <p id="deleteMsg">确定要删除此文件吗？此操作不可恢复�?/p>
+      <p id="deleteMsg">确定要删除此文件吗？此操作不可恢复。</p>
       <mdui-button slot="action" variant="text" onclick="document.getElementById('deleteDialog').open=false">取消</mdui-button>
       <mdui-button slot="action" variant="filled" id="deleteConfirmBtn">删除</mdui-button>
     </mdui-dialog>
 
-    <!-- 修改密码对话�?-->
     <mdui-dialog id="pwdDialog" icon="lock" headline="修改密码" close-on-overlay-click>
       <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;">
-        <mdui-text-field id="oldPwd" type="password" label="旧密�? variant="outlined"></mdui-text-field>
+        <mdui-text-field id="oldPwd" type="password" label="旧密码" variant="outlined"></mdui-text-field>
         <mdui-text-field id="newPwd" type="password" label="新密码（至少4位）" variant="outlined" minlength="4"></mdui-text-field>
         <div id="pwdError" style="color:var(--mdui-color-error);font-size:13px;display:none;"></div>
       </div>
@@ -57,7 +52,6 @@ import NavBar from '../components/NavBar.astro';
       <mdui-button slot="action" variant="filled" id="pwdConfirmBtn">确认修改</mdui-button>
     </mdui-dialog>
 
-    <!-- 消息�?-->
     <mdui-snackbar id="snackbar" closeable placement="bottom"></mdui-snackbar>
   </main>
 </Layout>
@@ -82,7 +76,7 @@ import NavBar from '../components/NavBar.astro';
   async function loadFiles() {
     const listEl = document.getElementById('fileList');
     const emptyEl = document.getElementById('emptyState');
-    listEl.innerHTML = '<mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载�?..</mdui-list-item>';
+    listEl.innerHTML = '<mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载�?..</mdui-list-item>';
     emptyEl.style.display = 'none';
 
     try {
@@ -148,7 +142,7 @@ import NavBar from '../components/NavBar.astro';
     progressBar.style.display = 'block';
     progressBar.value = 0;
     progressBar.max = files.length;
-    progressText.textContent = `正在上传 ${files.length} 个文�?..`;
+    progressText.textContent = `正在上传 ${files.length} 个文�?..`;
 
     let done = 0;
     for (const file of files) {
@@ -171,7 +165,7 @@ import NavBar from '../components/NavBar.astro';
         console.error(`上传 ${file.name} 失败:`, err);
       }
       progressBar.value = done;
-      progressText.textContent = `已上�?${done}/${files.length}...`;
+      progressText.textContent = `已上�?${done}/${files.length}...`;
     }
     progressBar.style.display = 'none';
     showMsg(done > 0 ? `成功上传 ${done}/${files.length} 个文件` : '上传失败');
@@ -181,7 +175,7 @@ import NavBar from '../components/NavBar.astro';
   // ========== 删除 ==========
   function confirmDelete(filename) {
     pendingDelete = filename;
-    document.getElementById('deleteMsg').textContent = `确定要删�?"${filename}" 吗？此操作不可恢复。`;
+    document.getElementById('deleteMsg').textContent = `确定要删�?"${filename}" 吗？此操作不可恢复。`;
     document.getElementById('deleteDialog').open = true;
   }
   document.getElementById('deleteConfirmBtn').addEventListener('click', async () => {
@@ -194,7 +188,7 @@ import NavBar from '../components/NavBar.astro';
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showMsg('文件已删�?);
+      showMsg('文件已删�?);
       loadFiles();
     } catch (err) { showMsg('删除失败: ' + err.message); }
     pendingDelete = null;
@@ -222,7 +216,7 @@ import NavBar from '../components/NavBar.astro';
     const errEl = document.getElementById('pwdError');
     errEl.style.display = 'none';
     if (!oldPassword || !newPassword) { errEl.textContent = '请填写旧密码和新密码'; errEl.style.display = 'block'; return; }
-    if (newPassword.length < 4) { errEl.textContent = '新密码至�?�?; errEl.style.display = 'block'; return; }
+    if (newPassword.length < 4) { errEl.textContent = '新密码至�?�?; errEl.style.display = 'block'; return; }
     try {
       const res = await fetch(`${API_BASE}/api/auth/change-password`, {
         method: 'POST',
