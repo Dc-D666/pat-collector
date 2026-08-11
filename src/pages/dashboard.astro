@@ -72,6 +72,10 @@ import NavBar from '../components/NavBar.astro';
   .empty-hint { font-size:13px; color:var(--mdui-color-outline); }
   .pwd-form { display:flex; flex-direction:column; gap:12px; padding:4px 0; }
   .pwd-error { color:var(--mdui-color-error); font-size:13px; display:none; }
+  .file-item-icon { font-size:28px; color:var(--mdui-color-primary); }
+  .file-item-meta { font-size:12px; color:var(--mdui-color-on-surface-variant); }
+  .file-item-btn { margin-right:4px; }
+  .file-item-del { color:var(--mdui-color-error); }
 </style>
 
 <script>
@@ -94,7 +98,7 @@ import NavBar from '../components/NavBar.astro';
   async function loadFiles() {
     const listEl = document.getElementById('fileList');
     const emptyEl = document.getElementById('emptyState');
-    listEl.innerHTML = '<mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载�?..</mdui-list-item>';
+    listEl.innerHTML = '<mdui-list-item class="list-loading">加载中...</mdui-list-item>';�?..</mdui-list-item>';
     emptyEl.style.display = 'none';
 
     try {
@@ -117,21 +121,21 @@ import NavBar from '../components/NavBar.astro';
         const time = formatTime(f.uploadedAt);
         return `
           <mdui-list-item>
-            <mdui-icon name="${icon}" slot="icon" style="font-size:28px;color:var(--mdui-color-primary);"></mdui-icon>
+            <mdui-icon name="${icon}" slot="icon" class="file-item-icon"></mdui-icon>
             <div>
               <div style="font-weight:500;">${escapeHtml(f.name)}</div>
-              <div style="font-size:12px;color:var(--mdui-color-on-surface-variant);">${size} · ${time}</div>
+              <div class="file-item-meta">${size} - ${time}</div>
             </div>
-            <mdui-button-icon slot="end-icon" icon="download" style="margin-right:4px;"
+            <mdui-button-icon slot="end-icon" icon="download" class="file-item-btn"
               onclick="downloadFile('${escapeAttr(f.name)}')"></mdui-button-icon>
-            <mdui-button-icon slot="end-icon" icon="delete" style="color:var(--mdui-color-error);"
+            <mdui-button-icon slot="end-icon" icon="delete" class="file-item-del"
               onclick="confirmDelete('${escapeAttr(f.name)}')"></mdui-button-icon>
           </mdui-list-item>
           <mdui-divider></mdui-divider>
         `;
       }).join('');
     } catch (err) {
-      listEl.innerHTML = `<mdui-list-item style="text-align:center;color:var(--mdui-color-error);">加载失败: ${err.message}</mdui-list-item>`;
+      listEl.innerHTML = `<mdui-list-item class="list-loading">加载失败: ${err.message}</mdui-list-item>`;
     }
   }
 

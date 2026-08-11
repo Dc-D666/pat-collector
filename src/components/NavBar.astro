@@ -7,7 +7,7 @@ const { current = '' } = Astro.props;
   <mdui-button-icon icon="smart_display" slot="icon"></mdui-button-icon>
   <mdui-top-app-bar-title>PatPlayer</mdui-top-app-bar-title>
   <div style="flex-grow:1"></div>
-  <span id="userDisplay" style="font-size:14px;margin-right:8px;color:var(--mdui-color-on-surface-variant)"></span>
+  <span id="userDisplay" class="nav-user"></span>
   <mdui-button-icon icon="lock" id="changePwdBtn" title="修改密码"></mdui-button-icon>
   <mdui-button-icon icon="logout" onclick="logout()"></mdui-button-icon>
 </mdui-top-app-bar>
@@ -38,7 +38,7 @@ const { current = '' } = Astro.props;
   @media (max-width: 840px) {
     .desktop-rail { display: none !important; }
   }
-  /* 侧边栏存在时，主内容需要偏移 */
+  .nav-user { font-size:14px; margin-right:8px; color:var(--mdui-color-on-surface-variant); }
   @media (min-width: 841px) {
     main, .page-content {
       margin-left: 80px;
