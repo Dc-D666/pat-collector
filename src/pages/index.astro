@@ -1,0 +1,254 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="登录">
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;
+              background:linear-gradient(135deg, var(--mdui-color-primary-container, #e3f2fd), var(--mdui-color-tertiary-container, #fce4ec));">
+    <div style="width:100%;max-width:420px;">
+      <!-- Logo -->
+      <div style="text-align:center;margin-bottom:32px;">
+        <mdui-icon name="smart_display" style="font-size:64px;color:var(--mdui-color-primary);"></mdui-icon>
+        <h1 style="font-size:28px;font-weight:700;margin:8px 0 0;color:var(--mdui-color-on-surface);">PatPlayer</h1>
+        <p style="color:var(--mdui-color-on-surface-variant);margin:4px 0 0;">高中AI社团 · 作品收集管理系统</p>
+      </div>
+
+      <!-- 表单卡片 -->
+      <mdui-card variant="elevated" style="padding:24px;">
+        <h2 style="font-size:18px;font-weight:600;text-align:center;margin:0 0 20px;" id="formTitle">
+          <mdui-icon name="lock" style="vertical-align:middle;margin-right:4px;"></mdui-icon>
+          登录
+        </h2>
+
+        <form id="authForm" style="display:flex;flex-direction:column;gap:16px;">
+          <mdui-text-field id="email" type="email" label="邮箱" variant="outlined" required></mdui-text-field>
+          <mdui-text-field id="password" type="password" label="密码（至少6位）" variant="outlined" required minlength="6"></mdui-text-field>
+
+          <!-- 注册额外字段 -->
+          <div id="registerFields" style="display:none;flex-direction:column;gap:16px;">
+            <mdui-select id="className" label="选择班级" variant="outlined" required>
+              <mdui-menu-item value="">请选择班级</mdui-menu-item>
+            </mdui-select>
+            <mdui-text-field id="name" label="真实姓名" variant="outlined" maxlength="50"></mdui-text-field>
+            <mdui-text-field id="last4" label="学号后4位" variant="outlined" maxlength="4" pattern="[0-9]{4}"></mdui-text-field>
+          </div>
+
+          <div id="errorMsg" style="color:var(--mdui-color-error);font-size:14px;display:none;"></div>
+          <div id="successMsg" style="color:var(--mdui-color-primary);font-size:14px;display:none;"></div>
+
+          <mdui-button type="submit" variant="filled" full-width id="submitBtn">登录</mdui-button>
+        </form>
+
+        <div style="text-align:center;margin-top:16px;font-size:14px;color:var(--mdui-color-on-surface-variant);">
+          <span id="toggleText">还没有账号？</span>
+          <mdui-button variant="text" id="toggleBtn">立即注册</mdui-button>
+        </div>
+      </mdui-card>
+
+      <p style="text-align:center;font-size:12px;color:var(--mdui-color-on-surface-variant);margin-top:16px;">
+        patplayer.com · 同班同学可互相查看
+      </p>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  const API_BASE = window.location.origin;
+  let isRegister = false;
+
+  // 加载班级列表
+  function loadClasses() {
+    const select = document.getElementById('className');
+    for (let year = 25; year <= 26; year++) {
+      const max = year === 25 ? 24 : 25;
+      for (let i = 1; i <= max; i++) {
+        const cls = `${year}${String(i).padStart(2, '0')}`;
+        const item = document.createElement('mdui-menu-item');
+        item.value = cls;
+        item.textContent = `${cls} 班（${year === 25 ? '高二' : '高一'}）`;
+        select.appendChild(item);
+      }
+    }
+  }
+  loadClasses();
+
+  // 切换登录/注册
+  document.getElementById('toggleBtn').addEventListener('click', () => {
+    isRegister = !isRegister;
+    const fields = document.getElementById('registerFields');
+    const submitBtn = document.getElementById('submitBtn');
+    const toggleText = document.getElementById('toggleText');
+    const toggleBtn = document.getElementById('toggleBtn');
+
+    if (isRegister) {
+      fields.style.display = 'flex';
+      submitBtn.textContent = '注册';
+      toggleText.textContent = '已有账号？';
+      toggleBtn.textContent = '去登录';
+      document.getElementById('className').required = true;
+      document.getElementById('name').required = true;
+      document.getElementById('last4').required = true;
+    } else {
+      fields.style.display = 'none';
+      submitBtn.textContent = '登录';
+      toggleText.textContent = '还没有账号？';
+      toggleBtn.textContent = '立即注册';
+      document.getElementById('className').required = false;
+      document.getElementById('name').required = false;
+      document.getElementById('last4').required = false;
+    }
+    document.getElementById('errorMsg').style.display = 'none';
+    document.getElementById('successMsg').style.display = 'none';
+  });
+
+  // 提交表单
+  document.getElementById('authForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = document.getElementById('submitBtn');
+    const errorEl = document.getElementById('errorMsg');
+    const successEl = document.getElementById('successMsg');
+
+    submitBtn.loading = true;
+    submitBtn.textContent = isRegister ? '注册中...' : '登录中...';
+    errorEl.style.display = 'none';
+    successEl.style.display = 'none';
+
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+
+    try {
+      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+      const body = { email, password };
+      if (isRegister) {
+        body.className = document.getElementById('className').value;
+        body.name = document.getElementById('name').value.trim();
+        body.last4 = document.getElementById('last4').value;
+      }
+
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        if (isRegister) {
+          successEl.textContent = '注册成功！请检查邮箱确认（如开启邮箱验证），然后切换到登录。';
+          successEl.style.display = 'block';
+        } else {
+          localStorage.setItem('patplayer_token', data.session.access_token);
+          window.location.href = '/dashboard';
+        }
+      } else {
+        errorEl.textContent = data.error || '操作失败';
+        errorEl.style.display = 'block';
+      }
+    } catch (err) {
+      errorEl.textContent = '网络错误，请检查连接';
+      errorEl.style.display = 'block';
+    }
+    submitBtn.loading = false;
+    submitBtn.textContent = isRegister ? '注册' : '登录';
+  });
+</script>
+
+        opt.value = cls;
+        opt.textContent = `${cls} 班（${year === 25 ? '高二' : '高一'}）`;
+        select.appendChild(opt);
+      }
+    }
+  }
+  loadClasses();
+
+  // 切换登录/注册
+  document.getElementById('toggleBtn').addEventListener('click', () => {
+    isRegister = !isRegister;
+    const registerFields = document.getElementById('registerFields');
+    const formTitle = document.getElementById('formTitle');
+    const submitBtn = document.querySelector('#authForm button[type="submit"]');
+    const toggleText = document.getElementById('toggleText');
+    const toggleBtn = document.getElementById('toggleBtn');
+
+    if (isRegister) {
+      registerFields.classList.remove('hidden');
+      formTitle.textContent = '📝 注册';
+      submitBtn.textContent = '注 册';
+      toggleText.textContent = '已有账号？';
+      toggleBtn.textContent = '去登录';
+      // 注册时需要班级/姓名/学号
+      document.getElementById('className').required = true;
+      document.getElementById('name').required = true;
+      document.getElementById('last4').required = true;
+    } else {
+      registerFields.classList.add('hidden');
+      formTitle.textContent = '🔐 登录';
+      submitBtn.textContent = '登 录';
+      toggleText.textContent = '还没有账号？';
+      toggleBtn.textContent = '立即注册';
+      document.getElementById('className').required = false;
+      document.getElementById('name').required = false;
+      document.getElementById('last4').required = false;
+    }
+
+    document.getElementById('errorMsg').classList.add('hidden');
+    document.getElementById('successMsg').classList.add('hidden');
+  });
+
+  // 处理表单提交
+  document.getElementById('authForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const btn = e.target.querySelector('button[type="submit"]');
+    const errorEl = document.getElementById('errorMsg');
+    const successEl = document.getElementById('successMsg');
+
+    btn.disabled = true;
+    btn.textContent = isRegister ? '注册中...' : '登录中...';
+    errorEl.classList.add('hidden');
+    successEl.classList.add('hidden');
+
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+
+    try {
+      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+      const body = { email, password };
+
+      if (isRegister) {
+        body.className = document.getElementById('className').value;
+        body.name = document.getElementById('name').value.trim();
+        body.last4 = document.getElementById('last4').value;
+      }
+
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        if (isRegister) {
+          // 注册成功，提示检查邮箱
+          successEl.textContent = '✅ 注册成功！请检查邮箱确认（如开启邮箱验证），然后切换到登录。';
+          successEl.classList.remove('hidden');
+        } else {
+          // 登录成功，保存 session token
+          localStorage.setItem('patplayer_token', data.session.access_token);
+          window.location.href = '/dashboard';
+        }
+      } else {
+        errorEl.textContent = data.error || '操作失败';
+        errorEl.classList.remove('hidden');
+      }
+    } catch (err) {
+      errorEl.textContent = '网络错误，请检查连接';
+      errorEl.classList.remove('hidden');
+    }
+
+    btn.disabled = false;
+    btn.textContent = isRegister ? '注 册' : '登 录';
+  });
+</script>

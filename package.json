@@ -1,0 +1,24 @@
+{
+  "name": "patplayer",
+  "version": "2.0.0",
+  "description": "高中AI社团作品收集管理系统",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/netlify": "^5.4.0",
+    "@astrojs/tailwind": "^5.1.0",
+    "@netlify/blobs": "^7.4.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "astro": "^4.15.0",
+    "mdui": "^2.1.5",
+    "tailwindcss": "^3.4.0"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true,
+    "sharp@0.33.5": true
+  }
+}

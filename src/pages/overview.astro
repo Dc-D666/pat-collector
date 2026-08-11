@@ -1,0 +1,145 @@
+---
+import Layout from '../layouts/Layout.astro';
+import NavBar from '../components/NavBar.astro';
+---
+
+<Layout title="提交记录总览">
+  <NavBar current="overview" />
+
+  <main class="page-content" style="max-width:960px;margin:0 auto;padding:16px;">
+    <div style="margin-bottom:20px;">
+      <h1 style="margin:0 0 4px;font-size:24px;font-weight:700;">
+        <mdui-icon name="bar_chart" style="vertical-align:middle;margin-right:6px;"></mdui-icon>提交记录总览
+      </h1>
+      <p style="margin:0;font-size:14px;color:var(--mdui-color-on-surface-variant);">所有班级提交情况一览</p>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div id="statsRow" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;"></div>
+
+    <div id="overviewContent" style="display:flex;flex-direction:column;gap:12px;">
+      <mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">加载中...</mdui-card>
+    </div>
+
+    <div id="overviewEmpty" style="display:none;text-align:center;padding:48px 16px;">
+      <mdui-icon name="inbox" style="font-size:64px;color:var(--mdui-color-outline-variant);"></mdui-icon>
+      <p style="color:var(--mdui-color-on-surface-variant);">还没有任何提交记录</p>
+    </div>
+  </main>
+</Layout>
+
+<script>
+  const API_BASE = window.location.origin;
+  const TOKEN = localStorage.getItem('patplayer_token');
+  if (!TOKEN) window.location.href = '/';
+  function authHeaders() { return { Authorization: `Bearer ${TOKEN}` }; }
+
+  async function loadOverview() {
+    const content = document.getElementById('overviewContent');
+    const empty = document.getElementById('overviewEmpty');
+
+    content.innerHTML = '<div class="text-center text-gray-400 py-8">加载中...</div>';
+    empty.classList.add('hidden');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/class/overview`, {
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error);
+
+      if (data.overview.length === 0) {
+        content.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+
+      renderStats(data.overview);
+      renderOverview(data.overview);
+    } catch (err) {
+      content.innerHTML = `<div class="text-center text-red-500 py-8">加载失败: ${err.message}</div>`;
+    }
+  }
+
+  function renderStats(overview) {
+    const totalStudents = overview.reduce((s, c) => s + c.studentCount, 0);
+    const totalFiles = overview.reduce((s, c) => s + c.totalFiles, 0);
+    const totalSize = overview.reduce((s, c) => s + c.totalSize, 0);
+    const activeClasses = overview.filter(c => c.totalFiles > 0).length;
+    const stats = [
+      { label: '总班级', value: overview.length, icon: 'school' },
+      { label: '有提交班级', value: activeClasses, icon: 'mail' },
+      { label: '总文件数', value: totalFiles, icon: 'description' },
+      { label: '总大小', value: formatSize(totalSize), icon: 'save' },
+    ];
+    document.getElementById('statsRow').innerHTML = stats.map(s => `
+      <mdui-card variant="elevated" style="text-align:center;padding:16px;">
+        <mdui-icon name="${s.icon}" style="font-size:28px;color:var(--mdui-color-primary);"></mdui-icon>
+        <div style="font-size:24px;font-weight:700;color:var(--mdui-color-primary);margin:4px 0;">${s.value}</div>
+        <div style="font-size:12px;color:var(--mdui-color-on-surface-variant);">${s.label}</div>
+      </mdui-card>
+    `).join('');
+  }
+
+  function renderOverview(overview) {
+    const content = document.getElementById('overviewContent');
+    content.innerHTML = overview.map(c => {
+      const hasFiles = c.totalFiles > 0;
+      const studentRows = c.students.map(s => `
+        <tr>
+          <td style="padding:8px 12px;font-size:14px;display:flex;align-items:center;gap:6px;">
+            <mdui-icon name="person" style="font-size:18px;color:var(--mdui-color-on-surface-variant);"></mdui-icon>${escapeHtml(s.name)}
+          </td>
+          <td style="padding:8px 12px;font-size:14px;text-align:center;">${s.fileCount}</td>
+          <td style="padding:8px 12px;font-size:14px;">${formatSize(s.totalSize)}</td>
+          <td style="padding:8px 12px;font-size:13px;color:var(--mdui-color-on-surface-variant);">${s.files.length > 0 ? formatTime(s.files[0].modifiedAt || s.files[0].uploaded_at) : '-'}</td>
+          <td style="padding:8px 12px;">
+            <mdui-collapse>
+              <mdui-collapse-item header="查看文件 (${s.files.length})" style="font-size:13px;">
+                <ul style="margin:0;padding-left:20px;font-size:13px;color:var(--mdui-color-on-surface-variant);">
+                  ${s.files.map(f => `<li>${escapeHtml(f.name)} <span style="font-size:11px;">(${formatSize(f.size)})</span></li>`).join('')}
+                </ul>
+              </mdui-collapse-item>
+            </mdui-collapse>
+          </td>
+        </tr>
+      `).join('');
+
+      return `
+        <mdui-card variant="elevated">
+          <div style="padding:12px 16px;background:var(--mdui-color-surface-container);display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <mdui-icon name="${hasFiles ? 'mail' : 'inbox'}" style="color:${hasFiles ? 'var(--mdui-color-primary)' : 'var(--mdui-color-outline)'};"></mdui-icon>
+              <span style="font-weight:600;">${c.className} 班</span>
+              <mdui-chip style="font-size:12px;">${c.totalFiles} 个文件</mdui-chip>
+            </div>
+            <span style="font-size:12px;color:var(--mdui-color-on-surface-variant);">${c.studentCount} 位同学 · ${formatSize(c.totalSize)}</span>
+          </div>
+          ${c.students.length > 0 ? `
+            <div class="mdui-table" style="width:100%;overflow-x:auto;">
+              <table class="mdui-table" style="width:100%;margin:0;">
+                <thead><tr>
+                  <th style="text-align:left;font-weight:500;">姓名</th>
+                  <th style="text-align:center;font-weight:500;">文件数</th>
+                  <th style="text-align:left;font-weight:500;">总大小</th>
+                  <th style="text-align:left;font-weight:500;">最近提交</th>
+                  <th style="text-align:left;font-weight:500;">详情</th>
+                </tr></thead>
+                <tbody>${studentRows}</tbody>
+              </table>
+            </div>
+          ` : '<div style="padding:16px;text-align:center;font-size:14px;color:var(--mdui-color-on-surface-variant);">暂无提交</div>'}
+        </mdui-card>
+      `;
+    }).join('');
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  loadOverview();
+</script>

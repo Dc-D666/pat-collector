@@ -1,0 +1,236 @@
+---
+import Layout from '../layouts/Layout.astro';
+import NavBar from '../components/NavBar.astro';
+---
+
+<Layout title="班级作品墙">
+  <NavBar current="class-wall" />
+
+  <main class="page-content" style="max-width:960px;margin:0 auto;padding:16px;">
+    <div style="margin-bottom:20px;">
+      <h1 style="margin:0 0 4px;font-size:24px;font-weight:700;">
+        <mdui-icon name="photo_library" style="vertical-align:middle;margin-right:6px;"></mdui-icon>班级作品墙
+      </h1>
+      <p style="margin:0;font-size:14px;color:var(--mdui-color-on-surface-variant);" id="classTitle">加载中...</p>
+    </div>
+
+    <mdui-text-field id="searchInput" label="搜索同学姓名或文件名" variant="outlined"
+      icon="search" style="max-width:400px;margin-bottom:16px;width:100%;"></mdui-text-field>
+
+    <div id="wallContent" style="display:flex;flex-direction:column;gap:12px;">
+      <mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">加载中...</mdui-card>
+    </div>
+
+    <div id="wallEmpty" style="display:none;text-align:center;padding:48px 16px;">
+      <mdui-icon name="inbox" style="font-size:64px;color:var(--mdui-color-outline-variant);"></mdui-icon>
+      <p style="color:var(--mdui-color-on-surface-variant);">班级还没有同学提交作品</p>
+    </div>
+  </main>
+</Layout>
+  </main>
+</Layout>
+
+<script>
+  const API_BASE = window.location.origin;
+  const TOKEN = localStorage.getItem('patplayer_token');
+  if (!TOKEN) window.location.href = '/';
+
+  function authHeaders() { return { Authorization: `Bearer ${TOKEN}` }; }
+
+  async function loadWall() {
+    const content = document.getElementById('wallContent');
+    const empty = document.getElementById('wallEmpty');
+    const title = document.getElementById('classTitle');
+    content.innerHTML = '<mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">加载中...</mdui-card>';
+    empty.style.display = 'none';
+
+    try {
+      const res = await fetch(`${API_BASE}/api/class/wall`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      title.textContent = `${data.className || ''} 班 · 共 ${data.students.length} 位同学提交`;
+      if (data.students.length === 0) { content.innerHTML = ''; empty.style.display = 'block'; return; }
+      renderWall(data.students);
+    } catch (err) {
+      content.innerHTML = `<mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-error);">加载失败: ${err.message}</mdui-card>`;
+    }
+  }
+
+  function renderWall(students) {
+    const content = document.getElementById('wallContent');
+    const searchInput = document.getElementById('searchInput');
+
+    function render(filtered) {
+      if (filtered.length === 0) {
+        content.innerHTML = '<mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">没有匹配的结果</mdui-card>';
+        return;
+      }
+      content.innerHTML = filtered.map(s => `
+        <mdui-card variant="elevated">
+          <div style="padding:12px 16px;background:var(--mdui-color-surface-container);display:flex;align-items:center;justify-content:space-between;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <mdui-icon name="person" style="color:var(--mdui-color-primary);"></mdui-icon>
+              <span style="font-weight:600;">${escapeHtml(s.name)}</span>
+              <mdui-chip style="font-size:12px;">${s.fileCount} 个文件</mdui-chip>
+            </div>
+            <span style="font-size:12px;color:var(--mdui-color-on-surface-variant);">${s.lastSubmit ? formatTime(s.lastSubmit) : '暂无提交'}</span>
+          </div>
+          <mdui-list>
+            ${s.files.map(f => `
+              <mdui-list-item>
+                <mdui-icon name="${getFileIcon(f.name)}" slot="icon" style="font-size:24px;color:var(--mdui-color-primary);"></mdui-icon>
+                <div>
+                  <div style="font-weight:500;font-size:14px;">${escapeHtml(f.name)}</div>
+                  <div style="font-size:12px;color:var(--mdui-color-on-surface-variant);">${formatSize(f.size)} · ${formatTime(f.modifiedAt)}</div>
+                </div>
+                <mdui-button slot="end-icon" variant="outlined" style="font-size:12px;"
+                  onclick="downloadClassFile('${escapeAttr(s.name)}','${escapeAttr(f.name)}')">下载</mdui-button>
+              </mdui-list-item>
+              <mdui-divider></mdui-divider>
+            `).join('')}
+          </mdui-list>
+        </mdui-card>
+      `).join('');
+    }
+
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.toLowerCase().trim();
+      if (!q) { render(students); return; }
+      const filtered = students.map(s => ({ ...s, files: s.files.filter(f => f.name.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)) })).filter(s => s.files.length > 0 || s.name.toLowerCase().includes(q));
+      render(filtered);
+    });
+    render(students);
+  }
+
+  function downloadClassFile(studentName, filename) {
+    window.open(`${API_BASE}/api/class/download/${encodeURIComponent(studentName)}/${encodeURIComponent(filename)}?token=${TOKEN}`);
+  }
+
+  function escapeHtml(str) { const div = document.createElement('div'); div.textContent = str; return div.innerHTML; }
+  function escapeAttr(str) { return str.replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+  loadWall();
+</script>
+    const content = document.getElementById('wallContent');
+    const empty = document.getElementById('wallEmpty');
+    const title = document.getElementById('classTitle');
+
+    content.innerHTML = '<div class="text-center text-gray-400 py-8">加载中...</div>';
+    empty.classList.add('hidden');
+
+    try {
+      const res = await fetch(`${API_BASE}/api/class/wall`, {
+        headers: authHeaders(),
+      });
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error);
+
+      title.textContent = `${data.className} 班 · 共 ${data.students.length} 位同学提交`;
+
+      if (data.students.length === 0) {
+        content.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+
+      renderWall(data.students);
+    } catch (err) {
+      content.innerHTML = `<div class="text-center text-red-500 py-8">加载失败: ${err.message}</div>`;
+    }
+  }
+
+  function renderWall(students) {
+    const content = document.getElementById('wallContent');
+    const searchInput = document.getElementById('searchInput');
+
+    function render(filtered) {
+      if (filtered.length === 0) {
+        content.innerHTML = '<div class="text-center text-gray-400 py-8">没有匹配的结果</div>';
+        return;
+      }
+
+      content.innerHTML = filtered.map(s => `
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <!-- 学生头部 -->
+          <div class="px-5 py-3 bg-gray-50 border-b flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-lg">👤</span>
+              <span class="font-semibold text-gray-800">${escapeHtml(s.name)}</span>
+              <span class="text-xs text-gray-400">${s.fileCount} 个文件</span>
+            </div>
+            <span class="text-xs text-gray-400">${s.lastSubmit ? formatTime(s.lastSubmit) : '暂无提交'}</span>
+          </div>
+          <!-- 文件列表 -->
+          <div class="divide-y">
+            ${s.files.map(f => `
+              <div class="px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <div class="flex items-center gap-3 min-w-0 flex-1">
+                  <span class="text-xl">${getFileIcon(f.name)}</span>
+                  <div class="min-w-0">
+                    <p class="text-sm text-gray-700 truncate" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</p>
+                    <p class="text-xs text-gray-400">${formatSize(f.size)} · ${formatTime(f.modifiedAt)}</p>
+                  </div>
+                </div>
+                <button onclick="downloadClassFile('${escapeAttr(s.name)}', '${escapeAttr(f.name)}')"
+                  class="px-3 py-1 text-xs text-primary-600 hover:bg-primary-50 rounded cursor-pointer bg-transparent border border-primary-200 hover:border-primary-300">
+                  ⬇️ 下载
+                </button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.toLowerCase().trim();
+      if (!q) { render(students); return; }
+
+      const filtered = students
+        .map(s => ({
+          ...s,
+          files: s.files.filter(f =>
+            f.name.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
+          ),
+        }))
+        .filter(s => s.files.length > 0 || s.name.toLowerCase().includes(q));
+
+      render(filtered);
+    });
+
+    render(students);
+  }
+
+  function downloadClassFile(studentName, filename) {
+    window.open(`${API_BASE}/api/class/download/${encodeURIComponent(studentName)}/${encodeURIComponent(filename)}?token=${TOKEN}`);
+  }
+
+  function getFileIcon(name) {
+    const ext = name.split('.').pop()?.toLowerCase();
+    const icons = {
+      jpg:'🖼️', jpeg:'🖼️', png:'🖼️', gif:'🖼️', bmp:'🖼️', webp:'🖼️', svg:'🖼️',
+      mp4:'🎬', webm:'🎬', mov:'🎬', avi:'🎬',
+      mp3:'🎵', wav:'🎵', ogg:'🎵',
+      pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊', ppt:'📽️', pptx:'📽️',
+      zip:'📦', rar:'📦', '7z':'📦',
+      py:'🐍', js:'📜', html:'🌐', css:'🎨', cpp:'⚙️', c:'⚙️', java:'☕',
+      psd:'🎨', ai:'🎨', blend:'🔮', fbx:'🗿', obj:'🗿',
+      txt:'📃', md:'📝',
+    };
+    return icons[ext] || '📎';
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function escapeAttr(str) {
+    return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+  }
+
+  loadWall();
+</script>
