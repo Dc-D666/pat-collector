@@ -6,34 +6,31 @@ import NavBar from '../components/NavBar.astro';
 <Layout title="我的文件">
   <NavBar current="dashboard" />
 
-  <main class="page-content" style="max-width:960px;margin:0 auto;padding:16px;">
-    <!-- 上传区域 -->
-    <mdui-card variant="outlined" clickable id="dropZone"
-      style="padding:32px;text-align:center;margin-bottom:24px;cursor:pointer;border-style:dashed;">
-      <mdui-icon name="cloud_upload" style="font-size:48px;color:var(--mdui-color-primary);"></mdui-icon>
-      <p style="font-size:16px;font-weight:500;margin:12px 0 4px;color:var(--mdui-color-on-surface);">拖拽文件到此处上传</p>
-      <p style="font-size:13px;color:var(--mdui-color-on-surface-variant);">或点击选择文件 - 支持多文件 - 最大500MB</p>
-      <input type="file" id="fileInput" multiple style="display:none;" />
-      <mdui-linear-progress id="uploadProgress" style="margin-top:16px;display:none;"></mdui-linear-progress>
-      <p id="progressText" style="font-size:13px;color:var(--mdui-color-on-surface-variant);margin-top:8px;"></p>
+  <main class="page-content">
+    <mdui-card variant="outlined" clickable id="dropZone" class="drop-zone">
+      <mdui-icon name="cloud_upload" class="upload-icon"></mdui-icon>
+      <p class="upload-title">拖拽文件到此处上传</p>
+      <p class="upload-hint">或点击选择文件 - 支持多文件 - 最大500MB</p>
+      <input type="file" id="fileInput" multiple style="display:none" />
+      <mdui-linear-progress id="uploadProgress" class="upload-progress"></mdui-linear-progress>
+      <p id="progressText" class="progress-text"></p>
     </mdui-card>
 
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <h2 style="margin:0;font-size:20px;font-weight:600;">
-        <mdui-icon name="folder" style="vertical-align:middle;margin-right:4px;"></mdui-icon>
-        我的文件
+    <div class="toolbar">
+      <h2 class="toolbar-title">
+        <mdui-icon name="folder" class="toolbar-icon"></mdui-icon>我的文件
       </h2>
       <mdui-button-icon icon="refresh" id="refreshBtn"></mdui-button-icon>
     </div>
 
-    <mdui-list id="fileList" style="border-radius:12px;overflow:hidden;">
-      <mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载中...</mdui-list-item>
+    <mdui-list id="fileList" class="file-list">
+      <mdui-list-item class="list-loading">加载中...</mdui-list-item>
     </mdui-list>
 
-    <div id="emptyState" style="display:none;text-align:center;padding:48px 16px;">
-      <mdui-icon name="inbox" style="font-size:64px;color:var(--mdui-color-outline-variant);"></mdui-icon>
-      <p style="color:var(--mdui-color-on-surface-variant);">还没有上传任何文件</p>
-      <p style="font-size:13px;color:var(--mdui-color-outline);">拖拽文件到上方区域开始上传</p>
+    <div id="emptyState" class="empty-state">
+      <mdui-icon name="inbox" class="empty-icon"></mdui-icon>
+      <p class="empty-msg">还没有上传任何文件</p>
+      <p class="empty-hint">拖拽文件到上方区域开始上传</p>
     </div>
 
     <mdui-dialog id="deleteDialog" icon="delete" headline="确认删除" close-on-overlay-click>
@@ -43,10 +40,10 @@ import NavBar from '../components/NavBar.astro';
     </mdui-dialog>
 
     <mdui-dialog id="pwdDialog" icon="lock" headline="修改密码" close-on-overlay-click>
-      <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;">
+      <div class="pwd-form">
         <mdui-text-field id="oldPwd" type="password" label="旧密码" variant="outlined"></mdui-text-field>
         <mdui-text-field id="newPwd" type="password" label="新密码（至少4位）" variant="outlined" minlength="4"></mdui-text-field>
-        <div id="pwdError" style="color:var(--mdui-color-error);font-size:13px;display:none;"></div>
+        <div id="pwdError" class="pwd-error"></div>
       </div>
       <mdui-button slot="action" variant="text" onclick="document.getElementById('pwdDialog').open=false">取消</mdui-button>
       <mdui-button slot="action" variant="filled" id="pwdConfirmBtn">确认修改</mdui-button>
@@ -55,6 +52,27 @@ import NavBar from '../components/NavBar.astro';
     <mdui-snackbar id="snackbar" closeable placement="bottom"></mdui-snackbar>
   </main>
 </Layout>
+
+<style>
+  .page-content { max-width:960px; margin:0 auto; padding:16px; }
+  .drop-zone { padding:32px; text-align:center; margin-bottom:24px; cursor:pointer; border-style:dashed; }
+  .upload-icon { font-size:48px; color:var(--mdui-color-primary); }
+  .upload-title { font-size:16px; font-weight:500; margin:12px 0 4px; color:var(--mdui-color-on-surface); }
+  .upload-hint { font-size:13px; color:var(--mdui-color-on-surface-variant); }
+  .upload-progress { margin-top:16px; display:none; }
+  .progress-text { font-size:13px; color:var(--mdui-color-on-surface-variant); margin-top:8px; }
+  .toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .toolbar-title { margin:0; font-size:20px; font-weight:600; }
+  .toolbar-icon { vertical-align:middle; margin-right:4px; }
+  .file-list { border-radius:12px; overflow:hidden; }
+  .list-loading { text-align:center; color:var(--mdui-color-on-surface-variant); }
+  .empty-state { display:none; text-align:center; padding:48px 16px; }
+  .empty-icon { font-size:64px; color:var(--mdui-color-outline-variant); }
+  .empty-msg { color:var(--mdui-color-on-surface-variant); }
+  .empty-hint { font-size:13px; color:var(--mdui-color-outline); }
+  .pwd-form { display:flex; flex-direction:column; gap:12px; padding:4px 0; }
+  .pwd-error { color:var(--mdui-color-error); font-size:13px; display:none; }
+</style>
 
 <script>
   const API_BASE = window.location.origin;

@@ -3,25 +3,20 @@ import Layout from '../layouts/Layout.astro';
 ---
 
 <Layout title="登录">
-  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;
-              background:linear-gradient(135deg, var(--mdui-color-primary-container, #e3f2fd), var(--mdui-color-tertiary-container, #fce4ec));">
-    <div style="width:100%;max-width:420px;">
-      <!-- Logo -->
-      <div style="text-align:center;margin-bottom:32px;">
-        <mdui-icon name="smart_display" style="font-size:64px;color:var(--mdui-color-primary);"></mdui-icon>
-        <h1 style="font-size:28px;font-weight:700;margin:8px 0 0;color:var(--mdui-color-on-surface);">PatPlayer</h1>
-        <p style="color:var(--mdui-color-on-surface-variant);margin:4px 0 0;">高中AI社团 · 作品收集管理系统</p>
+  <div class="login-bg">
+    <div class="login-box">
+      <div class="login-logo">
+        <mdui-icon name="smart_display" class="logo-icon"></mdui-icon>
+        <h1 class="logo-title">PatPlayer</h1>
+        <p class="logo-subtitle">高中AI社团 - 作品收集管理系统</p>
       </div>
 
-      <!-- 表单卡片 -->
-      <mdui-card variant="elevated" style="padding:24px;">
-        <h2 style="font-size:18px;font-weight:600;text-align:center;margin:0 0 20px;" id="formTitle">
-          <mdui-icon name="lock" style="vertical-align:middle;margin-right:4px;"></mdui-icon>
-          登录
+      <mdui-card variant="elevated" class="login-card">
+        <h2 class="form-title" id="formTitle">
+          <mdui-icon name="lock" class="title-lock"></mdui-icon>登录
         </h2>
 
-        <form id="authForm" style="display:flex;flex-direction:column;gap:16px;">
-          <!-- 以下字段登录和注册都需要 -->
+        <form id="authForm" class="auth-form">
           <mdui-select id="className" label="选择班级" variant="outlined" required>
             <mdui-menu-item value="">请选择班级</mdui-menu-item>
           </mdui-select>
@@ -29,28 +24,41 @@ import Layout from '../layouts/Layout.astro';
           <mdui-text-field id="last4" label="学号后4位" variant="outlined" maxlength="4" pattern="[0-9]{4}" required></mdui-text-field>
           <mdui-text-field id="password" type="password" label="密码" variant="outlined" required minlength="4"></mdui-text-field>
 
-          <div id="registerHint" style="font-size:12px;color:var(--mdui-color-on-surface-variant);display:none;">
-            注册后初始密码为 <b>123456</b>，请登录后修改
-          </div>
-
-          <div id="errorMsg" style="color:var(--mdui-color-error);font-size:14px;display:none;"></div>
-          <div id="successMsg" style="color:var(--mdui-color-primary);font-size:14px;display:none;"></div>
+          <div id="registerHint" class="register-hint">注册后初始密码为 <b>123456</b>，请登录后修改</div>
+          <div id="errorMsg" class="form-error"></div>
+          <div id="successMsg" class="form-success"></div>
 
           <mdui-button type="submit" variant="filled" full-width id="submitBtn">登录</mdui-button>
         </form>
 
-        <div style="text-align:center;margin-top:16px;font-size:14px;color:var(--mdui-color-on-surface-variant);">
+        <div class="toggle-row">
           <span id="toggleText">还没有账号？</span>
           <mdui-button variant="text" id="toggleBtn">立即注册</mdui-button>
         </div>
       </mdui-card>
 
-      <p style="text-align:center;font-size:12px;color:var(--mdui-color-on-surface-variant);margin-top:16px;">
-        patplayer.com · 同班同学可互相查看
-      </p>
+      <p class="login-footer">patplayer.com - 同班同学可互相查看</p>
     </div>
   </div>
 </Layout>
+
+<style>
+  .login-bg { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; background:linear-gradient(135deg, var(--mdui-color-primary-container, #e3f2fd), var(--mdui-color-tertiary-container, #fce4ec)); }
+  .login-box { width:100%; max-width:420px; }
+  .login-logo { text-align:center; margin-bottom:32px; }
+  .logo-icon { font-size:64px; color:var(--mdui-color-primary); }
+  .logo-title { font-size:28px; font-weight:700; margin:8px 0 0; color:var(--mdui-color-on-surface); }
+  .logo-subtitle { color:var(--mdui-color-on-surface-variant); margin:4px 0 0; }
+  .login-card { padding:24px; }
+  .form-title { font-size:18px; font-weight:600; text-align:center; margin:0 0 20px; }
+  .title-lock { vertical-align:middle; margin-right:4px; }
+  .auth-form { display:flex; flex-direction:column; gap:16px; }
+  .register-hint { font-size:12px; color:var(--mdui-color-on-surface-variant); display:none; }
+  .form-error { color:var(--mdui-color-error); font-size:14px; display:none; }
+  .form-success { color:var(--mdui-color-primary); font-size:14px; display:none; }
+  .toggle-row { text-align:center; margin-top:16px; font-size:14px; color:var(--mdui-color-on-surface-variant); }
+  .login-footer { text-align:center; font-size:12px; color:var(--mdui-color-on-surface-variant); margin-top:16px; }
+</style>
 
 <script>
   const API_BASE = window.location.origin;
