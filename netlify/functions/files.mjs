@@ -1,4 +1,4 @@
-// PatPlayer 文件管理 API �?本地认证 + Netlify Blobs 存储
+// PatPlayer Files API - local auth + Netlify Blobs
 import { getStore } from '@netlify/blobs';
 import crypto from 'crypto';
 
@@ -17,13 +17,13 @@ function isAllowedExtension(fn) {
   return ALLOWED_EXTENSIONS.includes('.' + fn.split('.').pop()?.toLowerCase());
 }
 
-// ---------- 本地 token 验证 ----------
+// ---------- Token verification ----------
 function verifyToken(token) {
   try {
     const decoded = Buffer.from(token, 'base64url').toString();
     const [userKey, ts, sig] = decoded.split('|');
     if (!userKey || !ts || !sig) return null;
-    const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(`${userKey}|${ts}`).digest('hex');
+    const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(userKey + '|' + ts).digest('hex');
     if (sig !== expected) return null;
     if (Date.now() - Number(ts) > 24 * 60 * 60 * 1000) return null;
     return userKey;
@@ -39,9 +39,11 @@ async function getUserFromToken(event) {
   return { className, name };
 }
 
-function blobKey(user, filename) { return `${user.className}/${user.name}/${filename}`; }
+function blobKey(user, filename) {
+  return user.className + '/' + user.name + '/' + filename;
+}
 
-// ---------- 文件元数据存�?----------
+// ---------- File metadata store ----------
 const META_STORE = 'patplayer-files-meta';
 
 async function saveMeta(key, meta) {
@@ -54,10 +56,7 @@ async function getMetas(keys) {
   const store = getStore(META_STORE);
   const result = {};
   for (const k of keys) {
-    try {
-      const raw = await store.get(k);
-      if (raw) result[k] = JSON.parse(raw);
-    } catch {}
+    try { const raw = await store.get(k); if (raw) result[k] = JSON.parse(raw); } catch {}
   }
   return result;
 }
@@ -72,8 +71,8 @@ async function deleteMeta(key) {
 async function upload(event, user) {
   try {
     const { filename, contentType, data, size } = JSON.parse(event.body);
-    if (!filename || !data) return { statusCode: 400, body: JSON.stringify({ error: '缺少文件名或数据' }) };
-    if (!isAllowedExtension(filename)) return { statusCode: 400, body: JSON.stringify({ error: '不支持的文件类型' }) };
+    if (!filename || !data) return { statusCode: 400, body: JSON.stringify({ error: 'No file selected' }) };
+    if (!isAllowedExtension(filename)) return { statusCode: 400, body: JSON.stringify({ error: 'File type not allowed' }) };
 
     const store = getStore('patplayer-files');
     const key = blobKey(user, filename);
@@ -81,7 +80,8 @@ async function upload(event, user) {
     await store.set(key, buffer, { metadata: { contentType } });
 
     await saveMeta(key, {
-      filename, size: size || buffer.length, contentType, uploadedAt: new Date().toISOString(),
+      filename, size: size || buffer.length, contentType,
+      uploadedAt: new Date().toISOString(),
       className: user.className, studentName: user.name,
     });
 
@@ -92,7 +92,7 @@ async function upload(event, user) {
 async function listFiles(event, user) {
   try {
     const store = getStore('patplayer-files');
-    const prefix = `${user.className}/${user.name}/`;
+    const prefix = user.className + '/' + user.name + '/';
     const { blobs } = await store.list({ prefix });
     const keys = blobs.map(b => b.key);
     const metas = await getMetas(keys);
@@ -121,11 +121,11 @@ async function deleteFile(event, user) {
 async function downloadFile(event, user) {
   try {
     const filename = event.queryStringParameters?.filename;
-    if (!filename) return { statusCode: 400, body: JSON.stringify({ error: '缺少文件�? }) };
+    if (!filename) return { statusCode: 400, body: JSON.stringify({ error: 'Filename required' }) };
     const store = getStore('patplayer-files');
     const key = blobKey(user, filename);
     const blob = await store.get(key, { type: 'stream' });
-    if (!blob) return { statusCode: 404, body: JSON.stringify({ error: '文件不存�? }) };
+    if (!blob) return { statusCode: 404, body: JSON.stringify({ error: 'File not found' }) };
     const chunks = [];
     for await (const chunk of blob) chunks.push(chunk);
     const buffer = Buffer.concat(chunks);
@@ -133,7 +133,7 @@ async function downloadFile(event, user) {
       statusCode: 200,
       headers: {
         'Content-Type': 'application/octet-stream',
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        'Content-Disposition': 'attachment; filename*=UTF-8\'\'' + encodeURIComponent(filename),
         'Content-Length': buffer.length.toString(),
       },
       body: buffer.toString('base64'),
@@ -142,17 +142,16 @@ async function downloadFile(event, user) {
   } catch (err) { return { statusCode: 500, body: JSON.stringify({ error: err.message }) }; }
 }
 
-
 export const handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: { 'Access-Control-Allow-Origin': '*' } };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204 };
   const user = await getUserFromToken(event);
-  if (!user) return { statusCode: 401, body: JSON.stringify({ error: '���ȵ�¼' }) };
+  if (!user) return { statusCode: 401, body: JSON.stringify({ error: 'Not logged in' }) };
   const path = event.path.replace('/api/files/', '');
   switch (path) {
     case 'upload':   return upload(event, user);
     case 'list':     return listFiles(event, user);
     case 'delete':   return deleteFile(event, user);
     case 'download': return downloadFile(event, user);
-    default:         return { statusCode: 404, body: JSON.stringify({ error: '�ӿڲ�����' }) };
+    default:         return { statusCode: 404, body: JSON.stringify({ error: 'Not found' }) };
   }
-};
+}; 

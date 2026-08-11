@@ -1,4 +1,4 @@
-// PatPlayer 班级 API — 本地认证 + Netlify Blobs
+// PatPlayer Class API - local auth + Netlify Blobs
 import { getStore } from '@netlify/blobs';
 import crypto from 'crypto';
 
@@ -37,8 +37,7 @@ async function getMetas(keys) {
 }
 
 /**
- * GET /api/class/wall
- * 班级作品墙：查看同班所有同学的提交
+ * GET /api/class/wall - View all submissions from classmates
  */
 async function classWall(event, user) {
   try {
@@ -47,7 +46,7 @@ async function classWall(event, user) {
 
     const { blobs } = await store.list({ prefix });
 
-    // 按学生姓名分组
+    // Group by student name
     const studentMap = {};
     for (const blob of blobs) {
       const parts = blob.key.replace(prefix, '').split('/');
@@ -62,7 +61,7 @@ async function classWall(event, user) {
       });
     }
 
-    // 获取大小信息
+    // Get file size info
     const allKeys = blobs.map(b => b.key);
     const metasMap = await getMetas(allKeys);
 
@@ -84,7 +83,7 @@ async function classWall(event, user) {
           lastSubmit: enrichedFiles[0]?.modifiedAt || null,
         };
       })
-      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     return {
       statusCode: 200,
@@ -96,19 +95,17 @@ async function classWall(event, user) {
 }
 
 /**
- * GET /api/class/overview
- * 提交记录总览：所有班级
+ * GET /api/class/overview - Submission summary for all classes
  */
 async function overview(_event, _user) {
   try {
     const store = getStore('patplayer-files');
     const { blobs } = await store.list({});
 
-    // 获取元数据
     const allKeys = blobs.map(b => b.key);
     const metasMap = await getMetas(allKeys);
 
-    // 按班级-学生 组织（从文件路径推导）
+    // Organize by class-student (derived from file paths)
     const classMap = {};
     for (const blob of blobs) {
       const parts = blob.key.split('/');
@@ -124,7 +121,7 @@ async function overview(_event, _user) {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([className, studentMap]) => {
         const students = Object.entries(studentMap)
-          .sort(([a], [b]) => a.localeCompare(b, 'zh-CN'))
+          .sort(([a], [b]) => a.localeCompare(b))
           .map(([name, files]) => {
             const totalSize = files.reduce((s, f) => s + (f.size || 0), 0);
             return { name, fileCount: files.length, totalSize,
@@ -132,12 +129,6 @@ async function overview(_event, _user) {
           });
         const totalFiles = students.reduce((s, st) => s + st.fileCount, 0);
         const totalSize = students.reduce((s, st) => s + st.totalSize, 0);
-        return { className, studentCount: students.length, totalFiles, totalSize, students };
-      });
-
-        const totalFiles = students.reduce((s, st) => s + st.fileCount, 0);
-        const totalSize = students.reduce((s, st) => s + st.totalSize, 0);
-
         return { className, studentCount: students.length, totalFiles, totalSize, students };
       });
 
@@ -157,7 +148,7 @@ export const handler = async (event) => {
 
   const user = await getUserFromToken(event);
   if (!user) {
-    return { statusCode: 401, body: JSON.stringify({ error: '请先登录' }) };
+    return { statusCode: 401, body: JSON.stringify({ error: 'Not logged in' }) };
   }
 
   const path = event.path.replace('/api/class/', '');
@@ -168,6 +159,6 @@ export const handler = async (event) => {
     case 'overview':
       return overview(event, user);
     default:
-      return { statusCode: 404, body: JSON.stringify({ error: '接口不存在' }) };
+      return { statusCode: 404, body: JSON.stringify({ error: 'Not found' }) };
   }
 };
