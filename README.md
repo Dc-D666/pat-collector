@@ -12,18 +12,19 @@
 |---|------|
 | 前端框架 | [Astro](https://astro.build/) (SSR 模式) |
 | UI 组件库 | [MDUI2](https://www.mdui.org/) (Material Design 3) |
-| 样式辅助 | Tailwind CSS |
 | 部署平台 | [Netlify](https://netlify.com) |
-| 认证服务 | [Supabase Auth](https://supabase.com/auth) |
-| 数据库 | Supabase PostgreSQL |
+| 后端 API | Netlify Functions |
 | 文件存储 | Netlify Blobs |
-| API 层 | Netlify Functions |
+| 用户存储 | Netlify Blobs |
+| 密码加密 | Node.js scrypt (HMAC-SHA256 Token) |
 
 ---
 
 ## 功能列表
 
-- **身份认证** — 邮箱注册 / 登录，绑定班级、姓名、学号
+- **身份认证** — 班级 + 姓名 + 学号后4位 + 密码，scrypt 加密存储
+- **默认密码** — 注册后初始密码为 `123456`，登录后可修改
+- **拖拽上传** — 支持多文件，实时进度条，扩展名白名单
 - **拖拽上传** — 支持多文件，实时进度条，扩展名白名单
 - **文件管理** — 查看、下载、删除个人文件
 - **班级作品墙** — 浏览同班同学提交，支持搜索过滤和下载

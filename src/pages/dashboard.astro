@@ -11,14 +11,14 @@ import NavBar from '../components/NavBar.astro';
     <mdui-card variant="outlined" clickable id="dropZone"
       style="padding:32px;text-align:center;margin-bottom:24px;cursor:pointer;border-style:dashed;">
       <mdui-icon name="cloud_upload" style="font-size:48px;color:var(--mdui-color-primary);"></mdui-icon>
-      <p style="font-size:16px;font-weight:500;margin:12px 0 4px;color:var(--mdui-color-on-surface);">拖拽文件到此处上传</p>
-      <p style="font-size:13px;color:var(--mdui-color-on-surface-variant);">或点击选择文件 · 支持多文件 · 最大500MB</p>
+      <p style="font-size:16px;font-weight:500;margin:12px 0 4px;color:var(--mdui-color-on-surface);">拖拽文件到此处上�?/p>
+      <p style="font-size:13px;color:var(--mdui-color-on-surface-variant);">或点击选择文件 · 支持多文�?· 最�?00MB</p>
       <input type="file" id="fileInput" multiple style="display:none;" />
       <mdui-linear-progress id="uploadProgress" style="margin-top:16px;display:none;"></mdui-linear-progress>
       <p id="progressText" style="font-size:13px;color:var(--mdui-color-on-surface-variant);margin-top:8px;"></p>
     </mdui-card>
 
-    <!-- 操作栏 -->
+    <!-- 操作�?-->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
       <h2 style="margin:0;font-size:20px;font-weight:600;">
         <mdui-icon name="folder" style="vertical-align:middle;margin-right:4px;"></mdui-icon>
@@ -29,27 +29,27 @@ import NavBar from '../components/NavBar.astro';
 
     <!-- 文件列表 -->
     <mdui-list id="fileList" style="border-radius:12px;overflow:hidden;">
-      <mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载中...</mdui-list-item>
+      <mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载�?..</mdui-list-item>
     </mdui-list>
 
-    <!-- 空状态 -->
+    <!-- 空状�?-->
     <div id="emptyState" style="display:none;text-align:center;padding:48px 16px;">
       <mdui-icon name="inbox" style="font-size:64px;color:var(--mdui-color-outline-variant);"></mdui-icon>
-      <p style="color:var(--mdui-color-on-surface-variant);">还没有上传任何文件</p>
-      <p style="font-size:13px;color:var(--mdui-color-outline);">拖拽文件到上方区域开始上传</p>
+      <p style="color:var(--mdui-color-on-surface-variant);">还没有上传任何文�?/p>
+      <p style="font-size:13px;color:var(--mdui-color-outline);">拖拽文件到上方区域开始上�?/p>
     </div>
 
-    <!-- 删除确认对话框 -->
+    <!-- 删除确认对话�?-->
     <mdui-dialog id="deleteDialog" icon="delete" headline="确认删除" close-on-overlay-click>
-      <p id="deleteMsg">确定要删除此文件吗？此操作不可恢复。</p>
+      <p id="deleteMsg">确定要删除此文件吗？此操作不可恢复�?/p>
       <mdui-button slot="action" variant="text" onclick="document.getElementById('deleteDialog').open=false">取消</mdui-button>
       <mdui-button slot="action" variant="filled" id="deleteConfirmBtn">删除</mdui-button>
     </mdui-dialog>
 
-    <!-- 修改密码对话框 -->
+    <!-- 修改密码对话�?-->
     <mdui-dialog id="pwdDialog" icon="lock" headline="修改密码" close-on-overlay-click>
       <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;">
-        <mdui-text-field id="oldPwd" type="password" label="旧密码" variant="outlined"></mdui-text-field>
+        <mdui-text-field id="oldPwd" type="password" label="旧密�? variant="outlined"></mdui-text-field>
         <mdui-text-field id="newPwd" type="password" label="新密码（至少4位）" variant="outlined" minlength="4"></mdui-text-field>
         <div id="pwdError" style="color:var(--mdui-color-error);font-size:13px;display:none;"></div>
       </div>
@@ -57,7 +57,7 @@ import NavBar from '../components/NavBar.astro';
       <mdui-button slot="action" variant="filled" id="pwdConfirmBtn">确认修改</mdui-button>
     </mdui-dialog>
 
-    <!-- 消息条 -->
+    <!-- 消息�?-->
     <mdui-snackbar id="snackbar" closeable placement="bottom"></mdui-snackbar>
   </main>
 </Layout>
@@ -82,7 +82,7 @@ import NavBar from '../components/NavBar.astro';
   async function loadFiles() {
     const listEl = document.getElementById('fileList');
     const emptyEl = document.getElementById('emptyState');
-    listEl.innerHTML = '<mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载中...</mdui-list-item>';
+    listEl.innerHTML = '<mdui-list-item style="text-align:center;color:var(--mdui-color-on-surface-variant);">加载�?..</mdui-list-item>';
     emptyEl.style.display = 'none';
 
     try {
@@ -148,7 +148,7 @@ import NavBar from '../components/NavBar.astro';
     progressBar.style.display = 'block';
     progressBar.value = 0;
     progressBar.max = files.length;
-    progressText.textContent = `正在上传 ${files.length} 个文件...`;
+    progressText.textContent = `正在上传 ${files.length} 个文�?..`;
 
     let done = 0;
     for (const file of files) {
@@ -171,7 +171,7 @@ import NavBar from '../components/NavBar.astro';
         console.error(`上传 ${file.name} 失败:`, err);
       }
       progressBar.value = done;
-      progressText.textContent = `已上传 ${done}/${files.length}...`;
+      progressText.textContent = `已上�?${done}/${files.length}...`;
     }
     progressBar.style.display = 'none';
     showMsg(done > 0 ? `成功上传 ${done}/${files.length} 个文件` : '上传失败');
@@ -181,7 +181,7 @@ import NavBar from '../components/NavBar.astro';
   // ========== 删除 ==========
   function confirmDelete(filename) {
     pendingDelete = filename;
-    document.getElementById('deleteMsg').textContent = `确定要删除 "${filename}" 吗？此操作不可恢复。`;
+    document.getElementById('deleteMsg').textContent = `确定要删�?"${filename}" 吗？此操作不可恢复。`;
     document.getElementById('deleteDialog').open = true;
   }
   document.getElementById('deleteConfirmBtn').addEventListener('click', async () => {
@@ -194,7 +194,7 @@ import NavBar from '../components/NavBar.astro';
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showMsg('文件已删除');
+      showMsg('文件已删�?);
       loadFiles();
     } catch (err) { showMsg('删除失败: ' + err.message); }
     pendingDelete = null;
@@ -222,7 +222,7 @@ import NavBar from '../components/NavBar.astro';
     const errEl = document.getElementById('pwdError');
     errEl.style.display = 'none';
     if (!oldPassword || !newPassword) { errEl.textContent = '请填写旧密码和新密码'; errEl.style.display = 'block'; return; }
-    if (newPassword.length < 4) { errEl.textContent = '新密码至少4位'; errEl.style.display = 'block'; return; }
+    if (newPassword.length < 4) { errEl.textContent = '新密码至�?�?; errEl.style.display = 'block'; return; }
     try {
       const res = await fetch(`${API_BASE}/api/auth/change-password`, {
         method: 'POST',
@@ -237,255 +237,4 @@ import NavBar from '../components/NavBar.astro';
       showMsg('密码修改成功');
     } catch (err) { errEl.textContent = '修改失败: ' + err.message; errEl.style.display = 'block'; }
   });
-</script>
-    <div id="dropZone"
-      class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center
-             hover:border-primary-400 hover:bg-primary-50/30 transition-all cursor-pointer mb-6">
-      <div class="text-4xl mb-3">📤</div>
-      <p class="text-lg font-medium text-gray-700">拖拽文件到此处上传</p>
-      <p class="text-sm text-gray-400 mt-1">或点击选择文件 · 支持多文件/文件夹 · 最大500MB</p>
-      <input type="file" id="fileInput" multiple class="hidden" />
-      <div id="uploadProgress" class="mt-4 hidden">
-        <div class="w-full bg-gray-200 rounded-full h-2">
-          <div id="progressBar" class="bg-primary-500 h-2 rounded-full transition-all" style="width:0%"></div>
-        </div>
-        <p id="progressText" class="text-sm text-gray-500 mt-1">上传中...</p>
-      </div>
-    </div>
-
-    <!-- 操作栏 -->
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-semibold">📁 我的文件</h2>
-      <button id="refreshBtn" class="text-sm text-primary-600 hover:text-primary-800 cursor-pointer bg-transparent border-none">
-        🔄 刷新列表
-      </button>
-    </div>
-
-    <!-- 文件列表 -->
-    <div id="fileList" class="space-y-2">
-      <div class="text-center text-gray-400 py-8">加载中...</div>
-    </div>
-
-    <!-- 空状态 -->
-    <div id="emptyState" class="hidden text-center py-12">
-      <div class="text-5xl mb-3">📭</div>
-      <p class="text-gray-500">还没有上传任何文件</p>
-      <p class="text-gray-400 text-sm mt-1">拖拽文件到上方区域开始上传</p>
-    </div>
-  </main>
-</Layout>
-
-<script>
-  const API_BASE = window.location.origin;
-  const TOKEN = localStorage.getItem('patplayer_token');
-  if (!TOKEN) window.location.href = '/';
-
-  let currentFiles = [];
-
-  function authHeaders() {
-    return { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
-  }
-
-  // ========== 文件列表 ==========
-  async function loadFiles() {
-    const listEl = document.getElementById('fileList');
-    const emptyEl = document.getElementById('emptyState');
-
-    listEl.innerHTML = '<div class="text-center text-gray-400 py-8">加载中...</div>';
-    emptyEl.classList.add('hidden');
-
-    try {
-      const res = await fetch(`${API_BASE}/api/files/list`, {
-        headers: authHeaders(),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        if (res.status === 401) { localStorage.removeItem('patplayer_token'); window.location.href = '/'; return; }
-        throw new Error(data.error);
-      }
-
-      currentFiles = data.files;
-
-      if (!data.files || data.files.length === 0) {
-        listEl.innerHTML = '';
-        emptyEl.classList.remove('hidden');
-        return;
-      }
-
-      emptyEl.classList.add('hidden');
-      listEl.innerHTML = data.files.map((f, i) => `
-        <div class="flex items-center justify-between bg-white rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow group">
-          <div class="flex items-center gap-3 min-w-0 flex-1">
-            <span class="text-2xl">${getFileIcon(f.name)}</span>
-            <div class="min-w-0">
-              <p class="font-medium text-gray-800 truncate" title="${escapeHtml(f.name)}">
-                ${escapeHtml(f.name)}
-              </p>
-              <p class="text-xs text-gray-400 mt-0.5">
-                ${formatSize(f.size)} · ${formatTime(f.uploadedAt)}
-              </p>
-            </div>
-          </div>
-          <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onclick="downloadFile('${escapeAttr(f.name)}')" title="下载"
-              class="px-2 py-1 text-xs text-gray-500 hover:text-green-600 hover:bg-green-50 rounded cursor-pointer bg-transparent border-none">
-              ⬇️
-            </button>
-            <button onclick="deleteFile('${escapeAttr(f.name)}')" title="删除"
-              class="px-2 py-1 text-xs text-gray-500 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer bg-transparent border-none">
-              🗑️
-            </button>
-          </div>
-        </div>
-      `).join('');
-    } catch (err) {
-      listEl.innerHTML = `<div class="text-center text-red-500 py-8">加载失败: ${err.message}</div>`;
-    }
-  }
-          </div>
-        </div>
-      `).join('');
-    } catch (err) {
-      listEl.innerHTML = `<div class="text-center text-red-500 py-8">加载失败: ${err.message}</div>`;
-    }
-  }
-
-  // ========== 上传（通过 Netlify Function → Netlify Blobs） ==========
-  const dropZone = document.getElementById('dropZone');
-  const fileInput = document.getElementById('fileInput');
-  const progressDiv = document.getElementById('uploadProgress');
-  const progressBar = document.getElementById('progressBar');
-  const progressText = document.getElementById('progressText');
-
-  dropZone.addEventListener('click', () => fileInput.click());
-
-  dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('border-primary-400', 'bg-primary-50/30');
-  });
-
-  dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('border-primary-400', 'bg-primary-50/30');
-  });
-
-  dropZone.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('border-primary-400', 'bg-primary-50/30');
-    const files = [...e.dataTransfer.files];
-    if (files.length > 0) await uploadFiles(files);
-  });
-
-  fileInput.addEventListener('change', async () => {
-    const files = [...fileInput.files];
-    if (files.length > 0) await uploadFiles(files);
-    fileInput.value = '';
-  });
-
-  async function uploadFiles(files) {
-    progressDiv.classList.remove('hidden');
-    progressBar.style.width = '0%';
-    progressBar.classList.remove('bg-red-500');
-    progressText.textContent = `正在上传 ${files.length} 个文件...`;
-
-    let successCount = 0;
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      try {
-        const reader = new FileReader();
-        const base64 = await new Promise((resolve, reject) => {
-          reader.onload = () => resolve(reader.result.split(',')[1]);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-
-        const res = await fetch(`${API_BASE}/api/files/upload`, {
-          method: 'POST',
-          headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filename: file.name,
-            contentType: file.type,
-            data: base64,
-            size: file.size,
-          }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
-
-        successCount++;
-        progressBar.style.width = `${((i + 1) / files.length) * 100}%`;
-        progressText.textContent = `已上传 ${i + 1}/${files.length}...`;
-      } catch (err) {
-        console.error(`上传 ${file.name} 失败:`, err);
-      }
-    }
-
-    if (successCount > 0) {
-      progressBar.style.width = '100%';
-      progressText.textContent = `✅ 成功上传 ${successCount}/${files.length} 个文件`;
-    } else {
-      progressBar.classList.add('bg-red-500');
-      progressText.textContent = '❌ 上传失败';
-    }
-
-    setTimeout(() => {
-      progressDiv.classList.add('hidden');
-      loadFiles();
-    }, 1500);
-  }
-
-  // ========== 删除 ==========
-  async function deleteFile(filename) {
-    if (!confirm(`确定要删除 "${filename}" 吗？此操作不可恢复。`)) return;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/files/delete`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ filename }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      loadFiles();
-    } catch (err) {
-      alert('删除失败: ' + err.message);
-    }
-  }
-
-  // ========== 下载 ==========
-  function downloadFile(filename) {
-    const url = `${API_BASE}/api/files/download?filename=${encodeURIComponent(filename)}&token=${TOKEN}`;
-    window.open(url);
-  }
-
-  // ========== 工具函数 ==========
-  function getFileIcon(name) {
-    const ext = name.split('.').pop()?.toLowerCase();
-    const icons = {
-      jpg: '🖼️', jpeg: '🖼️', png: '🖼️', gif: '🖼️', bmp: '🖼️', webp: '🖼️', svg: '🖼️',
-      mp4: '🎬', webm: '🎬', mov: '🎬', avi: '🎬',
-      mp3: '🎵', wav: '🎵', ogg: '🎵',
-      pdf: '📄', doc: '📝', docx: '📝', xls: '📊', xlsx: '📊', ppt: '📽️', pptx: '📽️',
-      zip: '📦', rar: '📦', '7z': '📦',
-      py: '🐍', js: '📜', html: '🌐', css: '🎨', cpp: '⚙️', c: '⚙️', java: '☕',
-      psd: '🎨', ai: '🎨', blend: '🔮', fbx: '🗿', obj: '🗿',
-      txt: '📃', md: '📝',
-    };
-    return icons[ext] || '📎';
-  }
-
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
-  function escapeAttr(str) {
-    return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-  }
-
-  // ========== 初始化 ==========
-  document.getElementById('refreshBtn').addEventListener('click', loadFiles);
-  loadFiles();
 </script>

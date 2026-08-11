@@ -3,30 +3,28 @@ import Layout from '../layouts/Layout.astro';
 import NavBar from '../components/NavBar.astro';
 ---
 
-<Layout title="班级作品墙">
+<Layout title="班级作品�?>
   <NavBar current="class-wall" />
 
   <main class="page-content" style="max-width:960px;margin:0 auto;padding:16px;">
     <div style="margin-bottom:20px;">
       <h1 style="margin:0 0 4px;font-size:24px;font-weight:700;">
-        <mdui-icon name="photo_library" style="vertical-align:middle;margin-right:6px;"></mdui-icon>班级作品墙
+        <mdui-icon name="photo_library" style="vertical-align:middle;margin-right:6px;"></mdui-icon>班级作品�?
       </h1>
-      <p style="margin:0;font-size:14px;color:var(--mdui-color-on-surface-variant);" id="classTitle">加载中...</p>
+      <p style="margin:0;font-size:14px;color:var(--mdui-color-on-surface-variant);" id="classTitle">加载�?..</p>
     </div>
 
     <mdui-text-field id="searchInput" label="搜索同学姓名或文件名" variant="outlined"
       icon="search" style="max-width:400px;margin-bottom:16px;width:100%;"></mdui-text-field>
 
     <div id="wallContent" style="display:flex;flex-direction:column;gap:12px;">
-      <mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">加载中...</mdui-card>
+      <mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">加载�?..</mdui-card>
     </div>
 
     <div id="wallEmpty" style="display:none;text-align:center;padding:48px 16px;">
       <mdui-icon name="inbox" style="font-size:64px;color:var(--mdui-color-outline-variant);"></mdui-icon>
-      <p style="color:var(--mdui-color-on-surface-variant);">班级还没有同学提交作品</p>
+      <p style="color:var(--mdui-color-on-surface-variant);">班级还没有同学提交作�?/p>
     </div>
-  </main>
-</Layout>
   </main>
 </Layout>
 
@@ -41,7 +39,7 @@ import NavBar from '../components/NavBar.astro';
     const content = document.getElementById('wallContent');
     const empty = document.getElementById('wallEmpty');
     const title = document.getElementById('classTitle');
-    content.innerHTML = '<mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">加载中...</mdui-card>';
+    content.innerHTML = '<mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">加载�?..</mdui-card>';
     empty.style.display = 'none';
 
     try {
@@ -49,7 +47,7 @@ import NavBar from '../components/NavBar.astro';
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      title.textContent = `${data.className || ''} 班 · 共 ${data.students.length} 位同学提交`;
+      title.textContent = `${data.className || ''} �?· �?${data.students.length} 位同学提交`;
       if (data.students.length === 0) { content.innerHTML = ''; empty.style.display = 'block'; return; }
       renderWall(data.students);
     } catch (err) {
@@ -63,7 +61,7 @@ import NavBar from '../components/NavBar.astro';
 
     function render(filtered) {
       if (filtered.length === 0) {
-        content.innerHTML = '<mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">没有匹配的结果</mdui-card>';
+        content.innerHTML = '<mdui-card variant="outlined" style="text-align:center;padding:32px;color:var(--mdui-color-on-surface-variant);">没有匹配的结�?/mdui-card>';
         return;
       }
       content.innerHTML = filtered.map(s => `
@@ -72,7 +70,7 @@ import NavBar from '../components/NavBar.astro';
             <div style="display:flex;align-items:center;gap:8px;">
               <mdui-icon name="person" style="color:var(--mdui-color-primary);"></mdui-icon>
               <span style="font-weight:600;">${escapeHtml(s.name)}</span>
-              <mdui-chip style="font-size:12px;">${s.fileCount} 个文件</mdui-chip>
+              <mdui-chip style="font-size:12px;">${s.fileCount} 个文�?/mdui-chip>
             </div>
             <span style="font-size:12px;color:var(--mdui-color-on-surface-variant);">${s.lastSubmit ? formatTime(s.lastSubmit) : '暂无提交'}</span>
           </div>
@@ -116,7 +114,7 @@ import NavBar from '../components/NavBar.astro';
     const empty = document.getElementById('wallEmpty');
     const title = document.getElementById('classTitle');
 
-    content.innerHTML = '<div class="text-center text-gray-400 py-8">加载中...</div>';
+    content.innerHTML = '<div class="text-center text-gray-400 py-8">加载�?..</div>';
     empty.classList.add('hidden');
 
     try {
@@ -127,7 +125,7 @@ import NavBar from '../components/NavBar.astro';
 
       if (!res.ok) throw new Error(data.error);
 
-      title.textContent = `${data.className} 班 · 共 ${data.students.length} 位同学提交`;
+      title.textContent = `${data.className} �?· �?${data.students.length} 位同学提交`;
 
       if (data.students.length === 0) {
         content.innerHTML = '';
@@ -147,7 +145,7 @@ import NavBar from '../components/NavBar.astro';
 
     function render(filtered) {
       if (filtered.length === 0) {
-        content.innerHTML = '<div class="text-center text-gray-400 py-8">没有匹配的结果</div>';
+        content.innerHTML = '<div class="text-center text-gray-400 py-8">没有匹配的结�?/div>';
         return;
       }
 
@@ -158,7 +156,7 @@ import NavBar from '../components/NavBar.astro';
             <div class="flex items-center gap-2">
               <span class="text-lg">👤</span>
               <span class="font-semibold text-gray-800">${escapeHtml(s.name)}</span>
-              <span class="text-xs text-gray-400">${s.fileCount} 个文件</span>
+              <span class="text-xs text-gray-400">${s.fileCount} 个文�?/span>
             </div>
             <span class="text-xs text-gray-400">${s.lastSubmit ? formatTime(s.lastSubmit) : '暂无提交'}</span>
           </div>
@@ -210,12 +208,12 @@ import NavBar from '../components/NavBar.astro';
   function getFileIcon(name) {
     const ext = name.split('.').pop()?.toLowerCase();
     const icons = {
-      jpg:'🖼️', jpeg:'🖼️', png:'🖼️', gif:'🖼️', bmp:'🖼️', webp:'🖼️', svg:'🖼️',
+      jpg:'🖼�?, jpeg:'🖼�?, png:'🖼�?, gif:'🖼�?, bmp:'🖼�?, webp:'🖼�?, svg:'🖼�?,
       mp4:'🎬', webm:'🎬', mov:'🎬', avi:'🎬',
       mp3:'🎵', wav:'🎵', ogg:'🎵',
-      pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊', ppt:'📽️', pptx:'📽️',
+      pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊', ppt:'📽�?, pptx:'📽�?,
       zip:'📦', rar:'📦', '7z':'📦',
-      py:'🐍', js:'📜', html:'🌐', css:'🎨', cpp:'⚙️', c:'⚙️', java:'☕',
+      py:'🐍', js:'📜', html:'🌐', css:'🎨', cpp:'⚙️', c:'⚙️', java:'�?,
       psd:'🎨', ai:'🎨', blend:'🔮', fbx:'🗿', obj:'🗿',
       txt:'📃', md:'📝',
     };
