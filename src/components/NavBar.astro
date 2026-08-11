@@ -8,6 +8,7 @@ const { current = '' } = Astro.props;
   <mdui-top-app-bar-title>PatPlayer</mdui-top-app-bar-title>
   <div style="flex-grow:1"></div>
   <span id="userDisplay" style="font-size:14px;margin-right:8px;color:var(--mdui-color-on-surface-variant)"></span>
+  <mdui-button-icon icon="lock" id="changePwdBtn" title="修改密码"></mdui-button-icon>
   <mdui-button-icon icon="logout" onclick="logout()"></mdui-button-icon>
 </mdui-top-app-bar>
 

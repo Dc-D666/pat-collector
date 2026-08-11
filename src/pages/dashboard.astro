@@ -46,6 +46,17 @@ import NavBar from '../components/NavBar.astro';
       <mdui-button slot="action" variant="filled" id="deleteConfirmBtn">删除</mdui-button>
     </mdui-dialog>
 
+    <!-- 修改密码对话框 -->
+    <mdui-dialog id="pwdDialog" icon="lock" headline="修改密码" close-on-overlay-click>
+      <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0;">
+        <mdui-text-field id="oldPwd" type="password" label="旧密码" variant="outlined"></mdui-text-field>
+        <mdui-text-field id="newPwd" type="password" label="新密码（至少4位）" variant="outlined" minlength="4"></mdui-text-field>
+        <div id="pwdError" style="color:var(--mdui-color-error);font-size:13px;display:none;"></div>
+      </div>
+      <mdui-button slot="action" variant="text" onclick="document.getElementById('pwdDialog').open=false">取消</mdui-button>
+      <mdui-button slot="action" variant="filled" id="pwdConfirmBtn">确认修改</mdui-button>
+    </mdui-dialog>
+
     <!-- 消息条 -->
     <mdui-snackbar id="snackbar" closeable placement="bottom"></mdui-snackbar>
   </main>
@@ -200,6 +211,32 @@ import NavBar from '../components/NavBar.astro';
 
   document.getElementById('refreshBtn').addEventListener('click', loadFiles);
   loadFiles();
+
+  // ========== 修改密码 ==========
+  document.getElementById('changePwdBtn').addEventListener('click', () => {
+    document.getElementById('pwdDialog').open = true;
+  });
+  document.getElementById('pwdConfirmBtn').addEventListener('click', async () => {
+    const oldPassword = document.getElementById('oldPwd').value;
+    const newPassword = document.getElementById('newPwd').value;
+    const errEl = document.getElementById('pwdError');
+    errEl.style.display = 'none';
+    if (!oldPassword || !newPassword) { errEl.textContent = '请填写旧密码和新密码'; errEl.style.display = 'block'; return; }
+    if (newPassword.length < 4) { errEl.textContent = '新密码至少4位'; errEl.style.display = 'block'; return; }
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/change-password`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ oldPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+      document.getElementById('pwdDialog').open = false;
+      document.getElementById('oldPwd').value = '';
+      document.getElementById('newPwd').value = '';
+      showMsg('密码修改成功');
+    } catch (err) { errEl.textContent = '修改失败: ' + err.message; errEl.style.display = 'block'; }
+  });
 </script>
     <div id="dropZone"
       class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center

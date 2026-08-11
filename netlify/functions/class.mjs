@@ -1,30 +1,39 @@
-// Netlify Functions: 班级作品墙 & 提交总览 API
+// PatPlayer 班级 API — 本地认证 + Netlify Blobs
 import { getStore } from '@netlify/blobs';
-import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const TOKEN_SECRET = process.env.TOKEN_SECRET || 'patplayer-default-secret-change-me';
+const META_STORE = 'patplayer-files-meta';
+
+function verifyToken(token) {
+  try {
+    const decoded = Buffer.from(token, 'base64url').toString();
+    const [userKey, ts, sig] = decoded.split('|');
+    if (!userKey || !ts || !sig) return null;
+    const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(`${userKey}|${ts}`).digest('hex');
+    if (sig !== expected) return null;
+    if (Date.now() - Number(ts) > 24 * 60 * 60 * 1000) return null;
+    return userKey;
+  } catch { return null; }
+}
 
 async function getUserFromToken(event) {
-  const authHeader = event.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  const token = authHeader.slice(7);
+  const auth = event.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return null;
+  const key = verifyToken(auth.slice(7));
+  if (!key) return null;
+  const [className, name] = key.split('/');
+  return { className, name };
+}
 
-  try {
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: { user }, error } = await supabase.auth.getUser(token);
-    if (error || !user) return null;
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('class_name, name')
-      .eq('id', user.id)
-      .single();
-
-    return profile ? { id: user.id, className: profile.class_name, name: profile.name } : null;
-  } catch {
-    return null;
+async function getMetas(keys) {
+  if (keys.length === 0) return {};
+  const store = getStore(META_STORE);
+  const result = {};
+  for (const k of keys) {
+    try { const raw = await store.get(k); if (raw) result[k] = JSON.parse(raw); } catch {}
   }
+  return result;
 }
 
 /**
@@ -54,18 +63,8 @@ async function classWall(event, user) {
     }
 
     // 获取大小信息
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
     const allKeys = blobs.map(b => b.key);
-    let metasMap = {};
-    if (allKeys.length > 0) {
-      const { data: metas } = await supabase
-        .from('file_meta')
-        .select('blob_key, size, uploaded_at')
-        .in('blob_key', allKeys);
-      if (metas) {
-        metas.forEach(m => { metasMap[m.blob_key] = m; });
-      }
-    }
+    const metasMap = await getMetas(allKeys);
 
     const students = Object.entries(studentMap)
       .map(([name, files]) => {
@@ -74,7 +73,7 @@ async function classWall(event, user) {
           return {
             name: f.name,
             size: meta?.size || 0,
-            modifiedAt: meta?.uploaded_at || null,
+            modifiedAt: meta?.uploadedAt || null,
           };
         }).sort((a, b) => new Date(b.modifiedAt || 0) - new Date(a.modifiedAt || 0));
 
@@ -105,53 +104,20 @@ async function overview(_event, _user) {
     const store = getStore('patplayer-files');
     const { blobs } = await store.list({});
 
-    // 获取所有 profiles
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: profiles } = await supabase
-      .from('profiles')
-      .select('class_name, name');
-
     // 获取元数据
     const allKeys = blobs.map(b => b.key);
-    let metasMap = {};
-    if (allKeys.length > 0) {
-      const { data: metas } = await supabase
-        .from('file_meta')
-        .select('blob_key, size, uploaded_at')
-        .in('blob_key', allKeys);
-      if (metas) {
-        metas.forEach(m => { metasMap[m.blob_key] = m; });
-      }
-    }
+    const metasMap = await getMetas(allKeys);
 
-    // 按班级-学生 组织
+    // 按班级-学生 组织（从文件路径推导）
     const classMap = {};
-    const classStudentSet = {}; // 记录每个班级有哪些学生（即使没提交文件）
-
-    if (profiles) {
-      profiles.forEach(p => {
-        if (!classStudentSet[p.class_name]) classStudentSet[p.class_name] = new Set();
-        classStudentSet[p.class_name].add(p.name);
-      });
-    }
-
     for (const blob of blobs) {
       const parts = blob.key.split('/');
       if (parts.length < 3) continue;
       const [className, studentName, filename] = parts;
-
       if (!classMap[className]) classMap[className] = {};
       if (!classMap[className][studentName]) classMap[className][studentName] = [];
-      classMap[className][studentName].push({
-        name: filename,
-        key: blob.key,
-        ...(metasMap[blob.key] || {}),
-      });
-    }
-
-    // 确保所有有学生的班级都出现
-    for (const [className, students] of Object.entries(classStudentSet)) {
-      if (!classMap[className]) classMap[className] = {};
+      const meta = metasMap[blob.key] || {};
+      classMap[className][studentName].push({ name: filename, key: blob.key, size: meta.size || 0, uploadedAt: meta.uploadedAt || null });
     }
 
     const result = Object.entries(classMap)
@@ -161,13 +127,13 @@ async function overview(_event, _user) {
           .sort(([a], [b]) => a.localeCompare(b, 'zh-CN'))
           .map(([name, files]) => {
             const totalSize = files.reduce((s, f) => s + (f.size || 0), 0);
-            return {
-              name,
-              fileCount: files.length,
-              totalSize,
-              files: files.sort((a, b) => new Date(b.uploaded_at || 0) - new Date(a.uploaded_at || 0)),
-            };
+            return { name, fileCount: files.length, totalSize,
+              files: files.sort((a, b) => new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0)) };
           });
+        const totalFiles = students.reduce((s, st) => s + st.fileCount, 0);
+        const totalSize = students.reduce((s, st) => s + st.totalSize, 0);
+        return { className, studentCount: students.length, totalFiles, totalSize, students };
+      });
 
         const totalFiles = students.reduce((s, st) => s + st.fileCount, 0);
         const totalSize = students.reduce((s, st) => s + st.totalSize, 0);
