@@ -5,11 +5,10 @@ CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,
   class_name VARCHAR(16) NOT NULL COMMENT '班级，如 2501',
   real_name VARCHAR(32) NOT NULL COMMENT '真实姓名',
-  student_id_last4 CHAR(4) NOT NULL COMMENT '学号后4位',
-  password_hash VARCHAR(255) NOT NULL COMMENT 'scrypt 盐+哈希（base64）',
-  must_change_password TINYINT(1) NOT NULL DEFAULT 1 COMMENT '首次登录需改密',
+  qq_tiny_id VARCHAR(32) NULL COMMENT 'QQ 频道 tiny_id（绑定后可空）',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_identity (class_name, real_name, student_id_last4)
+  UNIQUE KEY uq_name (class_name, real_name),
+  UNIQUE KEY uq_qq (qq_tiny_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS files (

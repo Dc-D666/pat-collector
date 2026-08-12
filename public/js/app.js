@@ -27,11 +27,6 @@ window.App = (() => {
       location.hash = '#/login';
       return;
     }
-    const user = API.getUser();
-    if (user && user.must_change_password) {
-      Views.forcePassword();
-      return;
-    }
     Nav.render();
     (routes[key] || routes.files)();
   }

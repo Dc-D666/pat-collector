@@ -5,6 +5,7 @@ const path = require('path');
 const express = require('express');
 const config = require('./config');
 const authRoutes = require('./routes/auth');
+const authQqRoutes = require('./routes/auth-qq');
 const fileRoutes = require('./routes/files');
 const classRoutes = require('./routes/class');
 
@@ -18,6 +19,7 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 
 // API 路由
+app.use('/api/auth/qq', authQqRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/class', classRoutes);

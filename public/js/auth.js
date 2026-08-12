@@ -1,10 +1,11 @@
 'use strict';
 
-// 登录 / 注册视图
+// 登录视图：QQ 频道扫码登录（主）+ 无 QQ 直通（兜底，姓名+班级直接进）
 window.Views = window.Views || {};
 Views.login = () => {
   const { escapeHtml } = Utils;
   const view = document.getElementById('view');
+  let pollTimer = null;
 
   function classOptions() {
     let html = '<option value="" disabled selected>请选择班级</option>';
@@ -16,134 +17,161 @@ Views.login = () => {
     return html;
   }
 
-  view.innerHTML = `
-    <div class="auth-wrap">
-      <div class="auth-card card">
-        <div class="auth-brand">
-          <div class="brand-logo">P</div>
-          <h1>PatPlayer</h1>
-          <p>高中 AI 社团 · 作品收集与展示平台</p>
+  function clearPoll() {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('auth-error');
+    if (el) { el.textContent = msg; el.classList.add('show'); }
+  }
+
+  function enterSystem(data) {
+    API.setToken(data.token);
+    API.setUser(data.user);
+    location.hash = '#/files';
+  }
+
+  // 主界面：两个入口
+  function renderHome() {
+    clearPoll();
+    view.innerHTML = `
+      <div class="auth-wrap">
+        <div class="auth-card card">
+          <div class="auth-brand">
+            <div class="brand-logo">P</div>
+            <h1>PatPlayer</h1>
+            <p>高中 AI 社团 · 作品收集与展示平台</p>
+          </div>
+          <button class="btn btn-primary" id="qq-login-btn" style="width:100%;justify-content:center;padding:13px;font-size:15px;">🐧 QQ 频道登录</button>
+          <div style="text-align:center;margin:14px 0;color:var(--text-dim);font-size:13px;">— 或 —</div>
+          <button class="btn" id="guest-btn" style="width:100%;justify-content:center;">我没有QQ，或直接提交我的程序文件</button>
         </div>
-        <div class="auth-tabs">
-          <button class="auth-tab active" data-mode="login">登录</button>
-          <button class="auth-tab" data-mode="register">注册</button>
-        </div>
-        <div class="form-error" id="form-error"></div>
-        <form id="auth-form" novalidate>
-          <div class="field">
-            <label for="f-class">班级</label>
-            <select id="f-class" required>${classOptions()}</select>
-          </div>
-          <div class="field">
-            <label for="f-name">真实姓名</label>
-            <input id="f-name" type="text" autocomplete="name" placeholder="请输入真实姓名" required />
-          </div>
-          <div class="field">
-            <label for="f-last4">学号后 4 位</label>
-            <input id="f-last4" type="text" inputmode="numeric" maxlength="4" placeholder="如 0001" required />
-          </div>
-          <div class="field" id="f-password-field" style="display:none;">
-            <label for="f-password">密码</label>
-            <input id="f-password" type="password" autocomplete="current-password" placeholder="请输入密码" />
-          </div>
-          <div class="hint" id="f-hint" style="display:none;">初始密码为 123456，注册成功后可自行修改。</div>
-          <button class="btn btn-primary" id="submit-btn" type="submit" style="width:100%;justify-content:center;margin-top:4px;">登录</button>
-        </form>
-      </div>
-    </div>`;
+      </div>`;
+    document.getElementById('qq-login-btn').onclick = () => startQqLogin();
+    document.getElementById('guest-btn').onclick = () => renderGuestForm();
+  }
 
-  let mode = 'login';
-
-  const setMode = (m) => {
-    mode = m;
-    document.querySelectorAll('.auth-tab').forEach((t) => t.classList.toggle('active', t.dataset.mode === m));
-    document.getElementById('f-password-field').style.display = m === 'login' ? '' : 'none';
-    document.getElementById('f-hint').style.display = m === 'register' ? '' : 'none';
-    document.getElementById('submit-btn').textContent = m === 'login' ? '登录' : '注册';
-    document.getElementById('f-password').required = m === 'login';
-    hideError();
-  };
-
-  const showError = (msg) => {
-    const el = document.getElementById('form-error');
-    el.textContent = msg;
-    el.classList.add('show');
-  };
-  const hideError = () => document.getElementById('form-error').classList.remove('show');
-
-  view.querySelectorAll('.auth-tab').forEach((t) => {
-    t.onclick = () => setMode(t.dataset.mode);
-  });
-
-  document.getElementById('auth-form').onsubmit = async (e) => {
-    e.preventDefault();
-    hideError();
-    const payload = {
-      class_name: document.getElementById('f-class').value,
-      real_name: document.getElementById('f-name').value.trim(),
-      student_id_last4: document.getElementById('f-last4').value.trim(),
-    };
-    const btn = document.getElementById('submit-btn');
-    btn.disabled = true;
+  // QQ 扫码登录
+  async function startQqLogin() {
+    const btn = document.getElementById('qq-login-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '获取二维码中…'; }
     try {
-      let data;
-      if (mode === 'register') {
-        data = await API.post('/api/auth/register', JSON.stringify(payload));
-      } else {
-        data = await API.post('/api/auth/login', JSON.stringify({
-          ...payload,
-          password: document.getElementById('f-password').value,
-        }));
+      const data = await API.post('/api/auth/qq/init', JSON.stringify({}));
+      if (data.error || !data.session || !data.qrcode_base64) {
+        throw new Error(data.error || '获取二维码失败，请重试');
       }
-      API.setToken(data.token);
-      API.setUser(data.user);
-      if (data.user && data.user.must_change_password) {
-        Views.forcePassword();
-      } else {
-        location.hash = '#/files';
-      }
+      renderQr(data);
     } catch (err) {
       showError(err.message);
-    } finally {
-      btn.disabled = false;
+      if (btn) { btn.disabled = false; btn.textContent = '🐧 QQ 频道登录'; }
     }
-  };
+  }
 
-  setMode('login');
-};
-
-// 首次登录强制改密视图（登录/注册后，或路由守卫发现未改密时调用）
-Views.forcePassword = () => {
-  const view = document.getElementById('view');
-  view.innerHTML = `
-    <div class="auth-wrap">
-      <div class="auth-card card">
-        <div class="auth-brand">
-          <div class="brand-logo">P</div>
-          <h1>首次登录</h1>
-          <p>请先设置你的新密码</p>
+  function renderQr(initData) {
+    clearPoll();
+    const session = initData.session;
+    view.innerHTML = `
+      <div class="auth-wrap">
+        <div class="auth-card card" style="text-align:center;">
+          <div class="auth-brand"><div class="brand-logo">P</div><h1>QQ 频道登录</h1></div>
+          <p style="color:var(--text-dim);font-size:13px;margin:0 0 12px;">用手机 QQ 扫码，或点击下方链接授权</p>
+          <img id="qr-img" alt="登录二维码" src="data:image/png;base64,${initData.qrcode_base64}"
+               style="width:220px;height:220px;border:1px solid var(--border);border-radius:12px;" />
+          <div style="margin:10px 0;">
+            <a href="${escapeHtml(initData.verification_uri || '')}" target="_blank" rel="noopener" style="color:var(--primary);font-size:13px;">在手机上打开授权链接</a>
+          </div>
+          <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">等待扫码授权…</div>
+          <button class="btn" id="qr-back" style="width:100%;justify-content:center;">返回</button>
         </div>
-        <div class="form-error" id="np-error"></div>
-        <div class="field"><label>新密码</label><input id="np" type="password" autocomplete="new-password" placeholder="至少 4 位" /></div>
-        <div class="field"><label>确认新密码</label><input id="np2" type="password" autocomplete="new-password" placeholder="再次输入" /></div>
-        <button class="btn btn-primary" id="np-submit" style="width:100%;justify-content:center;">设置并进入</button>
-      </div>
-    </div>`;
-  const errEl = document.getElementById('np-error');
-  const showNpErr = (m) => { errEl.textContent = m; errEl.classList.add('show'); };
-  document.getElementById('np-submit').onclick = async () => {
-    errEl.classList.remove('show');
-    const p1 = document.getElementById('np').value;
-    const p2 = document.getElementById('np2').value;
-    if (p1.length < 4) return showNpErr('密码至少 4 位');
-    if (p1 !== p2) return showNpErr('两次输入的密码不一致');
-    if (p1 === '123456') return showNpErr('请勿使用默认密码 123456');
-    try {
-      await API.post('/api/auth/change-password', JSON.stringify({ old_password: '123456', new_password: p1 }));
-      API.setUser({ ...API.getUser(), must_change_password: false });
-      location.hash = '#/files';
-    } catch (err) {
-      showNpErr(err.message);
-    }
-  };
+      </div>`;
+    document.getElementById('qr-back').onclick = renderHome;
+
+    const poll = async () => {
+      try {
+        const r = await API.post('/api/auth/qq/poll', JSON.stringify({ session }));
+        if (r.status === 'authorized') {
+          clearPoll();
+          if (r.bound && r.user) {
+            // 已绑定 → 直接登录
+            const bindRes = await API.post('/api/auth/qq/bind', JSON.stringify({ session }));
+            enterSystem(bindRes);
+          } else {
+            renderBindForm(session, r.nickname || '');
+          }
+          return;
+        }
+        const statusEl = document.getElementById('qr-status');
+        if (statusEl) {
+          if (r.status === 'pending_authorization' && r.error) {
+            statusEl.textContent = r.error;
+          } else {
+            statusEl.textContent = '等待扫码授权…';
+          }
+        }
+        pollTimer = setTimeout(poll, 2500);
+      } catch (err) {
+        clearPoll();
+        const statusEl = document.getElementById('qr-status');
+        if (statusEl) statusEl.textContent = err.message;
+      }
+    };
+    pollTimer = setTimeout(poll, 2000);
+  }
+
+  // 扫码成功但未绑定 → 补全班级+姓名
+  function renderBindForm(session, nickname) {
+    clearPoll();
+    view.innerHTML = `
+      <div class="auth-wrap">
+        <div class="auth-card card">
+          <div class="auth-brand"><div class="brand-logo">P</div><h1>完善信息</h1><p>QQ 登录成功，请确认你的班级与姓名</p></div>
+          <div class="form-error" id="auth-error"></div>
+          <div class="field"><label>班级</label><select id="bind-class">${classOptions()}</select></div>
+          <div class="field"><label>真实姓名</label><input id="bind-name" type="text" placeholder="请输入真实姓名" value="${escapeHtml(nickname)}" /></div>
+          <button class="btn btn-primary" id="bind-submit" style="width:100%;justify-content:center;">进入系统</button>
+          <button class="btn btn-ghost" id="bind-back" style="width:100%;justify-content:center;margin-top:6px;">返回</button>
+        </div>
+      </div>`;
+    document.getElementById('bind-back').onclick = renderHome;
+    document.getElementById('bind-submit').onclick = async () => {
+      const class_name = document.getElementById('bind-class').value;
+      const real_name = document.getElementById('bind-name').value.trim();
+      if (!class_name) return showError('请选择班级');
+      if (!real_name) return showError('请输入真实姓名');
+      try {
+        const data = await API.post('/api/auth/qq/bind', JSON.stringify({ session, class_name, real_name }));
+        enterSystem(data);
+      } catch (err) { showError(err.message); }
+    };
+  }
+
+  // 无 QQ 直通：姓名 + 班级
+  function renderGuestForm() {
+    clearPoll();
+    view.innerHTML = `
+      <div class="auth-wrap">
+        <div class="auth-card card">
+          <div class="auth-brand"><div class="brand-logo">P</div><h1>直接提交</h1><p>没有 QQ？填班级和姓名即可进入</p></div>
+          <div class="form-error" id="auth-error"></div>
+          <div class="field"><label>班级</label><select id="guest-class">${classOptions()}</select></div>
+          <div class="field"><label>真实姓名</label><input id="guest-name" type="text" placeholder="请输入真实姓名" /></div>
+          <button class="btn btn-primary" id="guest-submit" style="width:100%;justify-content:center;">进入系统</button>
+          <button class="btn btn-ghost" id="guest-back" style="width:100%;justify-content:center;margin-top:6px;">返回</button>
+        </div>
+      </div>`;
+    document.getElementById('guest-back').onclick = renderHome;
+    document.getElementById('guest-submit').onclick = async () => {
+      const class_name = document.getElementById('guest-class').value;
+      const real_name = document.getElementById('guest-name').value.trim();
+      if (!class_name) return showError('请选择班级');
+      if (!real_name) return showError('请输入真实姓名');
+      try {
+        const data = await API.post('/api/auth/guest', JSON.stringify({ class_name, real_name }));
+        enterSystem(data);
+      } catch (err) { showError(err.message); }
+    };
+  }
+
+  renderHome();
 };

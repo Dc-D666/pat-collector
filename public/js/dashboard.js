@@ -1,19 +1,16 @@
 'use strict';
 
-// 我的文件视图：上传 / 列表 / 下载 / 删除 / 改密码
+// 我的文件视图：上传 / 列表 / 下载 / 删除
 window.Views = window.Views || {};
 Views.files = () => {
-  const { escapeHtml, formatSize, formatTime, getFileIcon, confirm, openModal, closeModal, toast } = Utils;
+  const { escapeHtml, formatSize, formatTime, getFileIcon, confirm, toast } = Utils;
   const view = document.getElementById('view');
 
   view.innerHTML = `
     <div class="page">
-      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;">
-        <div>
-          <h1 class="page-title">我的文件</h1>
-          <div class="page-sub">拖拽或点击上传，仅本人可见</div>
-        </div>
-        <button class="btn" id="change-pwd-btn">🔒 修改密码</button>
+      <div class="page-head">
+        <h1 class="page-title">我的文件</h1>
+        <div class="page-sub">拖拽或点击上传，仅本人可见</div>
       </div>
 
       <div class="dropzone" id="dropzone">
@@ -119,35 +116,6 @@ Views.files = () => {
       };
     });
   }
-
-  // ---- 修改密码 ----
-  document.getElementById('change-pwd-btn').onclick = () => {
-    openModal(`
-      <h3 class="modal-title">修改密码</h3>
-      <div class="form-error" id="pwd-error"></div>
-      <div class="field"><label>旧密码</label><input type="password" id="pwd-old" placeholder="请输入旧密码" /></div>
-      <div class="field"><label>新密码</label><input type="password" id="pwd-new" placeholder="至少 4 位" /></div>
-      <div class="modal-actions">
-        <button class="btn" id="pwd-cancel">取消</button>
-        <button class="btn btn-primary" id="pwd-save">保存</button>
-      </div>`);
-    document.getElementById('pwd-cancel').onclick = closeModal;
-    document.getElementById('pwd-save').onclick = async () => {
-      const errEl = document.getElementById('pwd-error');
-      errEl.classList.remove('show');
-      try {
-        await API.post('/api/auth/change-password', JSON.stringify({
-          old_password: document.getElementById('pwd-old').value,
-          new_password: document.getElementById('pwd-new').value,
-        }));
-        closeModal();
-        toast('密码修改成功');
-      } catch (err) {
-        errEl.textContent = err.message;
-        errEl.classList.add('show');
-      }
-    };
-  };
 
   loadFiles();
 };

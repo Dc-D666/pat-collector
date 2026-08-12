@@ -36,11 +36,6 @@ window.API = (() => {
       const err = new Error((data && data.error) || `请求失败 (${res.status})`);
       err.status = res.status;
       err.code = data && data.code;
-      if (err.code === 'MUST_CHANGE_PASSWORD') {
-        const u = getUser();
-        if (u) { u.must_change_password = true; setUser(u); }
-        if (window.App) window.App.render();
-      }
       throw err;
     }
     return data;
