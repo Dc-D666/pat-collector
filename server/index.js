@@ -40,6 +40,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: '服务器内部错误' });
 });
 
-app.listen(config.port, () => {
+app.listen(config.port, '127.0.0.1', () => {
   console.log(`[server] PatPlayer 已启动：http://127.0.0.1:${config.port}`);
 });
