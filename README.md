@@ -1,140 +1,99 @@
 # PatPlayer
 
-> 高中 AI 社团作品收集管理系统
+高中 AI 社团作品收集与展示平台 — 适合部署在云端的轻量级学生作品提交与管理系统。
 
-基于 **Astro + MDUI2 + Netlify + Supabase** 构建的轻量级作品提交与展示平台。学生可通过邮箱注册登录，拖拽上传作品文件，浏览同班同学的作品墙，查看全校提交总览。
+核心目标：为班级/年级提供一个简单、安全的作品提交入口与班级作品墙，支持拖拽上传、多文件、按班级/姓名浏览与下载。
 
----
+状态
+- 当前仓库基于 Astro + MDUI2 + Netlify Serverless（Netlify Functions + Netlify Blobs）。项目已经移除了 Supabase，存储与用户信息均使用 Netlify Blobs 实现；README 已更新以匹配当前代码结构与运行方式。
+- 注意：仓库中存在几个会导致本地/CI 构建失败的重复/多余代码（详见 Troubleshooting）。在合并部署前请先修复这些问题或让我代为修复。
 
-## 技术栈
+主要特性
+- 学生注册/登录（班级 + 姓名 + 学号后4位，基于 Netlify Blobs 的本地账户系统）
+- 拖拽批量上传文件，上传进度与文件管理（查看、下载、删除）
+- 班级作品墙与全校提交总览（按班级→姓名 分层）
+- 简单的 Token 认证与访问控制（Netlify Functions 端）
+- 可部署到 Netlify（静态 + Netlify Functions）；无需外部数据库（Supabase 已移除）
 
-| 层 | 技术 |
-|---|------|
-| 前端框架 | [Astro](https://astro.build/) (SSR 模式) |
-| UI 组件库 | [MDUI2](https://www.mdui.org/) (Material Design 3) |
-| 部署平台 | [Netlify](https://netlify.com) |
-| 后端 API | Netlify Functions |
-| 文件存储 | Netlify Blobs |
-| 用户存储 | Netlify Blobs |
-| 密码加密 | Node.js scrypt (HMAC-SHA256 Token) |
+技术栈
+- 语言：Astro (页面模板) + JavaScript
+- 运行/框架：Astro v4.x（Netlify adapter）
+- 关键依赖：@astrojs/netlify、@astrojs/tailwind、mdui、@netlify/blobs、tailwindcss
+- 部署：Netlify（前端 + Functions），数据/用户信息使用 Netlify Blobs
 
----
+快速开始（本地开发）
+前置：
+- Node.js 18+（推荐 18/20）
+- npm 或 pnpm
+- Netlify 账号（若要部署）
 
-## 功能列表
-
-- **身份认证** — 班级 + 姓名 + 学号后4位 + 密码，scrypt 加密存储
-- **默认密码** — 注册后初始密码为 `123456`，登录后可修改
-- **拖拽上传** — 支持多文件，实时进度条，扩展名白名单
-- **拖拽上传** — 支持多文件，实时进度条，扩展名白名单
-- **文件管理** — 查看、下载、删除个人文件
-- **班级作品墙** — 浏览同班同学提交，支持搜索过滤和下载
-- **提交总览** — 全校按班级-姓名层级展示，统计卡片
-- **安全防护** — RLS 权限隔离，Token 认证，路径遍历防护
-
----
-
-## 快速开始
-
-### 前置要求
-
-- Node.js 18+
-- [Supabase](https://supabase.com) 账号（免费套餐即可）
-- [Netlify](https://netlify.com) 账号
-
-### 本地开发
-
+克隆并运行：
 ```bash
-# 1. 克隆仓库
-git clone https://github.com/YOUR_USERNAME/PatPlayer.git
+git clone https://github.com/CookieTZH/PatPlayer.git
 cd PatPlayer
-
-# 2. 安装依赖
 npm install
-
-# 3. 配置环境变量
+# 将环境变量复制并编辑
 cp .env.example .env
-# 编辑 .env 填入 Supabase 凭据
-
-# 4. 启动开发服务器
+# 填入 TOKEN_SECRET 或在 Netlify 环境变量中设置
 npm run dev
 ```
 
-浏览器访问 `http://localhost:4321`
+默认本地地址： http://localhost:4321
 
-### 环境变量
+构建与预览：
+```bash
+npm run build
+npm run preview
+```
 
-创建 `.env` 文件：
-
+必需环境变量
+在仓库根目录创建 `.env`（或在 Netlify 中设置相应环境变量）：
 ```env
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key-here
+# 用于 HMAC token 的签名密钥；生产环境请设置为强随机值
+TOKEN_SECRET=your-random-secret-change-me
 ```
 
----
+存储与数据库说明
+- 本项目当前不依赖外部数据库。用户账号、文件元数据与二进制文件均存储在 Netlify Blobs（通过 @netlify/blobs 的 getStore API）。
+- 如果你希望迁移到 Supabase / Postgres 或其他数据库，请告知，我可以帮忙迁移并同步更新函数代码与 README。
 
-## 部署
+Netlify 部署（简要）
+1. 将代码推送到 GitHub。  
+2. 在 Netlify 中选择 “Import from Git” → 选择本仓库。  
+3. 设置构建命令：`npm run build`，发布目录：通常为 `dist`（如有差异请确认 Astro 输出目录）。  
+4. 在 Netlify 的环境变量设置中填入 TOKEN_SECRET（或其他自定义变量）。  
+5. 若使用 Netlify Functions，请确认 `netlify/` 目录及 `netlify.toml` 配置正确。
 
-### 1. Supabase 设置
-
-在 Supabase SQL Editor 中执行 `supabase/schema.sql`，创建以下表：
-
-- `profiles` — 用户扩展信息（班级、姓名、学号）
-- `file_meta` — 文件元数据
-
-### 2. Netlify 部署
-
-1. 将代码推送到 GitHub
-2. 在 Netlify 中 Import from Git → 选择仓库
-3. 设置环境变量（同 `.env.example`）
-4. 部署完成后绑定自定义域名
-
-详细步骤见 [DEPLOY.md](./DEPLOY.md)
-
----
-
-## 项目结构
-
+项目结构（概览）
 ```
-PatPlayer/
-├── src/
-│   ├── layouts/Layout.astro      # 全局布局（MDUI2 引入）
-│   ├── components/NavBar.astro   # 导航栏（顶部栏 + 侧边栏 + 底部栏）
-│   └── pages/
-│       ├── index.astro           # 登录/注册页
-│       ├── dashboard.astro       # 个人文件管理
-│       ├── class-wall.astro      # 班级作品墙
-│       └── overview.astro        # 提交记录总览
-├── netlify/
-│   └── functions/
-│       ├── auth.mjs              # 认证 API（注册/登录/获取用户）
-│       ├── files.mjs             # 文件 API（上传/列表/删除/下载）
-│       └── class.mjs             # 班级 API（作品墙/总览）
-├── supabase/
-│   └── schema.sql                # 数据库建表语句
-├── scripts/                      # 旧版部署脚本（内网版保留）
-├── astro.config.mjs              # Astro 配置（Netlify SSR 适配器）
-├── netlify.toml                  # Netlify 部署配置
-└── .env.example                  # 环境变量模板
+src/
+  layouts/        全局布局（MDUI2 引入、全局工具函数）
+  pages/          页面 (index.astro 登录页、dashboard 等)
+  components/     可复用组件（按钮、列表等）
+netlify/
+  functions/      Serverless API（auth/files/class 等，使用 Netlify Blobs）
+astro.config.mjs Astro 配置（Netlify adapter）
+netlify.toml     Netlify 部署配置
+.env.example     环境变量模板
+package.json
 ```
 
----
+如何贡献 / 修改
+- 若要修复 UI 或后端逻辑，建议在分支上提交改动并创建 PR，CI 通过后合并。
+- 我可以帮助提交 README 的改动，或修复仓库中明显导致编译失败的问题并创建 PR。
 
-## API 接口
+Troubleshooting（需要优先修复的两处）
+1. src/layouts/Layout.astro 中存在重复的闭合标签（两个 `</body></html>`），请保留一组闭合标签并删除多余部分，重复闭合会导致 SSR/构建问题。文件路径：`src/layouts/Layout.astro`。
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/auth/register` | 注册 |
-| POST | `/api/auth/login` | 登录 |
-| GET | `/api/auth/me` | 获取当前用户 |
-| POST | `/api/files/upload` | 上传文件 |
-| GET | `/api/files/list` | 文件列表 |
-| POST | `/api/files/delete` | 删除文件 |
-| GET | `/api/files/download` | 下载文件 |
-| GET | `/api/class/wall` | 班级作品墙 |
-| GET | `/api/class/overview` | 提交总览 |
+2. src/pages/index.astro 包含重复与冲突的 `<script>` 内容（页面内部有两份相似/重复的脚本段落与重复的 DOM 操作），这会导致运行时错误或编译失败。请合并脚本逻辑并删除重复段落，确保每个 DOM 元素仅被定义/监听一次。文件路径：`src/pages/index.astro`。
 
----
+许可
+- MIT
 
-## License
-
-MIT
+附录：仓库中主要文件（快速参考）
+- package.json — 脚本：dev/build/preview；依赖列在其中
+- astro.config.mjs — Astro 配置
+- netlify.toml — Netlify 部署设置
+- netlify/functions/*.mjs — 认证与文件 API（基于 Netlify Blobs）
+- src/layouts/Layout.astro — 全局布局（含全局工具函数）
+- src/pages/index.astro — 登录/注册页面（含前端表单与脚本）
