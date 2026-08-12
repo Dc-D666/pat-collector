@@ -8,6 +8,7 @@ const authRoutes = require('./routes/auth');
 const authQqRoutes = require('./routes/auth-qq');
 const fileRoutes = require('./routes/files');
 const classRoutes = require('./routes/class');
+const appRoutes = require('./routes/apps');
 
 config.assertConfig();
 
@@ -23,6 +24,7 @@ app.use('/api/auth/qq', authQqRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/class', classRoutes);
+app.use('/api/apps', appRoutes);
 
 // 未知 API 路径 → 404 JSON
 app.use('/api', (req, res) => {

@@ -25,6 +25,19 @@ function publicUser(row) {
 
 const ipKey = (req) => req.ip || req.connection.remoteAddress || 'unknown';
 
+// 把 QQ 会话关联到用户（不清理，供后续自动/手动识别轻应用使用）；顺带清理该用户旧的会话
+async function linkSession(sessionId, userId) {
+  const old = await query('SELECT qq_session_id FROM users WHERE id = ?', [userId]);
+  if (old.length > 0 && old[0].qq_session_id && old[0].qq_session_id !== sessionId) {
+    qqSessions.cleanupSession(old[0].qq_session_id);
+  }
+  await query('UPDATE users SET qq_session_id = ? WHERE id = ?', [sessionId, userId]);
+  const s = qqSessions.getSession(sessionId);
+  if (s) s.user_id = userId;
+  qqSessions.markDirty();
+  qqSessions.saveIndex();
+}
+
 // 1. 发起扫码登录：创建隔离会话 → CLI login 拿二维码
 router.post(
   '/init',
@@ -156,7 +169,7 @@ router.post(
     // 该 tiny_id 已绑定 → 直接登录（无需再填班级姓名）
     const byQq = await query('SELECT * FROM users WHERE qq_tiny_id = ?', [s.tiny_id]);
     if (byQq.length > 0) {
-      qqSessions.cleanupSession(sessionId);
+      await linkSession(sessionId, byQq[0].id);
       return res.json({ token: issue(byQq[0].id), user: publicUser(byQq[0]) });
     }
 
@@ -181,7 +194,7 @@ router.post(
       }
       await query('UPDATE users SET qq_tiny_id = ? WHERE id = ?', [s.tiny_id, u.id]);
       u.qq_tiny_id = s.tiny_id;
-      qqSessions.cleanupSession(sessionId);
+      await linkSession(sessionId, u.id);
       return res.json({ token: issue(u.id), user: publicUser(u) });
     }
 
@@ -190,7 +203,7 @@ router.post(
       [class_name, real_name, s.tiny_id]
     );
     const created = { id: result.insertId, class_name, real_name, qq_tiny_id: s.tiny_id, created_at: new Date() };
-    qqSessions.cleanupSession(sessionId);
+    await linkSession(sessionId, created.id);
     return res.json({ token: issue(created.id), user: publicUser(created) });
   })
 );

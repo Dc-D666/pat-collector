@@ -1,9 +1,9 @@
 'use strict';
 
-// 我的文件视图：上传 / 列表 / 下载 / 删除
+// 我的文件视图：上传 / 列表 / 下载 / 删除 + AI 轻应用收集
 window.Views = window.Views || {};
 Views.files = () => {
-  const { escapeHtml, formatSize, formatTime, getFileIcon, confirm, toast } = Utils;
+  const { escapeHtml, formatSize, formatTime, getFileIcon, confirm, toast, openModal, closeModal } = Utils;
   const view = document.getElementById('view');
 
   view.innerHTML = `
@@ -24,6 +24,21 @@ Views.files = () => {
 
       <div class="card">
         <div id="file-list"><div class="spinner"></div></div>
+      </div>
+
+      <div class="card" style="margin-top:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div>
+            <h2 style="margin:0;font-size:17px;">AI 轻应用</h2>
+            <div style="font-size:12px;color:var(--text-dim);">识别你在 QQ 频道发布的 AI 轻应用并收集</div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary btn-sm" id="auto-scan-btn">自动识别</button>
+            <button class="btn btn-sm" id="manual-scan-btn">手动识别</button>
+          </div>
+        </div>
+        <div id="apps-status"></div>
+        <div id="apps-list"><div class="spinner"></div></div>
       </div>
     </div>`;
 
@@ -117,5 +132,151 @@ Views.files = () => {
     });
   }
 
+  // ---- AI 轻应用 ----
+  async function loadApps() {
+    const list = document.getElementById('apps-list');
+    try {
+      const data = await API.get('/api/apps');
+      const apps = data.apps;
+      if (!apps.length) {
+        list.innerHTML = `<div class="empty" style="padding:20px;">还没有收集的轻应用</div>`;
+        return;
+      }
+      list.innerHTML = apps.map((a) => `
+        <div class="app-row">
+          <div class="app-info">
+            <a class="app-title" href="${escapeHtml(a.app_url)}" target="_blank" rel="noopener">${escapeHtml(a.title || a.app_url)}</a>
+            ${a.description ? `<div class="app-desc">${escapeHtml(a.description)}</div>` : ''}
+            ${a.gameplay ? `<div class="app-desc">玩法：${escapeHtml(a.gameplay)}</div>` : ''}
+          </div>
+          <div class="file-actions">
+            <button class="btn btn-sm btn-ghost app-del" data-id="${a.id}" style="color:var(--danger);">删除</button>
+          </div>
+        </div>`).join('');
+      list.querySelectorAll('.app-del').forEach((b) => {
+        b.onclick = async () => {
+          const ok = await confirm('删除该轻应用？', { danger: true });
+          if (!ok) return;
+          try { await API.del('/api/apps/' + b.dataset.id); toast('已删除'); await loadApps(); }
+          catch (err) { toast(err.message); }
+        };
+      });
+    } catch (err) {
+      list.innerHTML = `<div class="empty" style="padding:20px;">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function renderScanResults(posts) {
+    const status = document.getElementById('apps-status');
+    // 展平所有帖子里的应用
+    const items = [];
+    for (const p of posts) {
+      for (const a of (p.apps || [])) {
+        items.push({ feed_id: p.feed_id, post_title: p.title, text: a.text, url: a.url });
+      }
+    }
+    if (!items.length) {
+      status.innerHTML = `<div class="empty" style="padding:16px;">没有识别到轻应用</div>`;
+      return;
+    }
+    status.innerHTML = `
+      <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">识别到 ${items.length} 个轻应用：</div>
+      ${items.map((it) => `
+        <div class="app-row">
+          <div class="app-info">
+            <div class="app-title">${escapeHtml(it.text || it.post_title || it.url)}</div>
+            <div class="app-desc">来源帖子：${escapeHtml(it.post_title || it.feed_id)}</div>
+          </div>
+          <div class="file-actions">
+            <a class="btn btn-sm btn-ghost" href="${escapeHtml(it.url)}" target="_blank" rel="noopener">跳转</a>
+            <button class="btn btn-sm btn-primary app-submit-btn" data-url="${escapeHtml(it.url)}" data-title="${escapeHtml(it.text || it.post_title || '')}" data-feed="${escapeHtml(it.feed_id)}">提交</button>
+          </div>
+        </div>`).join('')}`;
+    status.querySelectorAll('.app-submit-btn').forEach((b) => {
+      b.onclick = () => showSubmitModal(b.dataset.url, b.dataset.title, b.dataset.feed);
+    });
+  }
+
+  async function autoScan() {
+    const status = document.getElementById('apps-status');
+    status.innerHTML = `<div class="spinner"></div><p style="text-align:center;color:var(--text-dim);font-size:13px;">正在识别你的近期帖子，可能需要一点时间…</p>`;
+    try {
+      const data = await API.post('/api/apps/auto-scan', JSON.stringify({}));
+      renderScanResults(data.posts || []);
+    } catch (err) {
+      status.innerHTML = `<div class="form-error show" style="display:block;">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function manualScan() {
+    openModal(`
+      <h3 class="modal-title">手动识别</h3>
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">粘贴帖子分享链接，或分享文本（自动提取其中的链接）</p>
+      <div class="form-error" id="manual-scan-error"></div>
+      <div class="field"><textarea id="manual-scan-text" rows="3" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" placeholder="例如：点击链接查看腾讯频道帖子【...】：https://pd.qq.com/s/xxx"></textarea></div>
+      <div class="modal-actions">
+        <button class="btn" id="manual-cancel">取消</button>
+        <button class="btn btn-primary" id="manual-save">识别</button>
+      </div>`);
+    document.getElementById('manual-cancel').onclick = closeModal;
+    document.getElementById('manual-save').onclick = async () => {
+      const errEl = document.getElementById('manual-scan-error');
+      errEl.classList.remove('show');
+      const text = document.getElementById('manual-scan-text').value.trim();
+      if (!text) { errEl.textContent = '请粘贴分享链接或文本'; errEl.classList.add('show'); return; }
+      try {
+        const data = await API.post('/api/apps/manual-scan', JSON.stringify({ text }));
+        closeModal();
+        if (data.apps && data.apps.length) {
+          renderScanResults([{ feed_id: data.feed_id, title: data.title, apps: data.apps }]);
+        } else {
+          document.getElementById('apps-status').innerHTML = `<div class="empty" style="padding:16px;">该帖子未识别到轻应用</div>`;
+        }
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.add('show');
+      }
+    };
+  }
+
+  function showSubmitModal(appUrl, title, feedId) {
+    openModal(`
+      <h3 class="modal-title">提交轻应用</h3>
+      <div class="form-error" id="app-submit-error"></div>
+      <div class="field"><label>应用名称</label><input id="app-title" type="text" value="${escapeHtml(title)}" maxlength="255" /></div>
+      <div class="field"><label>应用链接</label><input id="app-url" type="text" value="${escapeHtml(appUrl)}" readonly /></div>
+      <div class="field"><label>应用简介（选填）</label><input id="app-desc" type="text" maxlength="2000" placeholder="一句话介绍这个应用" /></div>
+      <div class="field"><label>玩法（选填）</label><input id="app-gameplay" type="text" maxlength="2000" placeholder="怎么玩" /></div>
+      <div class="modal-actions">
+        <button class="btn" id="app-cancel">取消</button>
+        <button class="btn btn-primary" id="app-save">提交</button>
+      </div>`);
+    document.getElementById('app-cancel').onclick = closeModal;
+    document.getElementById('app-save').onclick = async () => {
+      const errEl = document.getElementById('app-submit-error');
+      errEl.classList.remove('show');
+      try {
+        await API.post('/api/apps', JSON.stringify({
+          app_url: document.getElementById('app-url').value,
+          title: document.getElementById('app-title').value.trim(),
+          description: document.getElementById('app-desc').value.trim(),
+          gameplay: document.getElementById('app-gameplay').value.trim(),
+          source_feed_id: feedId || '',
+        }));
+        closeModal();
+        toast('已提交');
+        document.getElementById('apps-status').innerHTML = '';
+        await loadApps();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.add('show');
+      }
+    };
+  }
+
+  document.getElementById('auto-scan-btn').onclick = autoScan;
+  document.getElementById('manual-scan-btn').onclick = manualScan;
+
   loadFiles();
+  loadApps();
 };

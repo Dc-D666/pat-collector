@@ -5,4 +5,6 @@ storage/
 *.swp
 .DS_Store
 .reasonix/
+__pycache__/
+*.pyc
 npm-debug.log*
