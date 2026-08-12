@@ -130,21 +130,39 @@ Views.login = () => {
   function renderQr(initData) {
     clearPoll();
     const session = initData.session;
+    const uri = initData.verification_uri || '';
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card" style="text-align:center;">
           <div class="auth-brand"><div class="brand-logo">P</div><h1>QQ 频道登录</h1></div>
-          <p style="color:var(--text-dim);font-size:13px;margin:0 0 12px;">用手机 QQ 扫码，或点击下方链接授权</p>
-          <img id="qr-img" alt="登录二维码" src="data:image/png;base64,${initData.qrcode_base64}"
-               style="width:220px;height:220px;border:1px solid var(--border);border-radius:12px;" />
-          <div style="margin:10px 0;">
-            <a href="${escapeHtml(initData.verification_uri || '')}" target="_blank" rel="noopener" style="color:var(--primary);font-size:13px;">在手机上打开授权链接</a>
-          </div>
-          <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin-bottom:10px;">等待扫码授权…</div>
+          <p style="color:var(--text-dim);font-size:13px;margin:0 0 14px;">授权后即可进入系统</p>
+
+          ${uri
+            ? `<a href="${escapeHtml(uri)}" target="_blank" rel="noopener" class="btn btn-primary auth-link-btn">打开授权链接</a>`
+            : `<button class="btn btn-primary auth-link-btn" id="copy-link">复制授权链接</button>`}
+          <p style="font-size:12px;color:var(--text-dim);margin:8px 0 4px;">推荐在手机或电脑浏览器中打开，用 QQ 授权登录</p>
+
+          <details class="qrcode-details">
+            <summary>也可以用 QQ 扫码登录</summary>
+            <img alt="登录二维码" src="data:image/png;base64,${initData.qrcode_base64}"
+                 style="width:180px;height:180px;border:1px solid var(--border);border-radius:12px;margin-top:8px;" />
+          </details>
+
+          <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin:12px 0;">等待授权…</div>
           <button class="btn" id="qr-back" style="width:100%;justify-content:center;">返回</button>
         </div>
       </div>`;
     document.getElementById('qr-back').onclick = renderHome;
+    const copyBtn = document.getElementById('copy-link');
+    if (copyBtn) {
+      copyBtn.onclick = () => {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(uri).catch(() => {});
+        }
+        const st = document.getElementById('qr-status');
+        if (st) st.textContent = '链接已复制，请到浏览器粘贴打开';
+      };
+    }
 
     const poll = async () => {
       try {
@@ -161,7 +179,7 @@ Views.login = () => {
         }
         const statusEl = document.getElementById('qr-status');
         if (statusEl) {
-          statusEl.textContent = (r.status === 'pending_authorization' && r.error) ? r.error : '等待扫码授权…';
+          statusEl.textContent = (r.status === 'pending_authorization' && r.error) ? r.error : '等待授权…';
         }
         pollTimer = setTimeout(poll, 2500);
       } catch (err) {

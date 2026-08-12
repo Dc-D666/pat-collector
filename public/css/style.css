@@ -173,6 +173,20 @@ button { font-family: inherit; cursor: pointer; }
 }
 .auth-tab.active { background: var(--surface); color: var(--primary); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 
+/* QQ 授权：链接优先按钮 + 折叠二维码 */
+.auth-link-btn {
+  width: 100%; justify-content: center; padding: 14px 20px;
+  font-size: 15px; font-weight: 700; border-radius: 14px;
+  text-decoration: none;
+}
+.qrcode-details { width: 100%; margin-top: 4px; }
+.qrcode-details summary {
+  font-size: 13px; color: var(--text-dim); text-align: center; cursor: pointer;
+  padding: 8px; border-radius: 8px; list-style: none; user-select: none;
+}
+.qrcode-details summary:hover { background: var(--bg); }
+.qrcode-details summary::-webkit-details-marker { display: none; }
+
 /* ============ 上传区 ============ */
 .dropzone {
   border: 2px dashed var(--border); border-radius: var(--radius);

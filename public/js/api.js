@@ -21,12 +21,14 @@ window.API = (() => {
   async function request(path, opts = {}) {
     const headers = { ...(opts.headers || {}) };
     const token = getToken();
+    const hadToken = !!token;
     if (token) headers['Authorization'] = 'Bearer ' + token;
     if (opts.body && !(opts.body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
     }
     const res = await fetch(path, { ...opts, headers });
-    if (res.status === 401) {
+    // 只有携带了 Bearer token 的请求收到 401 才视为「登录过期」；扫码登录流程（无 token）的 401 是业务态错误，原样抛出
+    if (res.status === 401 && hadToken) {
       goLogin();
       throw new Error('登录已过期，请重新登录');
     }

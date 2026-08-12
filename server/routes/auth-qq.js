@@ -95,13 +95,31 @@ router.post(
       return res.json({ session: sessionId, status: 'pending', error: '' });
     }
 
-    // 已授权：取 QQ 身份 tiny_id + nickname（全局接口，防御式字段探测）
+    // 已授权：取昵称 + tiny_id
+    // 注意：get-user-info（全局/频道）都不返回 tiny_id，只能靠 guild-member-search 拿（字段 tinyid）
     s.token_obtained = true;
     try {
       const globalInfo = await runCli(['manage', 'get-user-info'], 10000, env);
-      const d = (globalInfo && globalInfo.data) || {};
-      s.tiny_id = String(d.tiny_id || d.tinyid || d.user_id || d.id || d.openid || d.uid || '');
-      s.nickname = d.nickname || d.global_nickname || '';
+      const gd = (globalInfo && globalInfo.data) || {};
+      s.nickname = gd.nickname || gd.global_nickname || '';
+
+      if (config.guildId) {
+        const guildInfo = await runCli(['manage', 'get-user-info', '--guild-id=' + config.guildId], 10000, env);
+        const gi = (guildInfo && guildInfo.data) || {};
+        const guildNick = gi.nickname || gi.member_name || gi.global_nickname || '';
+        if (guildNick) s.nickname = guildNick;
+
+        // 用昵称在频道内搜成员拿 tiny_id
+        const searchR = await runCli(
+          ['manage', 'guild-member-search', '--guild-id=' + config.guildId, '--keyword=' + s.nickname],
+          10000,
+          env
+        );
+        const members = (searchR && searchR.data && searchR.data.members) || [];
+        if (members.length > 0) {
+          s.tiny_id = String(members[0].tinyid || members[0].tiny_id || '');
+        }
+      }
     } catch (_) { /* tiny_id 为空则后续 bind 会拒绝 */ }
 
     let bound = false;

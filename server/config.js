@@ -87,8 +87,8 @@ const config = {
   storageDir: path.resolve(PROJECT_ROOT, process.env.STORAGE_DIR || 'storage/uploads'),
   publicDir: path.resolve(PROJECT_ROOT, 'public'),
   qqSessionsDir: path.resolve(PROJECT_ROOT, process.env.QQ_SESSIONS_DIR || 'storage/qq-sessions'),
-  // 可选：限定 QQ 登录到某个频道（guild）；空 = 不校验频道成员
-  guildId: process.env.GUILD_ID || '',
+  // QQ 登录需在频道内搜成员拿到 tiny_id（get-user-info 不返回 tiny_id）；默认南方中学频道，可用 GUILD_ID 覆盖
+  guildId: process.env.GUILD_ID || '621631744026206738',
   projectRoot: PROJECT_ROOT,
   classes: CLASSES,
   grades: GRADES,
