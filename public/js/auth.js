@@ -31,12 +31,35 @@ Views.login = () => {
     if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
   }
 
+  // ---- 移动端 OAuth 回调恢复：跳 connect.qq.com 授权再跳回时页面刷新会丢 session，用 localStorage 恢复 ----
+  const PENDING_OAUTH_KEY = 'patplayer_pending_oauth';
+  function savePendingOAuth(sessionId) {
+    localStorage.setItem(PENDING_OAUTH_KEY, JSON.stringify({ sessionId, timestamp: Date.now() }));
+  }
+  function getPendingOAuth() {
+    try {
+      const raw = localStorage.getItem(PENDING_OAUTH_KEY);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      if (!d.sessionId) return null;
+      if (Date.now() - d.timestamp > 300000) { // 300s 覆盖授权耗时
+        localStorage.removeItem(PENDING_OAUTH_KEY);
+        return null;
+      }
+      return d.sessionId;
+    } catch (_) { return null; }
+  }
+  function clearPendingOAuth() {
+    localStorage.removeItem(PENDING_OAUTH_KEY);
+  }
+
   function showError(msg) {
     const el = document.getElementById('auth-error');
     if (el) { el.textContent = msg; el.classList.add('show'); }
   }
 
   function enterSystem(data) {
+    clearPendingOAuth();
     API.setToken(data.token);
     API.setUser(data.user);
     location.hash = '#/files';
@@ -94,6 +117,7 @@ Views.login = () => {
   // 主界面：两个入口
   function renderHome() {
     clearPoll();
+    clearPendingOAuth();
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card">
@@ -131,6 +155,7 @@ Views.login = () => {
     clearPoll();
     const session = initData.session;
     const uri = initData.verification_uri || '';
+    savePendingOAuth(session);
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card" style="text-align:center;">
@@ -165,28 +190,52 @@ Views.login = () => {
     }
 
     const poll = async () => {
-      try {
-        const r = await API.post('/api/auth/qq/poll', JSON.stringify({ session }));
-        if (r.status === 'authorized') {
-          clearPoll();
-          if (r.bound && r.user) {
-            const bindRes = await API.post('/api/auth/qq/bind', JSON.stringify({ session }));
-            enterSystem(bindRes);
-          } else {
-            renderBindForm(session, r.nickname || '');
-          }
-          return;
-        }
-        const statusEl = document.getElementById('qr-status');
-        if (statusEl) {
-          statusEl.textContent = (r.status === 'pending_authorization' && r.error) ? r.error : '等待授权…';
-        }
-        pollTimer = setTimeout(poll, 2500);
-      } catch (err) {
+      const done = await pollSession(session, document.getElementById('qr-status'));
+      if (!done) pollTimer = setTimeout(poll, 2500);
+    };
+    pollTimer = setTimeout(poll, 2000);
+  }
+
+  // 轮询授权状态；返回 true 表示已结束（授权成功或出错），false 表示继续轮询
+  async function pollSession(sessionId, statusEl) {
+    try {
+      const r = await API.post('/api/auth/qq/poll', JSON.stringify({ session: sessionId }));
+      if (r.status === 'authorized') {
         clearPoll();
-        const statusEl = document.getElementById('qr-status');
-        if (statusEl) statusEl.textContent = err.message;
+        if (r.bound && r.user) {
+          const bindRes = await API.post('/api/auth/qq/bind', JSON.stringify({ session: sessionId }));
+          enterSystem(bindRes);
+        } else {
+          renderBindForm(sessionId, r.nickname || '');
+        }
+        return true;
       }
+      if (statusEl) {
+        statusEl.textContent = (r.status === 'pending_authorization' && r.error) ? r.error : '等待授权…';
+      }
+      return false;
+    } catch (err) {
+      clearPoll();
+      if (statusEl) statusEl.textContent = err.message;
+      return true;
+    }
+  }
+
+  // 移动端回调恢复：页面刷新后凭 localStorage 里的 session 继续轮询（无二维码/链接）
+  function renderPendingAuth(sessionId) {
+    clearPoll();
+    view.innerHTML = `
+      <div class="auth-wrap">
+        <div class="auth-card card" style="text-align:center;">
+          <div class="auth-brand"><div class="brand-logo">P</div><h1>QQ 频道登录</h1></div>
+          <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin:16px 0;">等待授权…</div>
+          <button class="btn" id="qr-back" style="width:100%;justify-content:center;">重新扫码</button>
+        </div>
+      </div>`;
+    document.getElementById('qr-back').onclick = renderHome;
+    const poll = async () => {
+      const done = await pollSession(sessionId, document.getElementById('qr-status'));
+      if (!done) pollTimer = setTimeout(poll, 2500);
     };
     pollTimer = setTimeout(poll, 2000);
   }
@@ -194,6 +243,7 @@ Views.login = () => {
   // 扫码成功但未绑定 → 补全班级+姓名
   async function renderBindForm(session, nickname) {
     clearPoll();
+    clearPendingOAuth();
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card">
@@ -247,5 +297,10 @@ Views.login = () => {
     };
   }
 
-  renderHome();
+  const pending = getPendingOAuth();
+  if (pending) {
+    renderPendingAuth(pending);
+  } else {
+    renderHome();
+  }
 };
