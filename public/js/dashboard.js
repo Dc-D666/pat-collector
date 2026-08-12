@@ -5,13 +5,34 @@ window.Views = window.Views || {};
 Views.files = () => {
   const { escapeHtml, formatSize, formatTime, getFileIcon, confirm, toast, openModal, closeModal } = Utils;
   const view = document.getElementById('view');
+  const isQqBound = !!(API.getUser() && API.getUser().is_qq_bound);
+
+  // QQ 用户：顶部最显眼的自动识别入口；非 QQ 用户不渲染（上传区自然在最上）
+  const topBanner = isQqBound
+    ? `<div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,var(--primary),#7c3aed);color:#fff;border:none;box-shadow:var(--shadow);">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div>
+            <div style="font-size:17px;font-weight:700;">🤖 自动识别 AI 轻应用</div>
+            <div style="font-size:13px;opacity:.92;">一键识别你最近在 QQ 频道发布的 AI 轻应用并收集</div>
+          </div>
+          <button class="btn" id="auto-scan-top-btn" style="background:#fff;color:var(--primary);border:none;font-weight:700;padding:11px 22px;font-size:15px;border-radius:12px;">开始识别</button>
+        </div>
+      </div>`
+    : '';
+
+  const appsActionBtns = isQqBound
+    ? `<button class="btn btn-primary btn-sm" id="auto-scan-btn">自动识别</button>
+       <button class="btn btn-sm" id="manual-scan-btn">手动识别</button>`
+    : `<span style="font-size:12px;color:var(--text-dim);">需 QQ 频道登录后可用</span>`;
 
   view.innerHTML = `
     <div class="page">
       <div class="page-head">
         <h1 class="page-title">我的文件</h1>
-        <div class="page-sub">拖拽或点击上传，仅本人可见</div>
+        <div class="page-sub">${isQqBound ? '上传程序文件，或自动收集你的 AI 轻应用' : '拖拽或点击上传，仅本人可见'}</div>
       </div>
+
+      ${topBanner}
 
       <div class="dropzone" id="dropzone">
         <div class="dz-icon">📤</div>
@@ -27,15 +48,12 @@ Views.files = () => {
       </div>
 
       <div class="card" style="margin-top:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
           <div>
             <h2 style="margin:0;font-size:17px;">AI 轻应用</h2>
             <div style="font-size:12px;color:var(--text-dim);">识别你在 QQ 频道发布的 AI 轻应用并收集</div>
           </div>
-          <div style="display:flex;gap:8px;">
-            <button class="btn btn-primary btn-sm" id="auto-scan-btn">自动识别</button>
-            <button class="btn btn-sm" id="manual-scan-btn">手动识别</button>
-          </div>
+          <div style="display:flex;gap:8px;align-items:center;">${appsActionBtns}</div>
         </div>
         <div id="apps-status"></div>
         <div id="apps-list"><div class="spinner"></div></div>
@@ -274,8 +292,14 @@ Views.files = () => {
     };
   }
 
-  document.getElementById('auto-scan-btn').onclick = autoScan;
-  document.getElementById('manual-scan-btn').onclick = manualScan;
+  const autoBtn = document.getElementById('auto-scan-btn');
+  if (autoBtn) autoBtn.onclick = autoScan;
+  const topAutoBtn = document.getElementById('auto-scan-top-btn');
+  if (topAutoBtn) topAutoBtn.onclick = autoScan;
+  if (isQqBound) {
+    const manualBtn = document.getElementById('manual-scan-btn');
+    if (manualBtn) manualBtn.onclick = manualScan;
+  }
 
   loadFiles();
   loadApps();

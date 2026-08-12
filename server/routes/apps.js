@@ -80,27 +80,49 @@ router.post(
       return res.status(400).json({ error: '需要 QQ 频道登录才能识别，请重新扫码登录' });
     }
     const text = String((req.body && req.body.text) || '').trim();
-    if (!text) return res.status(400).json({ error: '请粘贴帖子分享链接或分享文本' });
-
-    const m = text.match(/https:\/\/pd\.qq\.com\/s\/[a-zA-Z0-9]+/);
-    if (!m) return res.status(400).json({ error: '未在文本中找到 pd.qq.com 的帖子分享链接' });
-    const shareUrl = m[0];
+    if (!text) return res.status(400).json({ error: '请粘贴帖子ID（B_ 开头）或分享链接' });
 
     const env = qqSessions.sessionEnv(s);
     let feedId = '';
+
+    // 1. 优先识别 BID（帖子ID）
+    const bidMatch = text.match(/B_[a-zA-Z0-9]+/);
+    if (bidMatch) {
+      feedId = bidMatch[0];
+    } else {
+      // 2. 分享链接 → 尝试 get-share-info（CLI 实际只返回频道信息，拿不到 feed_id）
+      const linkMatch = text.match(/https:\/\/pd\.qq\.com\/s\/[a-zA-Z0-9]+/);
+      if (!linkMatch) {
+        return res.status(400).json({ error: '未找到帖子ID或分享链接，请粘贴 B_ 开头的帖子ID 或 pd.qq.com/s/ 分享链接' });
+      }
+      try {
+        const info = await runCli(['manage', 'get-share-info', '--url=' + linkMatch[0]], 15000, env);
+        const d = (info && info.data) || {};
+        feedId = String(d.feed_id || d.feedId || (d.feed && d.feed.feed_id) || '');
+      } catch (_) { /* fallthrough */ }
+      if (!feedId) {
+        return res.status(400).json({
+          error: '分享链接只能解析到频道、拿不到帖子ID（CLI 限制）。请改用「自动识别」，或直接粘贴帖子ID（B_ 开头）',
+        });
+      }
+    }
+
+    // 3. 取帖子详情 + 校验作者是本人
     let title = '';
     let channelId = '';
     try {
-      const info = await runCli(['manage', 'get-share-info', '--url=' + shareUrl], 15000, env);
-      const d = (info && info.data) || {};
-      feedId = String(d.feed_id || d.feedId || (d.feed && (d.feed.feed_id || d.feed.id)) || '');
-      title = d.title || d.content || (d.feed && d.feed.title) || '';
-      channelId = String(d.channel_id || d.channelId || (d.feed && d.feed.channel_id) || '');
-    } catch (_) { /* fallthrough */ }
-    if (!feedId) {
-      return res.status(400).json({ error: '解析分享链接失败，请确认是帖子分享链接（而非频道链接）' });
-    }
+      const detail = await runCli(['feed', 'get-feed-detail', '--feed-id=' + feedId], 15000, env);
+      const dd = (detail && detail.data) || {};
+      const feed = dd.feed || dd;
+      const authorId = String(feed.author_id || (feed.author && feed.author.tiny_id) || '');
+      if (authorId && authorId !== s.tiny_id) {
+        return res.status(403).json({ error: '该帖子不是你发布的，请确认粘贴的是自己的帖子' });
+      }
+      title = feed.title || feed.content || '';
+      channelId = String(feed.channel_id || dd.channel_id || '');
+    } catch (_) { /* 作者字段缺失时暂不拦截，交给提取 */ }
 
+    // 4. 提取轻应用
     const links = await extractLinks(feedId, s, channelId);
     res.json({ feed_id: feedId, title, apps: links });
   })
