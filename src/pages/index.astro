@@ -43,7 +43,7 @@ import Layout from '../layouts/Layout.astro';
 </Layout>
 
 <style>
-  .login-bg { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; background:linear-gradient(135deg, var(--mdui-color-primary-container, #e3f2fd), var(--mdui-color-tertiary-container, #fce4ec)); }
+  .login-bg { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; background:linear-gradient(135deg, var(--mdui-color-primary-container, #e3f2fd), var(--mdui-color-surface, #ffffff)); }
   .login-box { width:100%; max-width:420px; }
   .login-logo { text-align:center; margin-bottom:32px; }
   .logo-icon { font-size:64px; color:var(--mdui-color-primary); }
@@ -135,95 +135,6 @@ import Layout from '../layouts/Layout.astro';
           successEl.style.display = 'block';
           setTimeout(() => { window.location.href = '/dashboard'; }, 1000);
         } else {
-          window.location.href = '/dashboard';
-        }
-      } else {
-        errorEl.textContent = data.error || '操作失败';
-        errorEl.style.display = 'block';
-      }
-    } catch (err) {
-      errorEl.textContent = '网络错误，请检查连接';
-      errorEl.style.display = 'block';
-    }
-    submitBtn.loading = false;
-    submitBtn.textContent = isRegister ? '注册' : '登录';
-  });
-</script>
-        const item = document.createElement('mdui-menu-item');
-        item.value = cls;
-        item.textContent = `${cls} 班（${year === 25 ? '高二' : '高一'}）`;
-        select.appendChild(item);
-      }
-    }
-  }
-  loadClasses();
-
-  // 切换登录/注册
-  document.getElementById('toggleBtn').addEventListener('click', () => {
-    isRegister = !isRegister;
-    const fields = document.getElementById('registerFields');
-    const submitBtn = document.getElementById('submitBtn');
-    const toggleText = document.getElementById('toggleText');
-    const toggleBtn = document.getElementById('toggleBtn');
-
-    if (isRegister) {
-      fields.style.display = 'flex';
-      submitBtn.textContent = '注册';
-      toggleText.textContent = '已有账号？';
-      toggleBtn.textContent = '去登录';
-      document.getElementById('className').required = true;
-      document.getElementById('name').required = true;
-      document.getElementById('last4').required = true;
-    } else {
-      fields.style.display = 'none';
-      submitBtn.textContent = '登录';
-      toggleText.textContent = '还没有账号？';
-      toggleBtn.textContent = '立即注册';
-      document.getElementById('className').required = false;
-      document.getElementById('name').required = false;
-      document.getElementById('last4').required = false;
-    }
-    document.getElementById('errorMsg').style.display = 'none';
-    document.getElementById('successMsg').style.display = 'none';
-  });
-
-  // 提交表单
-  document.getElementById('authForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const submitBtn = document.getElementById('submitBtn');
-    const errorEl = document.getElementById('errorMsg');
-    const successEl = document.getElementById('successMsg');
-
-    submitBtn.loading = true;
-    submitBtn.textContent = isRegister ? '注册中...' : '登录中...';
-    errorEl.style.display = 'none';
-    successEl.style.display = 'none';
-
-    const email = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-
-    try {
-      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-      const body = { email, password };
-      if (isRegister) {
-        body.className = document.getElementById('className').value;
-        body.name = document.getElementById('name').value.trim();
-        body.last4 = document.getElementById('last4').value;
-      }
-
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        if (isRegister) {
-          successEl.textContent = '注册成功！请检查邮箱确认（如开启邮箱验证），然后切换到登录。';
-          successEl.style.display = 'block';
-        } else {
-          localStorage.setItem('patplayer_token', data.session.access_token);
           window.location.href = '/dashboard';
         }
       } else {
