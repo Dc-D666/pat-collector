@@ -5,6 +5,7 @@ const path = require('path');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const FEED_LINKS_PY = path.join(PROJECT_ROOT, 'feed_links.py');
+const SHARE_RESOLVE_PY = path.join(PROJECT_ROOT, 'share_resolve.py');
 const CLI_BIN_DIR = (() => {
   const isWin = process.platform === 'win32';
   return isWin
@@ -51,4 +52,32 @@ function extractLinks(feedId, session, channelId) {
   });
 }
 
-module.exports = { extractLinks };
+// 用 share_resolve.py 把 pd.qq.com/s/ 短链解析成帖子 ID（BID）。
+// 脚本内部用 curl + 浏览器 UA 拉取 Nuxt SSR 页面提取 feedId。
+function resolveShare(shortUrl) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'python3',
+      [SHARE_RESOLVE_PY, shortUrl],
+      { timeout: 60000, maxBuffer: 10 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          return reject(new Error('解析失败：' + ((stderr && stderr.trim().slice(0, 200)) || error.message)));
+        }
+        const out = stdout || '';
+        const bids = [];
+        for (const line of out.split('\n')) {
+          const m = line.match(/^BID\s*:\s*(B_[a-zA-Z0-9]+)/);
+          if (m) bids.push(m[1]);
+        }
+        if (bids.length === 0) {
+          const hint = out.split('\n').filter((l) => l.startsWith('错误') || l.startsWith('未解析')).join(' ');
+          return reject(new Error(hint || '未解析到帖子ID'));
+        }
+        resolve(bids[0]);
+      }
+    );
+  });
+}
+
+module.exports = { extractLinks, resolveShare };

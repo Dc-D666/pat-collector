@@ -8,7 +8,7 @@ const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../utils/rateLimit');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
-const { extractLinks } = require('../qq/feed-links');
+const { extractLinks, resolveShare } = require('../qq/feed-links');
 
 const router = express.Router();
 
@@ -21,6 +21,20 @@ async function getUserSession(userId) {
   const s = qqSessions.getSession(rows[0].qq_session_id);
   if (!s || !s.token_obtained || !s.tiny_id) return null;
   return s;
+}
+
+// 取帖子详情并校验作者是本人；返回 { ok, title, channelId }
+async function verifyOwnFeed(feedId, s, env) {
+  const detail = await runCli(['feed', 'get-feed-detail', '--feed-id=' + feedId, '--guild-id=' + config.guildId], 15000, env);
+  const dd = (detail && detail.data) || {};
+  const feed = dd.feed || dd;
+  const authorId = String(feed.author_id || (feed.author && feed.author.tiny_id) || '');
+  return {
+    ok: authorId !== '' && authorId === s.tiny_id,
+    authorId,
+    title: feed.title || feed.content || '',
+    channelId: String(feed.channel_id || dd.channel_id || ''),
+  };
 }
 
 // 自动识别：取本人近期帖子，逐个提取轻应用
@@ -52,14 +66,16 @@ router.post(
     const posts = [];
     for (const f of own) {
       try {
-        const links = await extractLinks(f.feed_id, s, f.channel_id || '');
+        const verify = await verifyOwnFeed(f.feed_id, s, env);
+        if (!verify.ok) continue; // 作者校验失败（非本人或无法确定）跳过
+        const links = await extractLinks(f.feed_id, s, verify.channelId || f.channel_id || '');
         if (links.length > 0) {
           posts.push({
             feed_id: f.feed_id,
-            title: f.title || f.content || '',
+            title: verify.title || f.title || f.content || '',
             content: f.content || '',
             create_time: f.create_time || '',
-            channel_id: f.channel_id || '',
+            channel_id: verify.channelId || f.channel_id || '',
             apps: links,
           });
         }
@@ -90,41 +106,27 @@ router.post(
     if (bidMatch) {
       feedId = bidMatch[0];
     } else {
-      // 2. 分享链接 → 尝试 get-share-info（CLI 实际只返回频道信息，拿不到 feed_id）
+      // 2. 分享链接 → 用 share_resolve.py 解析出 BID
       const linkMatch = text.match(/https:\/\/pd\.qq\.com\/s\/[a-zA-Z0-9]+/);
       if (!linkMatch) {
         return res.status(400).json({ error: '未找到帖子ID或分享链接，请粘贴 B_ 开头的帖子ID 或 pd.qq.com/s/ 分享链接' });
       }
       try {
-        const info = await runCli(['manage', 'get-share-info', '--url=' + linkMatch[0]], 15000, env);
-        const d = (info && info.data) || {};
-        feedId = String(d.feed_id || d.feedId || (d.feed && d.feed.feed_id) || '');
-      } catch (_) { /* fallthrough */ }
-      if (!feedId) {
-        return res.status(400).json({
-          error: '分享链接只能解析到频道、拿不到帖子ID（CLI 限制）。请改用「自动识别」，或直接粘贴帖子ID（B_ 开头）',
-        });
+        feedId = await resolveShare(linkMatch[0]);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
       }
     }
 
-    // 3. 取帖子详情 + 校验作者是本人
-    let title = '';
-    let channelId = '';
-    try {
-      const detail = await runCli(['feed', 'get-feed-detail', '--feed-id=' + feedId], 15000, env);
-      const dd = (detail && detail.data) || {};
-      const feed = dd.feed || dd;
-      const authorId = String(feed.author_id || (feed.author && feed.author.tiny_id) || '');
-      if (authorId && authorId !== s.tiny_id) {
-        return res.status(403).json({ error: '该帖子不是你发布的，请确认粘贴的是自己的帖子' });
-      }
-      title = feed.title || feed.content || '';
-      channelId = String(feed.channel_id || dd.channel_id || '');
-    } catch (_) { /* 作者字段缺失时暂不拦截，交给提取 */ }
+    // 3. 校验作者是本人
+    const verify = await verifyOwnFeed(feedId, s, env);
+    if (!verify.ok) {
+      return res.status(403).json({ error: '该帖子不是你发布的，请确认粘贴的是自己的帖子' });
+    }
 
     // 4. 提取轻应用
-    const links = await extractLinks(feedId, s, channelId);
-    res.json({ feed_id: feedId, title, apps: links });
+    const links = await extractLinks(feedId, s, verify.channelId);
+    res.json({ feed_id: feedId, title: verify.title, apps: links });
   })
 );
 
