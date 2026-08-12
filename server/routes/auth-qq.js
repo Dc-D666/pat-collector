@@ -10,6 +10,7 @@ const { asyncHandler } = require('../utils/async');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { rateLimit } = require('../utils/rateLimit');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -24,6 +25,30 @@ function publicUser(row) {
 }
 
 const ipKey = (req) => req.ip || req.connection.remoteAddress || 'unknown';
+
+// 检查当前用户 QQ 会话是否仍有效（单设备登录被踢后 token 失效）；失效则清理会话
+router.get('/status', requireAuth, asyncHandler(async (req, res) => {
+  const rows = await query('SELECT qq_session_id FROM users WHERE id = ?', [req.user.id]);
+  if (rows.length === 0 || !rows[0].qq_session_id) {
+    return res.json({ valid: false, reason: 'no_session' });
+  }
+  const sid = rows[0].qq_session_id;
+  const s = qqSessions.getSession(sid);
+  if (!s || !s.token_obtained) {
+    return res.json({ valid: false, reason: 'no_session' });
+  }
+  try {
+    const status = await runCli(['login', 'status'], 10000, qqSessions.sessionEnv(s));
+    const valid = !!(status && status.success && status.data && status.data.valid === true);
+    if (!valid) {
+      qqSessions.cleanupSession(sid);
+      await query('UPDATE users SET qq_session_id = NULL WHERE id = ?', [req.user.id]);
+    }
+    return res.json({ valid });
+  } catch (_) {
+    return res.json({ valid: false, reason: 'error' });
+  }
+}));
 
 // 把 QQ 会话关联到用户（不清理，供后续自动/手动识别轻应用使用）；顺带清理该用户旧的会话
 async function linkSession(sessionId, userId) {

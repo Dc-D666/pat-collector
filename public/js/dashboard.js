@@ -32,6 +32,8 @@ Views.files = () => {
         <div class="page-sub">${isQqBound ? '上传程序文件，或自动收集你的 AI 轻应用' : '拖拽或点击上传，仅本人可见'}</div>
       </div>
 
+      <div id="qq-expired-banner"></div>
+
       ${topBanner}
 
       <div class="dropzone" id="dropzone">
@@ -184,22 +186,18 @@ Views.files = () => {
     }
   }
 
-  function renderScanResults(posts) {
+  // 已识别但未提交的轻应用（累积，按 url 去重）
+  let scanItems = [];
+
+  function renderScanResults() {
     const status = document.getElementById('apps-status');
-    // 展平所有帖子里的应用
-    const items = [];
-    for (const p of posts) {
-      for (const a of (p.apps || [])) {
-        items.push({ feed_id: p.feed_id, post_title: p.title, text: a.text, url: a.url });
-      }
-    }
-    if (!items.length) {
-      status.innerHTML = `<div class="empty" style="padding:16px;">没有识别到轻应用</div>`;
+    if (!scanItems.length) {
+      status.innerHTML = `<div class="empty" style="padding:16px;">还没有识别结果</div>`;
       return;
     }
     status.innerHTML = `
-      <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">识别到 ${items.length} 个轻应用：</div>
-      ${items.map((it) => `
+      <div style="font-size:13px;color:var(--text-dim);margin-bottom:8px;">识别到 ${scanItems.length} 个轻应用（未提交）：</div>
+      ${scanItems.map((it, i) => `
         <div class="app-row">
           <div class="app-info">
             <div class="app-title">${escapeHtml(it.text || it.post_title || it.url)}</div>
@@ -207,31 +205,57 @@ Views.files = () => {
           </div>
           <div class="file-actions">
             <a class="btn btn-sm btn-ghost" href="${escapeHtml(it.url)}" target="_blank" rel="noopener">跳转</a>
-            <button class="btn btn-sm btn-primary app-submit-btn" data-url="${escapeHtml(it.url)}" data-title="${escapeHtml(it.text || it.post_title || '')}" data-feed="${escapeHtml(it.feed_id)}">提交</button>
+            <button class="btn btn-sm btn-primary app-submit-btn" data-i="${i}">提交</button>
           </div>
         </div>`).join('')}`;
     status.querySelectorAll('.app-submit-btn').forEach((b) => {
-      b.onclick = () => showSubmitModal(b.dataset.url, b.dataset.title, b.dataset.feed);
+      b.onclick = () => {
+        const it = scanItems[parseInt(b.dataset.i, 10)];
+        if (it) showSubmitModal(it.url, it.text || it.post_title || '', it.feed_id);
+      };
     });
   }
 
-  async function autoScan() {
+  function addScanItems(posts) {
+    let added = 0;
+    for (const p of posts) {
+      for (const a of (p.apps || [])) {
+        const item = { feed_id: p.feed_id, post_title: p.title, text: a.text, url: a.url };
+        if (scanItems.some((x) => x.url === item.url)) continue;
+        scanItems.push(item);
+        added++;
+      }
+    }
+    renderScanResults();
+    return added;
+  }
+
+  function showScanning(msg) {
     const status = document.getElementById('apps-status');
-    status.innerHTML = `<div class="spinner"></div><p style="text-align:center;color:var(--text-dim);font-size:13px;">正在识别你的近期帖子，可能需要一点时间…</p>`;
+    status.innerHTML = `<div class="scan-loading"><div class="spinner"></div><p>${escapeHtml(msg)}</p></div>`;
+  }
+
+  async function autoScan() {
+    showScanning('正在识别你的近期帖子，可能需要一点时间…');
     try {
       const data = await API.post('/api/apps/auto-scan', JSON.stringify({}));
-      renderScanResults(data.posts || []);
+      scanItems = []; // 自动识别重置结果
+      addScanItems(data.posts || []);
+      if (!scanItems.length) {
+        document.getElementById('apps-status').innerHTML = `<div class="empty" style="padding:16px;">没有在近期帖子中识别到轻应用</div>`;
+      }
     } catch (err) {
-      status.innerHTML = `<div class="form-error show" style="display:block;">${escapeHtml(err.message)}</div>`;
+      document.getElementById('apps-status').innerHTML = `<div class="form-error show" style="display:block;">${escapeHtml(err.message)}</div>`;
     }
   }
 
   function manualScan() {
     openModal(`
       <h3 class="modal-title">手动识别</h3>
-      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">粘贴帖子分享链接，或分享文本（自动提取其中的链接）</p>
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">粘贴帖子ID（B_ 开头）或分享链接/文本</p>
       <div class="form-error" id="manual-scan-error"></div>
       <div class="field"><textarea id="manual-scan-text" rows="3" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" placeholder="例如：点击链接查看腾讯频道帖子【...】：https://pd.qq.com/s/xxx"></textarea></div>
+      <div id="manual-scan-result"></div>
       <div class="modal-actions">
         <button class="btn" id="manual-cancel">取消</button>
         <button class="btn btn-primary" id="manual-save">识别</button>
@@ -239,20 +263,24 @@ Views.files = () => {
     document.getElementById('manual-cancel').onclick = closeModal;
     document.getElementById('manual-save').onclick = async () => {
       const errEl = document.getElementById('manual-scan-error');
+      const resultEl = document.getElementById('manual-scan-result');
       errEl.classList.remove('show');
       const text = document.getElementById('manual-scan-text').value.trim();
-      if (!text) { errEl.textContent = '请粘贴分享链接或文本'; errEl.classList.add('show'); return; }
+      if (!text) { errEl.textContent = '请粘贴帖子ID或分享链接'; errEl.classList.add('show'); return; }
+      resultEl.innerHTML = `<div class="scan-loading"><div class="spinner"></div><p>识别中…</p></div>`;
       try {
         const data = await API.post('/api/apps/manual-scan', JSON.stringify({ text }));
-        closeModal();
         if (data.apps && data.apps.length) {
-          renderScanResults([{ feed_id: data.feed_id, title: data.title, apps: data.apps }]);
+          addScanItems([{ feed_id: data.feed_id, title: data.title, apps: data.apps }]);
+          resultEl.innerHTML = `<div style="color:var(--success);font-size:13px;">✓ 识别到 ${data.apps.length} 个轻应用，已加入下方列表</div>`;
+          setTimeout(closeModal, 800);
         } else {
-          document.getElementById('apps-status').innerHTML = `<div class="empty" style="padding:16px;">该帖子未识别到轻应用</div>`;
+          resultEl.innerHTML = `<div class="empty" style="padding:12px;">该帖子未识别到轻应用</div>`;
         }
       } catch (err) {
         errEl.textContent = err.message;
         errEl.classList.add('show');
+        resultEl.innerHTML = '';
       }
     };
   }
@@ -301,6 +329,26 @@ Views.files = () => {
     if (manualBtn) manualBtn.onclick = manualScan;
   }
 
+  // QQ 会话失效检测：单设备登录被踢后 token 失效，提示重新登录
+  async function checkQqStatus() {
+    if (!isQqBound) return;
+    try {
+      const data = await API.get('/api/auth/qq/status');
+      if (data.valid === false) {
+        const banner = document.getElementById('qq-expired-banner');
+        if (banner) {
+          banner.innerHTML = `
+            <div style="background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+              <div style="font-size:14px;">⚠️ QQ 频道登录已失效（可能在其他设备登录了），AI 轻应用识别功能暂不可用。</div>
+              <button class="btn btn-sm" id="qq-relogin-btn" style="background:#9a3412;color:#fff;border:none;">重新登录</button>
+            </div>`;
+          document.getElementById('qq-relogin-btn').onclick = () => { API.clearToken(); location.hash = '#/login'; };
+        }
+      }
+    } catch (_) { /* 静默失败 */ }
+  }
+
   loadFiles();
   loadApps();
+  checkQqStatus();
 };
