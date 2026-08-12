@@ -22,20 +22,30 @@ function publicUser(row) {
 
 const ipKey = (req) => req.ip || req.connection.remoteAddress || 'unknown';
 
+// 年级 → 班级 二级菜单结构（供前端渲染，单一数据源在 config.js）
+router.get('/classes', (req, res) => {
+  res.json({
+    grades: config.grades.map((g) => ({ name: g.name, classes: config.classesByGrade[g.name] })),
+  });
+});
+
 // 无 QQ 直通：姓名 + 班级，直接放行进入系统（无密码、无学号）
 router.post(
   '/guest',
   rateLimit({ windowMs: 10 * 60 * 1000, max: 30, keyFn: ipKey }),
   asyncHandler(async (req, res) => {
-    const class_name = String((req.body && req.body.class_name) || '').trim();
-    const real_name = String((req.body && req.body.real_name) || '').trim();
+    let class_name = config.normalizeClass((req.body && req.body.class_name) || '');
+    let real_name = String((req.body && req.body.real_name) || '').trim();
+    const isStandard = config.isStandardClass(class_name);
 
-    if (!config.classes.includes(class_name)) {
-      return res.status(400).json({ error: '班级不在白名单内' });
+    // 标准年级：姓名必填；「其他」：姓名选填（缺省用「同学」）
+    if (isStandard && !real_name) {
+      return res.status(400).json({ error: '请输入姓名' });
     }
-    if (real_name.length < 1 || real_name.length > 32) {
-      return res.status(400).json({ error: '请输入真实姓名' });
+    if (real_name.length > 32) {
+      return res.status(400).json({ error: '姓名过长' });
     }
+    if (!real_name) real_name = '同学';
 
     const existing = await query(
       'SELECT * FROM users WHERE class_name = ? AND real_name = ?',

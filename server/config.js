@@ -11,14 +11,40 @@ try {
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-// ---- 班级白名单：高二 2501–2524（24 班）、高一 2601–2625（25 班） ----
-const CLASSES = [];
-for (let c = 2501; c <= 2524; c++) CLASSES.push(String(c));
-for (let c = 2601; c <= 2625; c++) CLASSES.push(String(c));
+// ---- 班级：高一 2601–2624、高二 2501–2524、高三 2401–2425，另有「其他」自由填写 ----
+const GRADES = [
+  { name: '高一', start: 2601, end: 2624 },
+  { name: '高二', start: 2501, end: 2524 },
+  { name: '高三', start: 2401, end: 2425 },
+];
 
-// 班级 -> 年级文案
+const CLASSES_BY_GRADE = {};
+const CLASSES = [];
+for (const g of GRADES) {
+  const list = [];
+  for (let c = g.start; c <= g.end; c++) list.push(String(c));
+  CLASSES_BY_GRADE[g.name] = list;
+  CLASSES.push(...list);
+}
+const CLASS_SET = new Set(CLASSES);
+
+// 班级 -> 年级文案；自由文本（不在标准范围内）一律归为「其他」
 function gradeOf(className) {
-  return className.startsWith('25') ? '高二' : '高一';
+  const c = String(className || '');
+  if (!CLASS_SET.has(c)) return '其他';
+  if (c.startsWith('26')) return '高一';
+  if (c.startsWith('25')) return '高二';
+  return '高三'; // 24 前缀
+}
+
+// 归一化班级：标准班级原样返回；自由文本去空白并截断；空 → '其他'
+function normalizeClass(raw) {
+  const c = String(raw || '').trim();
+  return c ? c.slice(0, 32) : '其他';
+}
+
+function isStandardClass(name) {
+  return CLASS_SET.has(name);
 }
 
 // ---- 扩展名白名单（约 50 种）----
@@ -65,7 +91,11 @@ const config = {
   guildId: process.env.GUILD_ID || '',
   projectRoot: PROJECT_ROOT,
   classes: CLASSES,
+  grades: GRADES,
+  classesByGrade: CLASSES_BY_GRADE,
   gradeOf,
+  normalizeClass,
+  isStandardClass,
   allowedExtensions: ALLOWED_EXTENSIONS,
 };
 

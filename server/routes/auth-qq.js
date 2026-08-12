@@ -132,8 +132,8 @@ router.post(
     if (!s || !s.token_obtained || !s.tiny_id) {
       return res.status(401).json({ error: '请先完成扫码授权' });
     }
-    const class_name = String((req.body && req.body.class_name) || '').trim();
-    const real_name = String((req.body && req.body.real_name) || '').trim();
+    let class_name = String((req.body && req.body.class_name) || '').trim();
+    let real_name = String((req.body && req.body.real_name) || '').trim();
 
     // 该 tiny_id 已绑定 → 直接登录（无需再填班级姓名）
     const byQq = await query('SELECT * FROM users WHERE qq_tiny_id = ?', [s.tiny_id]);
@@ -142,12 +142,15 @@ router.post(
       return res.json({ token: issue(byQq[0].id), user: publicUser(byQq[0]) });
     }
 
-    if (!config.classes.includes(class_name)) {
-      return res.status(400).json({ error: '班级不在白名单内' });
+    class_name = config.normalizeClass(class_name);
+    const isStandard = config.isStandardClass(class_name);
+    if (isStandard && !real_name) {
+      return res.status(400).json({ error: '请输入姓名' });
     }
-    if (real_name.length < 1 || real_name.length > 32) {
-      return res.status(400).json({ error: '请输入真实姓名' });
+    if (real_name.length > 32) {
+      return res.status(400).json({ error: '姓名过长' });
     }
+    if (!real_name) real_name = s.nickname || '同学';
 
     const byName = await query(
       'SELECT * FROM users WHERE class_name = ? AND real_name = ?',
