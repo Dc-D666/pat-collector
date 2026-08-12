@@ -1,99 +1,102 @@
 # PatPlayer
 
-高中 AI 社团作品收集与展示平台 — 适合部署在云端的轻量级学生作品提交与管理系统。
+高中 AI 社团**作品收集与展示平台**。从零实现（不依赖任何历史仓库代码），技术栈：**Node.js + Express + MySQL + 原生前端**。
 
-核心目标：为班级/年级提供一个简单、安全的作品提交入口与班级作品墙，支持拖拽上传、多文件、按班级/姓名浏览与下载。
+## 功能
 
-状态
-- 当前仓库基于 Astro + MDUI2 + Netlify Serverless（Netlify Functions + Netlify Blobs）。项目已经移除了 Supabase，存储与用户信息均使用 Netlify Blobs 实现；README 已更新以匹配当前代码结构与运行方式。
-- 注意：仓库中存在几个会导致本地/CI 构建失败的重复/多余代码（详见 Troubleshooting）。在合并部署前请先修复这些问题或让我代为修复。
+| 模块 | 功能 |
+| --- | --- |
+| 认证 | 注册（班级 + 姓名 + 学号后 4 位，初始密码 `123456`）、登录、当前用户、修改密码（需旧密码，新密码 ≥ 4 位）、首次登录强制改密 |
+| 班级白名单 | 高二 2501–2524（24 班）、高一 2601–2625（25 班） |
+| 令牌 | HMAC-SHA256 签名 + base64url，24h 过期，`Authorization: Bearer` 携带 |
+| 个人文件 | multipart 上传（多文件、拖拽、按文件进度、失败跳过）、列表、下载、删除（二次确认） |
+| 扩展名白名单 | 约 50 种：图片 / 视频 / 音频 / Office / 压缩包 / 代码 / 3D |
+| 班级作品墙 | 仅本班，按姓名分组卡片，文件倒序，按姓名 / 文件名实时搜索，逐文件下载 |
+| 全校总览 | 统计卡片 + 每班卡片（学生数 / 文件数 / 总大小），可展开学生与文件明细 |
 
-主要特性
-- 学生注册/登录（班级 + 姓名 + 学号后4位，基于 Netlify Blobs 的本地账户系统）
-- 拖拽批量上传文件，上传进度与文件管理（查看、下载、删除）
-- 班级作品墙与全校提交总览（按班级→姓名 分层）
-- 简单的 Token 认证与访问控制（Netlify Functions 端）
-- 可部署到 Netlify（静态 + Netlify Functions）；无需外部数据库（Supabase 已移除）
+## 技术栈
 
-技术栈
-- 语言：Astro (页面模板) + JavaScript
-- 运行/框架：Astro v4.x（Netlify adapter）
-- 关键依赖：@astrojs/netlify、@astrojs/tailwind、mdui、@netlify/blobs、tailwindcss
-- 部署：Netlify（前端 + Functions），数据/用户信息使用 Netlify Blobs
+- **后端**：Express 4 + `mysql2` + `multer`；密码用 Node 内置 `scrypt`（加盐哈希），令牌用内置 `crypto` HMAC。
+- **存储**：本地文件系统 `storage/uploads/`，MySQL 存元数据。
+- **前端**：原生 HTML/CSS/JS，hash 路由 SPA，无构建步骤；响应式（桌面左 rail + 移动端底部 app bar）。
 
-快速开始（本地开发）
-前置：
-- Node.js 18+（推荐 18/20）
-- npm 或 pnpm
-- Netlify 账号（若要部署）
+## 目录结构
 
-克隆并运行：
+```
+server/
+  index.js          入口（路由挂载 / 静态托管 / SPA 回退）
+  config.js         班级与扩展名白名单、端口、大小上限、存储路径
+  db.js             mysql2 连接池（dateStrings 直返字符串，规避时区偏移）
+  schema.sql        users / files 建表
+  init-db.js        建表 + 建存储目录
+  middleware/auth.js Bearer 鉴权中间件
+  routes/auth.js    注册 / 登录 / me / 改密
+  routes/files.js   上传 / 列表 / 下载 / 删除
+  routes/class.js   班级墙 / 全校总览
+  utils/            token、password、async、rateLimit
+public/
+  index.html        SPA 壳
+  css/style.css
+  js/{app,api,utils,nav,auth,dashboard,class-wall,overview}.js
+storage/uploads/    上传文件（已 gitignore）
+```
+
+## 本地开发
+
 ```bash
-git clone https://github.com/CookieTZH/PatPlayer.git
-cd PatPlayer
+# 1. 准备 MySQL（库 pat / 用户 pat），并配置环境变量
+cp .env.example .env    # 按需修改 DB_* 与 TOKEN_SECRET
+
+# 2. 安装依赖 + 建表
 npm install
-# 将环境变量复制并编辑
-cp .env.example .env
-# 填入 TOKEN_SECRET 或在 Netlify 环境变量中设置
-npm run dev
+npm run init-db
+
+# 3. 启动
+npm run dev            # 或 npm start
 ```
 
-默认本地地址： http://localhost:4321
+默认监听 `http://127.0.0.1:3001`。
 
-构建与预览：
-```bash
-npm run build
-npm run preview
-```
+## 环境变量
 
-必需环境变量
-在仓库根目录创建 `.env`（或在 Netlify 中设置相应环境变量）：
-```env
-# 用于 HMAC token 的签名密钥；生产环境请设置为强随机值
-TOKEN_SECRET=your-random-secret-change-me
-```
+| 变量 | 说明 | 默认 |
+| --- | --- | --- |
+| `PORT` | 监听端口 | `3001` |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | MySQL 连接 | `127.0.0.1` / `3306` / `pat` / `pat` / — |
+| `TOKEN_SECRET` | 令牌签名密钥，**生产务必设强随机值** | —（无硬编码默认） |
+| `MAX_UPLOAD_MB` | 上传大小上限 | `200` |
+| `MAX_USER_STORAGE_MB` | 每用户存储配额 | `2048` |
+| `STORAGE_DIR` | 文件存储目录 | `storage/uploads` |
 
-存储与数据库说明
-- 本项目当前不依赖外部数据库。用户账号、文件元数据与二进制文件均存储在 Netlify Blobs（通过 @netlify/blobs 的 getStore API）。
-- 如果你希望迁移到 Supabase / Postgres 或其他数据库，请告知，我可以帮忙迁移并同步更新函数代码与 README。
+## API
 
-Netlify 部署（简要）
-1. 将代码推送到 GitHub。  
-2. 在 Netlify 中选择 “Import from Git” → 选择本仓库。  
-3. 设置构建命令：`npm run build`，发布目录：通常为 `dist`（如有差异请确认 Astro 输出目录）。  
-4. 在 Netlify 的环境变量设置中填入 TOKEN_SECRET（或其他自定义变量）。  
-5. 若使用 Netlify Functions，请确认 `netlify/` 目录及 `netlify.toml` 配置正确。
+| 方法 | 路径 | 鉴权 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/auth/register` | — | 注册并返回 token |
+| POST | `/api/auth/login` | — | 登录 |
+| GET | `/api/auth/me` | Bearer | 当前用户 |
+| POST | `/api/auth/change-password` | Bearer | 改密 |
+| POST | `/api/files/upload` | Bearer | multipart 单文件（`file` 字段） |
+| GET | `/api/files` | Bearer | 本人文件列表 |
+| GET | `/api/files/download/:id` | Bearer | 下载（本人 + 同班） |
+| DELETE | `/api/files/:id` | Bearer | 删除（仅本人） |
+| GET | `/api/class/wall` | Bearer | 本班作品墙 |
+| GET | `/api/class/overview` | Bearer | 全校总览 |
 
-项目结构（概览）
-```
-src/
-  layouts/        全局布局（MDUI2 引入、全局工具函数）
-  pages/          页面 (index.astro 登录页、dashboard 等)
-  components/     可复用组件（按钮、列表等）
-netlify/
-  functions/      Serverless API（auth/files/class 等，使用 Netlify Blobs）
-astro.config.mjs Astro 配置（Netlify adapter）
-netlify.toml     Netlify 部署配置
-.env.example     环境变量模板
-package.json
-```
+## 部署（宝塔 + PM2 + nginx）
 
-如何贡献 / 修改
-- 若要修复 UI 或后端逻辑，建议在分支上提交改动并创建 PR，CI 通过后合并。
-- 我可以帮助提交 README 的改动，或修复仓库中明显导致编译失败的问题并创建 PR。
+1. **时区**：`timedatectl set-timezone Asia/Shanghai`（时间显示以数据库墙钟时间为准，请确保机器为北京时间）。
+2. 上传代码，`npm install --production`，`npm run init-db`。
+3. 配置 `.env`（生产库名/账号、强随机 `TOKEN_SECRET`，并设 `NODE_ENV=production` 以启用密钥 fail-fast）。
+4. PM2 启动：`pm2 start server/index.js --name patplayer`（新增进程后 `pm2 save`）。
+5. nginx 反代 `80/443 → 127.0.0.1:3001`；`client_max_body_size` 需 ≥ `MAX_UPLOAD_MB`（例如 `200m`）。
 
-Troubleshooting（需要优先修复的两处）
-1. src/layouts/Layout.astro 中存在重复的闭合标签（两个 `</body></html>`），请保留一组闭合标签并删除多余部分，重复闭合会导致 SSR/构建问题。文件路径：`src/layouts/Layout.astro`。
+## 安全说明
 
-2. src/pages/index.astro 包含重复与冲突的 `<script>` 内容（页面内部有两份相似/重复的脚本段落与重复的 DOM 操作），这会导致运行时错误或编译失败。请合并脚本逻辑并删除重复段落，确保每个 DOM 元素仅被定义/监听一次。文件路径：`src/pages/index.astro`。
-
-许可
-- MIT
-
-附录：仓库中主要文件（快速参考）
-- package.json — 脚本：dev/build/preview；依赖列在其中
-- astro.config.mjs — Astro 配置
-- netlify.toml — Netlify 部署设置
-- netlify/functions/*.mjs — 认证与文件 API（基于 Netlify Blobs）
-- src/layouts/Layout.astro — 全局布局（含全局工具函数）
-- src/pages/index.astro — 登录/注册页面（含前端表单与脚本）
+- 密码 `scrypt` 加盐哈希；令牌 HMAC 签名、24h 过期；`TOKEN_SECRET` 无硬编码默认值，生产环境缺失/示例值会拒绝启动。
+- **首次登录强制改密**：新账户 `must_change_password=1`，登录后须先设置非默认密码；禁止改回 `123456`。
+- **登录凭据不泄露**：班级墙 / 全校总览只返回姓名与班级，**不返回学号后 4 位**（登录三元组不完整）。
+- 登录 / 注册 / 改密均内置进程内速率限制（单机够用；多实例请接 Redis）。
+- 上传按扩展名白名单 + 单文件大小上限 + **每用户存储配额**三重校验；文件名清洗控制字符与非法字符。
+- 下载按「本人 + 同班」鉴权，跨班 `403`；删除仅本人。
+- 落盘文件名用 `uuid`，原始文件名仅存于元数据，避免路径穿越。

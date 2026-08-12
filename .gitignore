@@ -1,6 +1,8 @@
 node_modules/
-dist/
-.netlify/
 .env
-*.db
-*.db-journal
+storage/
+*.log
+*.swp
+.DS_Store
+.reasonix/
+npm-debug.log*

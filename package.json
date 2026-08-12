@@ -1,23 +1,21 @@
 {
   "name": "patplayer",
-  "version": "2.0.0",
-  "description": "高中AI社团作品收集管理系统",
-  "type": "module",
+  "version": "3.0.0",
+  "private": true,
+  "description": "高中 AI 社团作品收集与展示平台（从零重构版）",
+  "main": "server/index.js",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview"
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "init-db": "node server/init-db.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
-    "@astrojs/netlify": "^5.4.0",
-    "@astrojs/tailwind": "^5.1.0",
-    "@netlify/blobs": "^7.4.0",
-    "astro": "^4.15.0",
-    "mdui": "^2.1.5",
-    "tailwindcss": "^3.4.0"
-  },
-  "allowScripts": {
-    "esbuild@0.21.5": true,
-    "sharp@0.33.5": true
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^2.0.1",
+    "mysql2": "^3.11.0"
   }
 }

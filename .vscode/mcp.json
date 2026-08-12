@@ -1,8 +1,0 @@
-{
-  "servers": {
-    "mdui": {
-      "command": "npx",
-      "args": ["-y", "@mdui/mcp"]
-    }
-  }
-}
