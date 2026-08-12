@@ -289,8 +289,8 @@ Views.files = () => {
     openModal(`
       <h3 class="modal-title">提交轻应用</h3>
       <div class="form-error" id="app-submit-error"></div>
-      <div class="field"><label>应用名称</label><input id="app-title" type="text" value="${escapeHtml(title)}" maxlength="255" /></div>
-      <div class="field"><label>应用链接</label><input id="app-url" type="text" value="${escapeHtml(appUrl)}" readonly /></div>
+      <div class="field"><label>应用名称（必填）</label><input id="app-title" type="text" value="${escapeHtml(title)}" maxlength="255" placeholder="请输入应用名称" /></div>
+      <div class="field"><label>应用链接（不可改）</label><input id="app-url" type="text" value="${escapeHtml(appUrl)}" readonly /></div>
       <div class="field"><label>应用简介（选填）</label><input id="app-desc" type="text" maxlength="2000" placeholder="一句话介绍这个应用" /></div>
       <div class="field"><label>玩法（选填）</label><input id="app-gameplay" type="text" maxlength="2000" placeholder="怎么玩" /></div>
       <div class="modal-actions">
@@ -301,10 +301,16 @@ Views.files = () => {
     document.getElementById('app-save').onclick = async () => {
       const errEl = document.getElementById('app-submit-error');
       errEl.classList.remove('show');
+      const appTitle = document.getElementById('app-title').value.trim();
+      if (!appTitle) {
+        errEl.textContent = '请输入应用名称';
+        errEl.classList.add('show');
+        return;
+      }
       try {
         await API.post('/api/apps', JSON.stringify({
           app_url: document.getElementById('app-url').value,
-          title: document.getElementById('app-title').value.trim(),
+          title: appTitle,
           description: document.getElementById('app-desc').value.trim(),
           gameplay: document.getElementById('app-gameplay').value.trim(),
           source_feed_id: feedId || '',

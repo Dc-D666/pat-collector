@@ -142,6 +142,7 @@ router.post(
     if (app_url.length > 512) return res.status(400).json({ error: '链接过长' });
 
     const title = String((req.body && req.body.title) || '').trim().slice(0, 255);
+    if (!title) return res.status(400).json({ error: '请输入应用名称' });
     const description = String((req.body && req.body.description) || '').trim().slice(0, 2000) || null;
     const gameplay = String((req.body && req.body.gameplay) || '').trim().slice(0, 2000) || null;
     const source_feed_id = String((req.body && req.body.source_feed_id) || '').trim().slice(0, 128) || null;
