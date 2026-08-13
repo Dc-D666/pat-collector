@@ -11,11 +11,15 @@ const classRoutes = require('./routes/class');
 const appRoutes = require('./routes/apps');
 const learnRoutes = require('./routes/learn');
 const pointsRoutes = require('./routes/points');
+const { startJobs } = require('./jobs');
 
 config.assertConfig();
 
 // 确保存储目录存在
 fs.mkdirSync(config.storageDir, { recursive: true });
+
+// 后台任务：过期频道置顶/精华自动回收
+startJobs();
 
 const app = express();
 app.disable('x-powered-by');

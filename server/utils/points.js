@@ -10,6 +10,11 @@ const RULES = {
   task: 20, // 完成整章所有任务（每章一次，ref_id 用 article:<id>）
   app_submit: 25, // 提交 AI 轻应用（QQ 频道，每个作品一次）
   file_submit: 50, // 提交作品文件（每个文件一次）
+  liked: 0, // （已废弃：被赞积分改由 like_receive 通过 CLI 增量发放）
+  like_give: 2, // 主动点赞他人（网页操作，每次 +2⭐，每日上限 10）
+  like_receive: 2, // 帖子被点赞（CLI 增量统计，每个赞 +2⭐，作者每日上限 30）
+  graduate: 50, // 全课程毕业（5 章全部学完+任务全完成，仅一次）
+  easter_egg: 5, // 彩蛋（连续点击顶栏积分徽章 5 次触发，仅一次）
 };
 
 /**
@@ -55,6 +60,12 @@ async function getPoints(userId) {
     task: '完成任务',
     app_submit: '提交 AI 轻应用',
     file_submit: '提交作品文件',
+    liked: '作品被点赞',
+    like_give: '点赞他人',
+    like_receive: '作品被点赞',
+    graduate: '课程毕业奖励',
+    easter_egg: '彩蛋奖励',
+    purchase: '积分商城兑换',
   };
   return {
     points: rows.length ? rows[0].points : 0,
@@ -69,4 +80,39 @@ async function getPoints(userId) {
   };
 }
 
-module.exports = { RULES, grant, getPoints };
+/**
+ * 消费积分（积分商城兑换）。事务：余额检查 → 扣分 → 记负数流水 → 写消费记录。
+ * @returns {{ok: boolean, points: number, purchase_id?: number} | {ok:false, error:string}}
+ */
+async function spend(userId, { item, cost, refType = '', refId = 0, feedId = '', feedExtra = '', title = '', expiresAt = null }) {
+  if (!cost || cost <= 0) return { ok: false, error: '参数错误' };
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.execute('SELECT points FROM users WHERE id = ? FOR UPDATE', [userId]);
+    const balance = rows.length ? Number(rows[0].points) : 0;
+    if (balance < cost) {
+      await conn.rollback();
+      return { ok: false, error: '积分不足' };
+    }
+    await conn.execute('UPDATE users SET points = points - ? WHERE id = ?', [cost, userId]);
+    await conn.execute(
+      'INSERT INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+      [userId, -cost, 'purchase', item + ':' + (refId || title || feedId || 'x')]
+    );
+    const [ins] = await conn.execute(
+      `INSERT INTO purchases (user_id, item, cost, ref_type, ref_id, feed_id, feed_extra, title, status, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+      [userId, item, cost, refType, refId, feedId, feedExtra, title, expiresAt]
+    );
+    await conn.commit();
+    return { ok: true, points: balance - cost, purchase_id: ins.insertId };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+module.exports = { RULES, grant, getPoints, spend };

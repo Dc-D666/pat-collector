@@ -6,7 +6,7 @@
 
 ## 1. 项目是什么
 
-高中 AI 社团「作品收集与展示平台」，品牌名**南中科技局**。核心能力：
+高中 AI 社团「作品收集与展示平台」，品牌名**南中科创局**。核心能力：
 
 - QQ 频道扫码登录（主）+ 无 QQ 直通（姓名+班级直接进）
 - 个人文件上传（多文件/拖拽/进度）
@@ -33,15 +33,16 @@ server/
   index.js            入口（路由挂载/静态托管/SPA 回退，监听 127.0.0.1:3001）
   config.js           班级白名单、扩展名白名单、GUILD_ID、路径、dateStrings、NFTI 跨站配置
   db.js               mysql2 连接池（dateStrings:true 直返字符串，规避时区）
-  schema.sql          建表（users/files/apps/articles/points_log/task_progress）
-  init-db.js          建表脚本（npm run init-db）
+  schema.sql          建表（users/files/apps/articles/points_log/task_progress/likes/purchases/feed_like_snapshots）
+  init-db.js          建表脚本（npm run init-db，IF NOT EXISTS 幂等，可增量建新表）
+  jobs.js             后台定时任务：过期置顶/精华自动回收（10 分钟）；帖子被赞积分按用户触发（refreshUserFeedLikes）
   middleware/auth.js  Bearer token 鉴权（requireAuth）
   routes/auth.js      无QQ直通(guest)/me/PATCH profile(展示名)/classes
   routes/auth-qq.js   QQ 扫码登录(init/poll/bind) + /status 失效检测
   routes/files.js     文件上传/列表/PATCH 元数据/下载/删除
   routes/class.js     全校作品展(wall)/总览(overview)——含 apps 混排 + display_name
   routes/apps.js      AI 轻应用 auto-scan/manual-scan/submit/list/delete
-  routes/learn.js     学AI 栏目：章节列表/文章详情/nfti-ticket/nfti-status
+  routes/learn.js     学AI 栏目：章节列表/文章详情/nfti-ticket/nfti-status/app-status/project-status/tinyid-check
   routes/points.js    积分：查询/阅读上报/任务上报(整章判定)/任务进度/排行榜
   qq/proxy.js         runCli 封装（execFile 调 CLI 二进制）
   qq/sessions.js      QQ 会话管理（每会话 HOME 隔离 + index.json 持久化 + 30天TTL）
@@ -50,15 +51,19 @@ server/
   utils/points.js     积分服务（grant 幂等发放 + 流水）
   utils/async.js, rateLimit.js
 public/
-  img/logo.png        本地 logo（QQ 频道头像，已本地化避免外链 CDN 卡加载）
   index.html          SPA 壳
   css/style.css
-  js/                 app/api/utils/nav/auth/dashboard/class-wall/overview/learn/points
+  js/                 app/api/utils/nav/auth/dashboard/class-wall/overview/learn/points/activity
+  img/                logo.png（本地化，onerror 降级"南"字）+ learn-ch1.png/learn-ch3-trae*.png/learn-ch5-skillhub.png
+  videos/ch2-create-app.mp4  第2章配套操作视频
 feed_links.py         从 BID 提取 AI 轻应用链接（用户提供）
 share_resolve.py      短链 pd.qq.com/s/xxx → BID（用户提供）
-seed-articles.js      学AI 教程入库脚本（node seed-articles.js 重跑会清空重写）
-ecosystem.config.cjs  PM2 配置
-deploy/pat.weaxi.cn.conf  nginx 反代配置（含 www 301 归一化）
+seed-articles.js      学AI 教程入库脚本（node seed-articles.js，按 slug 幂等 upsert：保留原 id，
+                      不破坏学员 task_progress/整章积分记录；仅删除本脚本中已移除的 slug）
+ecosystem.config.cjs  PM2 配置（服务名 patplayer，fork 单实例）
+.env.example          环境变量模板（含全部配置项说明，密码类一律占位符）
+deploy/pat.weaxi.cn.conf       nginx 反代配置（HTTP 301→HTTPS、www 归一化、200m、proxy_cache off）
+deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用）
 ```
 
 ## 4. 数据库（库 pat / 用户 pat，本机 MySQL 3306）
@@ -71,6 +76,9 @@ deploy/pat.weaxi.cn.conf  nginx 反代配置（含 www 301 归一化）
 - **articles**：id, slug(唯一), chapter(章节号), title, summary, content(Markdown), **tasks(JSON 任务数组)**, sort_order, created_at, updated_at
 - **points_log**：id, user_id, amount, reason(first_login/read_article/task/app_submit/file_submit), ref_id(防重), created_at；唯一键 `(user_id, reason, ref_id)`
 - **task_progress**：id, user_id, article_id, task_index, created_at；唯一键 `(user_id, article_id, task_index)`
+- **likes**：id, user_id(点赞人), target_type(file/app), target_id, created_at；唯一键 `(user_id, target_type, target_id)`
+- **feed_like_snapshots**：id, feed_id(帖子BID), like_count(本次 prefer_count), owner_user_id, delta(增量), points_granted, created_at；**追加式**快照，每轮轮询插一行
+- **purchases**：id, user_id, item(wall_top/app_top/app_essence/title), cost, ref_type, ref_id, feed_id(帖子BID), feed_extra(JSON: create_time/author_id，取消置顶用), title(称号), status(active/expired), expires_at, created_at
 
 > 线上库有真实数据，改表用 ALTER 不要 DROP；`npm run init-db` 只在全新环境用。
 
@@ -109,9 +117,9 @@ deploy/pat.weaxi.cn.conf  nginx 反代配置（含 www 301 归一化）
 
 ### 学AI（`/api/learn` + `public/js/learn.js`）
 - 5 章教程存在 `articles` 表，正文 Markdown，**前端自研渲染器**（支持标题/列表/引用/代码块/表格/链接，先转义防 XSS）
-- 每章 `tasks` JSON 数组，任务类型：`video`(B站)、`quiz`(单选)、`action`(实操，可带 `nfti:true` 标记)
-- 文章页：阅读计时 ≥60s 上报积分；任务进度条 + 单选即时判题 + 视频/实操打卡按钮
-- 改教程内容：编辑 `seed-articles.js` 后 `node seed-articles.js`（清空重写全部）
+- 每章 `tasks` JSON 数组，任务类型：`quiz`(单选，即时判题)、`action`(实操，可带 `nfti:true` 标记)；B站视频/本地 mp4 以媒体行嵌入正文（不是独立任务类型）
+- 文章页：阅读计时 ≥60s 上报积分；任务进度条 + 单选即时判题 + 实操打卡按钮
+- 改教程内容：编辑 `seed-articles.js` 后 `node seed-articles.js`（**幂等 upsert**，按 slug 保留原 id，不清空学员进度；仅当某 slug 从脚本移除时才删除该文章）
 
 ### 积分规则（`utils/points.js` RULES）
 | 行为 | 积分 |
@@ -121,10 +129,29 @@ deploy/pat.weaxi.cn.conf  nginx 反代配置（含 www 301 归一化）
 | **完成整章所有任务**（每章一次） | 20 |
 | 提交 AI 轻应用（每个作品一次） | 25 |
 | 提交作品文件（每个文件一次） | 50 |
+| **主动点赞他人**（网页操作，每次 +2⭐，每日票数不限，点赞者每日上限 10） | 2 |
+| **帖子被点赞**（打开「我的积分」页时按用户刷新，作者每日上限 30） | 2/赞 |
+| **课程毕业**（5 章全读完+任务全完成，仅一次） | 50 |
+| **彩蛋**（连续点击顶栏积分徽章 5 次，仅一次） | 5 |
 
 - `grant()` 幂等：`points_log` 唯一键 `(user_id, reason, ref_id)` 防重复，事务内插流水+更新 `users.points`
 - 任务积分是**整章判定**：`/api/points/task` 记 `task_progress` → 该章全完成才 `grant('task','article:<id>')`
-- 排行榜 `/api/points/leaderboard`（top20 降序 + 我的排名），前端「🏆 积分榜」页
+- 排行榜 `/api/points/leaderboard`（top20 降序 + 我的排名 + 称号），前端「🏆 我的积分」页
+- 主动点赞：`/api/points/like`，**每日票数不限**，禁自赞（400），重复赞 409；点赞者 `like_give` +2⭐（每日上限 LIKE_GIVE_DAILY=10）
+- **被赞增量（关键机制）**：用户打开「我的积分」页 → 前端先调 `GET /api/points/refresh-likes`（rateLimit 60s/10 次）→ 后端 `jobs.refreshUserFeedLikes(userId)` 只遍历**该用户**带 `source_feed_id` 的 apps → 用本人 QQ 会话调 `get-feed-detail` 取 `prefer_count` → 与 `feed_like_snapshots` 上次快照对比，**只发增量**（delta×2⭐，`like_receive`，作者每日上限 30）→ 追加快照行（ref_id=`feed:<feed_id>:<snapId>` 防重）。**首次建立基线不补发历史赞**；无有效会话直接跳过（前端提示重新扫码登录）。CLI 耗时约 0.7s/帖，页面串行 await 刷新后再拉积分
+- 彩蛋：前端 `app.js` 事件委托监听 `.points-badge` 连点 5 次（2s 窗口）→ `POST /api/points/easter-egg`（幂等 once）
+
+### 积分商城（已下架：前端无入口，后端接口+定时回收保留，待重新上架）
+| 商品 | 价格 | 说明 |
+| --- | --- | --- |
+| 作品展置顶 24h（wall_top） | 100 | 站内自动：class.js wall 排序置顶 + 前端 🔥 徽标 |
+| 频道帖子置顶 24h（app_top） | 150 | CLI `feed top-feed --action=1`（需 QQ 会话+管理权限） |
+| 频道精华 24h（app_essence） | 100 | CLI `feed set-feed-essence --action=1` |
+| 专属称号 30 天（title） | 60 | 作品展/总览/排行榜展示 title_tag |
+
+- `spend()` 事务：余额 `FOR UPDATE` → 扣分 → 负数流水 → 写 `purchases`
+- 频道类兑换**先执行 CLI 成功才扣分**（失败返回错误不扣）；24h 到期由 `server/jobs.js` 每 10 分钟扫描 `expires_at` 过期项自动取消（top-feed action=2 / set-feed-essence action=2）并标 expired；**无有效会话时无法自动取消，会标记 expired 并提示人工处理**
+- CLI 命令参数（已实测 schema）：`top-feed` 需 `--feed-id --user-id --create-time --guild-id --action 1|2`；`set-feed-essence` 需 `--feed-id --action 1|2`
 
 ### 跨站体验（第1章实操任务 → NFTI）
 - **机制**：PatPlayer 签 HMAC ticket（`GET /api/learn/nfti-ticket`，含 tiny_id+pat_sid+5min 过期）→ 前端跳 `https://nfti.weaxi.cn/?pat_ticket=...` → NFTI 校验后建"借用会话"
@@ -163,7 +190,7 @@ deploy/pat.weaxi.cn.conf  nginx 反代配置（含 www 301 归一化）
 21. **logo 用外链 CDN 会卡加载**：腾讯图片 CDN（groupprohead.gtimg.cn）在部分网络下慢/被墙，已本地化到 `public/img/logo.png` 并加 `onerror` 降级为"南"字
 22. **nginx 413 拦截**：超 200MB 文件被 nginx `client_max_body_size 200m` 拦截返回 HTML 413（前端解析失败显示"请求失败 (413)"）；前端已做上传前预检（大小上限从 `/api/auth/me` 下发）+ api.js 对 413 给固定中文文案
 23. **证书 www 子域**：证书 SAN 已含 `www.pat.weaxi.cn`（重签），nginx 配置 www → 301 归一化到不带 www；`deploy/pat.weaxi.cn.conf` 是源，改完 `cp` 到宝塔目录 + `nginx -t && reload`
-24. **`middleware/auth.js` 的 SELECT 必须包含新列**：加 `points` 列时若漏查，`req.user.points` 恒 undefined → 排行榜 `me.points` 恒 0（积分榜显示错误）。加列后同步 middleware SELECT
+24. **`middleware/auth.js` 的 SELECT 必须包含新列**：加 `points` 列时若漏查，`req.user.points` 恒 undefined → 排行榜 `me.points` 恒 0（我的积分页显示错误）。加列后同步 middleware SELECT
 25. **任务上报失败要可见**：前端 `reportTask` 不能静默吞错（`catch {}`）——失败时按钮已置灰但服务端没记录，用户以为完成了。失败要 toast + 回滚按钮状态允许重试
 26. **`poll` 的 `token_obtained` 快捷分支要检查 tiny_id**：已授权但 tiny_id 反查失败时，下一次 poll 不能直接返回 `authorized`（会弹 bind 表单 → bind 又报错），必须重查 tiny_id，仍失败返回 `pending_authorization` + 明确错误
 27. **B站视频链接获取**：`search.bilibili.com` 直接 curl 会被反爬（412），需带浏览器 UA + Referer；`api.bilibili.com/x/web-interface/view?bvid=` 可验证 BV 有效性（标题/时长/UP主）。教程任务里的 BV 号失效需更新 `seed-articles.js` 重跑
@@ -176,7 +203,7 @@ deploy/pat.weaxi.cn.conf  nginx 反代配置（含 www 301 归一化）
 - **nginx**：`/www/server/panel/vhost/nginx/pat.weaxi.cn.conf`（反代 3001，`client_max_body_size 200m`）
 - **SSL**：certbot webroot 模式（`/var/www/certbot`），证书 `/etc/letsencrypt/live/pat.weaxi.cn`（SAN 含 www）
 - **NFTI**：`/home/nfti/NF-BTI`（Docker，backend 9000 + nginx 8081→80），与 PatPlayer 共享 MySQL、共享频道；**backend 容器只读挂载 `/home/PatPlayer/storage/qq-sessions → /patplayer-sessions:ro`**
-- `.env`（生产，已 gitignore）：`NODE_ENV=production`、强随机 `TOKEN_SECRET`、DB 连接、**`PAT_TICKET_SECRET`（与 NFTI docker-compose 一致）+ `NFTI_DB_*` 只读连接**
+- `.env`（生产，已 gitignore）：`NODE_ENV=production`、强随机 `TOKEN_SECRET`、DB 连接、**`PAT_TICKET_SECRET`（与 NFTI docker-compose 一致）+ `NFTI_DB_*` 只读连接**；配置项模板见仓库 `.env.example`（全部占位符，可安全提交）
 
 ## 10. 常用运维命令
 
@@ -194,7 +221,7 @@ nginx -t && nginx -s reload
 # 看日志
 pm2 logs patplayer --lines 50 --nostream
 
-# 重写学AI 教程（seed-articles.js 是唯一数据源）
+# 更新学AI 教程（seed-articles.js 是唯一数据源；幂等 upsert，不清空学员进度）
 node seed-articles.js
 
 # 重建 NFTI（跨站体验依赖它）

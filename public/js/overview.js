@@ -64,7 +64,7 @@ Views.overview = async () => {
                 <div class="student-files">
                   ${(s.apps || []).map((a) => `
                     <div class="file-row">
-                      <div class="file-icon" style="width:32px;height:32px;font-size:16px;background:#ede9fe;">🤖</div>
+                      <div class="file-icon" style="width:32px;height:32px;font-size:16px;background:#EDE6D6;">🤖</div>
                       <div class="file-info">
                         <div class="file-name">${escapeHtml(a.title || 'AI 轻应用')}</div>
                         <div class="file-meta">${escapeHtml(a.description || '')}${a.gameplay ? ' · ' + escapeHtml(a.gameplay) : ''}</div>

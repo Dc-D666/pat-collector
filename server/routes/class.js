@@ -13,7 +13,7 @@ function displayNameOf(row) {
   return row.show_real_name !== 0 ? row.real_name : (row.nickname || row.real_name);
 }
 
-function groupByStudent(fileRows, appRows) {
+function groupByStudent(fileRows, appRows, titleMap) {
   const map = new Map();
   for (const r of fileRows) {
     if (!map.has(r.user_id)) {
@@ -21,6 +21,7 @@ function groupByStudent(fileRows, appRows) {
         user_id: r.user_id,
         real_name: r.real_name,
         display_name: displayNameOf(r),
+        title_tag: (titleMap && titleMap.get(r.user_id)) || '',
         files: [],
         apps: [],
       });
@@ -39,6 +40,7 @@ function groupByStudent(fileRows, appRows) {
         user_id: r.user_id,
         real_name: r.real_name,
         display_name: displayNameOf(r),
+        title_tag: (titleMap && titleMap.get(r.user_id)) || '',
         files: [],
         apps: [],
       });
@@ -64,6 +66,7 @@ function groupByStudent(fileRows, appRows) {
       user_id: s.user_id,
       real_name: s.real_name,
       display_name: s.display_name,
+      title_tag: s.title_tag,
       file_count: s.files.length,
       app_count: s.apps.length,
       last_submit: last,
@@ -93,6 +96,23 @@ router.get(
       ),
     ]);
 
+    // 点赞聚合 + 我的点赞 + 作品展置顶（purchases）+ 生效中的专属称号
+    const [likeAgg, myLikes, tops, titles] = await Promise.all([
+      query('SELECT target_type, target_id, COUNT(*) AS cnt FROM likes GROUP BY target_type, target_id'),
+      query('SELECT target_type, target_id FROM likes WHERE user_id = ?', [req.user.id]),
+      query(
+        "SELECT ref_type, ref_id FROM purchases WHERE item = 'wall_top' AND status = 'active' AND expires_at > NOW()"
+      ),
+      query(
+        "SELECT user_id, title FROM purchases WHERE item = 'title' AND status = 'active' AND expires_at > NOW()"
+      ),
+    ]);
+    const likeMap = new Map();
+    for (const l of likeAgg) likeMap.set(l.target_type + ':' + l.target_id, Number(l.cnt));
+    const likedSet = new Set(myLikes.map((l) => l.target_type + ':' + l.target_id));
+    const topSet = new Set(tops.map((t) => t.ref_type + ':' + t.ref_id));
+    const titleMap = new Map(titles.map((t) => [t.user_id, t.title]));
+
     const projects = [];
     for (const r of fileRows) {
       projects.push({
@@ -102,6 +122,7 @@ router.get(
         class_name: r.class_name,
         grade: config.gradeOf(r.class_name),
         display_name: displayNameOf(r),
+        title_tag: titleMap.get(r.user_id) || '',
         title: r.title || r.original_name,
         original_name: r.original_name,
         description: r.description,
@@ -110,6 +131,9 @@ router.get(
         time: r.uploaded_at,
         is_mine: r.user_id === req.user.id,
         same_class: r.class_name === req.user.class_name,
+        like_count: likeMap.get('file:' + r.file_id) || 0,
+        liked_by_me: likedSet.has('file:' + r.file_id),
+        topped: topSet.has('file:' + r.file_id),
       });
     }
     for (const r of appRows) {
@@ -120,6 +144,7 @@ router.get(
         class_name: r.class_name,
         grade: config.gradeOf(r.class_name),
         display_name: displayNameOf(r),
+        title_tag: titleMap.get(r.user_id) || '',
         title: r.title || 'AI 轻应用',
         app_url: r.app_url,
         description: r.description,
@@ -127,10 +152,16 @@ router.get(
         time: r.created_at,
         is_mine: r.user_id === req.user.id,
         same_class: r.class_name === req.user.class_name,
+        like_count: likeMap.get('app:' + r.app_id) || 0,
+        liked_by_me: likedSet.has('app:' + r.app_id),
+        topped: topSet.has('app:' + r.app_id),
       });
     }
-    // 按时间倒序混排
-    projects.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
+    // 排序：置顶项优先，其余按时间倒序
+    projects.sort((a, b) => {
+      if (a.topped !== b.topped) return a.topped ? -1 : 1;
+      return a.time < b.time ? 1 : a.time > b.time ? -1 : 0;
+    });
 
     res.json({ class_name: req.user.class_name, projects });
   })
@@ -179,8 +210,13 @@ router.get(
       classMap.get(r.class_name).appRows.push(r);
     }
 
+    const titles = await query(
+      "SELECT user_id, title FROM purchases WHERE item = 'title' AND status = 'active' AND expires_at > NOW()"
+    );
+    const titleMap = new Map(titles.map((t) => [t.user_id, t.title]));
+
     const classes = [...classMap.values()].map((c) => {
-      const students = groupByStudent(c.fileRows, c.appRows);
+      const students = groupByStudent(c.fileRows, c.appRows, titleMap);
       const fileCount = students.reduce((n, s) => n + s.file_count, 0);
       const appCount = students.reduce((n, s) => n + s.app_count, 0);
       const size = students.reduce(
@@ -203,6 +239,7 @@ router.get(
           user_id: s.user_id,
           real_name: s.real_name,
           display_name: s.display_name,
+          title_tag: s.title_tag,
           file_count: s.file_count,
           app_count: s.app_count,
           total_size: s.files.reduce((m, f) => m + Number(f.size), 0),

@@ -3,15 +3,16 @@
 // 导航：桌面左 rail + 移动端顶部栏 + 底部 app bar
 window.Nav = (() => {
   const ITEMS = [
-    { hash: '#/files', icon: '🗂️', label: '我的文件', key: 'files' },
+    { hash: '#/activity', icon: '🎉', label: '活动简介', key: 'activity' },
+    { hash: '#/learn', icon: '🎓', label: 'AI 小学堂', key: 'learn' },
     { hash: '#/class-wall', icon: '🏫', label: '全校作品展', key: 'class-wall' },
-    { hash: '#/overview', icon: '📊', label: '提交总览', key: 'overview' },
-    { hash: '#/learn', icon: '🤖', label: '学AI', key: 'learn' },
-    { hash: '#/points', icon: '🏆', label: '积分榜', key: 'points' },
+    { hash: '#/files', icon: '🗂️', label: '我的项目', key: 'files' },
+    { hash: '#/points', icon: '🏆', label: '我的积分', key: 'points' },
   ];
 
   function currentKey() {
     const h = location.hash || '#/files';
+    if (h.startsWith('#/activity')) return 'activity';
     if (h.startsWith('#/class-wall')) return 'class-wall';
     if (h.startsWith('#/overview')) return 'overview';
     if (h.startsWith('#/learn')) return 'learn';
@@ -28,7 +29,7 @@ window.Nav = (() => {
 
     document.getElementById('rail').innerHTML = `
       <div class="brand">
-        <img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><span class="brand-name">南中科技局</span>
+        <img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><span class="brand-name">南中科创局</span>
       </div>
       <nav class="rail-nav">
         ${ITEMS.map((it) => `
@@ -44,15 +45,14 @@ window.Nav = (() => {
         </div>
         <span class="points-badge" title="我的积分">⭐ ${u.points || 0}</span>
       </div>
-      <button class="logout-btn" title="退出登录">⎋ 退出登录</button>
     `;
 
     document.getElementById('topbar').innerHTML = `
-      <div class="topbar-title">南中科技局</div>
+      <div class="topbar-title"><img class="brand-logo" src="/img/logo.png" alt="" onerror="this.remove()" style="width:24px;height:24px;border-radius:8px;" />南中科创局</div>
       <div style="display:flex;align-items:center;gap:10px;">
         <span class="points-badge" title="我的积分">⭐ ${u.points || 0}</span>
         <div class="topbar-user">${u.class_name ? escapeHtml(u.class_name + '班 ' + displayName) : ''}</div>
-        <button class="logout-btn" title="退出登录">⎋ 退出</button>
+        <button class="logout-btn" title="退出登录">退出</button>
       </div>`;
 
     document.getElementById('appbar').innerHTML = ITEMS.map((it) => `
@@ -61,7 +61,12 @@ window.Nav = (() => {
       </a>`).join('');
 
     document.querySelectorAll('.logout-btn').forEach((btn) => {
-      btn.onclick = () => { API.clearToken(); location.hash = '#/login'; };
+      btn.onclick = async () => {
+        const yes = await Utils.confirm('确定要退出登录吗？');
+        if (!yes) return;
+        API.clearToken();
+        location.hash = '#/login';
+      };
     });
   }
 

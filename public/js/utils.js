@@ -38,17 +38,17 @@ window.Utils = (() => {
 
   // 扩展名 → 图标类别
   const ICON_RULES = [
-    [/^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?|heic)$/, { emoji: '🖼️', color: '#eef2ff' }],
-    [/^(mp4|mov|avi|mkv|webm|flv|wmv|m4v)$/, { emoji: '🎬', color: '#fee2e2' }],
-    [/^(mp3|wav|flac|aac|ogg|m4a|wma)$/, { emoji: '🎵', color: '#ede9fe' }],
-    [/^(doc|docx)$/, { emoji: '📄', color: '#dbeafe' }],
-    [/^(xls|xlsx|csv)$/, { emoji: '📊', color: '#dcfce7' }],
-    [/^(ppt|pptx)$/, { emoji: '📽️', color: '#ffedd5' }],
-    [/^pdf$/, { emoji: '📕', color: '#fee2e2' }],
-    [/^(zip|rar|7z|tar|gz)$/, { emoji: '🗜️', color: '#fef3c7' }],
-    [/^(py|js|ts|c|cpp|java|html|css|json|ipynb)$/, { emoji: '💻', color: '#ccfbf1' }],
-    [/^(stl|obj|glb|gltf|fbx|blend)$/, { emoji: '📦', color: '#f3e8ff' }],
-    [/^(txt|md)$/, { emoji: '📝', color: '#f1f5f9' }],
+    [/^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?|heic)$/, { emoji: '🖼️', color: '#F3ECDD' }],
+    [/^(mp4|mov|avi|mkv|webm|flv|wmv|m4v)$/, { emoji: '🎬', color: '#FBE7E2' }],
+    [/^(mp3|wav|flac|aac|ogg|m4a|wma)$/, { emoji: '🎵', color: '#F3E8DC' }],
+    [/^(doc|docx)$/, { emoji: '📄', color: '#F0E6D6' }],
+    [/^(xls|xlsx|csv)$/, { emoji: '📊', color: '#E7EFDC' }],
+    [/^(ppt|pptx)$/, { emoji: '📽️', color: '#F9E8D8' }],
+    [/^pdf$/, { emoji: '📕', color: '#FCE8E4' }],
+    [/^(zip|rar|7z|tar|gz)$/, { emoji: '🗜️', color: '#F7EFD8' }],
+    [/^(py|js|ts|c|cpp|java|html|css|json|ipynb)$/, { emoji: '💻', color: '#E4EFE4' }],
+    [/^(stl|obj|glb|gltf|fbx|blend)$/, { emoji: '📦', color: '#EFE7DE' }],
+    [/^(txt|md)$/, { emoji: '📝', color: '#F2EDE4' }],
   ];
 
   function getFileIcon(name) {
@@ -56,7 +56,7 @@ window.Utils = (() => {
     for (const [re, icon] of ICON_RULES) {
       if (re.test(ext)) return icon;
     }
-    return { emoji: '📎', color: '#f1f5f9' };
+    return { emoji: '📎', color: '#F2EDE4' };
   }
 
   // ---- 弹窗 ----

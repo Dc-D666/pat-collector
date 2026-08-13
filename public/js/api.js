@@ -26,7 +26,18 @@ window.API = (() => {
     if (opts.body && !(opts.body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
     }
-    const res = await fetch(path, { ...opts, headers });
+    // 请求超时（15s）：网络挂起时给出明确错误，避免界面无限等待（如我的积分页 spinner 一直转）
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    let res;
+    try {
+      res = await fetch(path, { ...opts, headers, signal: controller.signal });
+    } catch (e) {
+      clearTimeout(timer);
+      if (e && e.name === 'AbortError') throw new Error('请求超时，请检查网络后重试');
+      throw new Error('网络错误，请稍后重试');
+    }
+    clearTimeout(timer);
     // 只有携带了 Bearer token 的请求收到 401 才视为「登录过期」；扫码登录流程（无 token）的 401 是业务态错误，原样抛出
     if (res.status === 401 && hadToken) {
       goLogin();
@@ -55,9 +66,20 @@ window.API = (() => {
   // 下载：fetch → blob → 触发浏览器保存；统一走 Authorization 头
   async function download(fileId, filename) {
     const token = getToken();
-    const res = await fetch('/api/files/download/' + fileId, {
-      headers: { Authorization: 'Bearer ' + token },
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    let res;
+    try {
+      res = await fetch('/api/files/download/' + fileId, {
+        headers: { Authorization: 'Bearer ' + token },
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      if (e && e.name === 'AbortError') throw new Error('下载超时，请重试');
+      throw new Error('网络错误，请稍后重试');
+    }
+    clearTimeout(timer);
     if (res.status === 401) { goLogin(); throw new Error('登录已过期'); }
     if (!res.ok) {
       let msg = '下载失败';

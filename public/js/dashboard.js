@@ -1,24 +1,12 @@
 'use strict';
 
-// 我的文件视图：上传 / 列表 / 下载 / 删除 + AI 轻应用收集
+// 我的项目视图：项目文件（上传/列表/下载/删除/补齐信息）+ AI 轻应用收集（识别/提交）
+// 两个功能域以 Tab 分隔，展示设置收进页头按钮；QQ 失效横幅由 app.js 全局处理
 window.Views = window.Views || {};
 Views.files = () => {
   const { escapeHtml, formatSize, formatTime, getFileIcon, confirm, toast, openModal, closeModal } = Utils;
   const view = document.getElementById('view');
   const isQqBound = !!(API.getUser() && API.getUser().is_qq_bound);
-
-  // QQ 用户：顶部最显眼的自动识别入口；非 QQ 用户不渲染（上传区自然在最上）
-  const topBanner = isQqBound
-    ? `<div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,var(--primary),#7c3aed);color:#fff;border:none;box-shadow:var(--shadow);">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-          <div>
-            <div style="font-size:17px;font-weight:700;">🤖 自动识别 AI 轻应用</div>
-            <div style="font-size:13px;opacity:.92;">一键识别你最近在 QQ 频道发布的 AI 轻应用并收集</div>
-          </div>
-          <button class="btn" id="auto-scan-top-btn" style="background:#fff;color:var(--primary);border:none;font-weight:700;padding:11px 22px;font-size:15px;border-radius:12px;">开始识别</button>
-        </div>
-      </div>`
-    : '';
 
   const appsActionBtns = isQqBound
     ? `<button class="btn btn-primary btn-sm" id="auto-scan-btn">自动识别</button>
@@ -28,49 +16,70 @@ Views.files = () => {
   view.innerHTML = `
     <div class="page">
       <div class="page-head">
-        <h1 class="page-title">我的文件</h1>
-        <div class="page-sub">${isQqBound ? '上传程序文件，或自动收集你的 AI 轻应用' : '拖拽或点击上传，仅本人可见'}</div>
+        <h1 class="page-title">我的项目</h1>
+        <div class="page-sub">${isQqBound ? '上传项目文件，或自动收集你的 AI 轻应用' : '拖拽或点击上传，仅本人可见'}</div>
         <button class="btn btn-sm btn-ghost" id="display-settings-btn" style="margin-top:10px;">👤 展示设置</button>
       </div>
 
-      <div id="qq-expired-banner"></div>
-
-      ${topBanner}
-
-      <div class="dropzone" id="dropzone">
-        <div class="dz-icon">📤</div>
-        <div class="dz-title">点击选择 或 拖拽文件到此处</div>
-        <div class="dz-hint">支持多文件上传，失败的文件会自动跳过</div>
-        <input type="file" id="file-input" multiple style="display:none;" />
+      <div class="tabs" id="files-tabs">
+        <button class="tab-btn ${isQqBound ? 'active' : ''}" data-tab="apps">🤖 AI 轻应用</button>
+        <button class="tab-btn ${isQqBound ? '' : 'active'}" data-tab="files">📁 项目文件</button>
       </div>
 
-      <div class="card upload-queue" id="upload-queue"></div>
-
-      <div class="card">
-        <div id="file-list"><div class="spinner"></div></div>
-      </div>
-
-      <div class="card" style="margin-top:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
-          <div>
-            <h2 style="margin:0;font-size:17px;">AI 轻应用</h2>
-            <div style="font-size:12px;color:var(--text-dim);">识别你在 QQ 频道发布的 AI 轻应用并收集</div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;">${appsActionBtns}</div>
+      <!-- Tab 1：项目文件 -->
+      <div id="panel-files" style="display:${isQqBound ? 'none' : ''};">
+        <div class="dropzone" id="dropzone">
+          <div class="dz-icon">📤</div>
+          <div class="dz-title">点击选择 或 拖拽文件到此处</div>
+          <div class="dz-hint">支持多文件上传，失败的文件会自动跳过</div>
+          <input type="file" id="file-input" multiple style="display:none;" />
         </div>
-        <div id="apps-status"></div>
-        <div id="apps-list"><div class="spinner"></div></div>
+        <div class="card upload-queue" id="upload-queue"></div>
+        <div class="card">
+          <div id="file-list"><div class="spinner"></div></div>
+        </div>
+      </div>
+
+      <!-- Tab 2：AI 轻应用 -->
+      <div id="panel-apps" style="display:${isQqBound ? '' : 'none'};">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+            <div>
+              <h2 style="margin:0;font-size:17px;">识别你的 AI 轻应用</h2>
+              <div style="font-size:12px;color:var(--text-dim);">从你在 QQ 频道发布的帖子中提取应用链接，确认后提交</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">${appsActionBtns}</div>
+          </div>
+          <div id="apps-status"></div>
+          <div id="apps-list"></div>
+        </div>
       </div>
     </div>`;
+
+  // ---- Tab 切换 ----
+  const tabs = document.getElementById('files-tabs');
+  if (tabs) {
+    tabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.tab-btn');
+      if (!btn) return;
+      tabs.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      const panelFiles = document.getElementById('panel-files');
+      const panelApps = document.getElementById('panel-apps');
+      if (panelFiles) panelFiles.style.display = btn.dataset.tab === 'files' ? '' : 'none';
+      if (panelApps) panelApps.style.display = btn.dataset.tab === 'apps' ? '' : 'none';
+    });
+  }
 
   // ---- 上传交互 ----
   const dz = document.getElementById('dropzone');
   const fileInput = document.getElementById('file-input');
-  dz.onclick = () => fileInput.click();
-  fileInput.onchange = () => { uploadFiles(fileInput.files); fileInput.value = ''; };
-  ['dragenter', 'dragover'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('dragover'); }));
-  ['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('dragover'); }));
-  dz.addEventListener('drop', (e) => uploadFiles(e.dataTransfer.files));
+  if (dz) dz.onclick = () => fileInput && fileInput.click();
+  if (fileInput) fileInput.onchange = () => { uploadFiles(fileInput.files); fileInput.value = ''; };
+  if (dz) {
+    ['dragenter', 'dragover'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('dragover'); }));
+    ['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('dragover'); }));
+    dz.addEventListener('drop', (e) => uploadFiles(e.dataTransfer.files));
+  }
 
   // 上传大小上限（MB），从 /api/auth/me 获取，用于上传前预检（避免 nginx 413 直接拦截）
   let maxUploadMb = null;
@@ -99,6 +108,7 @@ Views.files = () => {
     if (!files.length) return;
     const limitMb = await getMaxUploadMb();
     const queue = document.getElementById('upload-queue');
+    if (!queue) return;
     queue.classList.add('show');
     queue.innerHTML = `
       <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
@@ -112,7 +122,7 @@ Views.files = () => {
       if (el) el.textContent = icon;
     };
     let done = 0;
-    const newFiles = []; // 本次上传成功的文件，稍后逐个填写作品信息
+    const newFiles = []; // 本次上传成功的文件，列表中以「待完善」标记，可随时补齐作品信息
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
       // 前端预检大小：超过上限直接拦截，避免 nginx 返回 HTML 413
@@ -145,13 +155,13 @@ Views.files = () => {
       bar.style.width = (done / files.length) * 100 + '%';
     }
     await loadFiles();
-    // 上传成功 → 逐个弹出「作品信息」表单（标题必填，默认文件名）
-    if (newFiles.length) await promptFileInfos(newFiles);
+    // 上传成功不强制弹表单：toast 提示，列表项带「待完善」标记，可随时编辑或一键补齐
+    if (newFiles.length) toast(`✅ 上传成功 ${newFiles.length} 个，可补充作品信息`);
   }
 
-  // 逐个为上传成功的文件填写作品信息
-  async function promptFileInfos(newFiles) {
-    for (const f of newFiles) {
+  // 逐个为文件填写作品信息（「补齐作品信息」批量入口 / 编辑入口共用）
+  async function promptFileInfos(files) {
+    for (const f of files) {
       await new Promise((resolve) => {
         showFileInfoModal(f, { onDone: resolve });
       });
@@ -162,6 +172,7 @@ Views.files = () => {
   // ---- 文件列表 ----
   async function loadFiles() {
     const list = document.getElementById('file-list');
+    if (!list) return;
     let files;
     try {
       const data = await API.get('/api/files');
@@ -171,27 +182,36 @@ Views.files = () => {
       return;
     }
     if (!files.length) {
-      list.innerHTML = `<div class="empty"><div class="empty-icon">🗂️</div>暂无文件，快来上传第一份作品吧</div>`;
+      list.innerHTML = `<div class="empty"><div class="empty-icon">🗂️</div>暂无项目，快来上传第一份作品吧</div>`;
       return;
     }
-    list.innerHTML = `<div class="file-list">${files.map((f) => {
+    const pendingCount = files.filter((f) => !(f.title && f.title.trim())).length;
+    list.innerHTML = `
+      <div class="file-list-head">
+        <span>共 ${files.length} 个项目${pendingCount ? `，${pendingCount} 个待完善` : ''}</span>
+        ${pendingCount ? `<button class="btn btn-sm btn-ghost" id="batch-fill-btn">📝 补齐作品信息（${pendingCount}）</button>` : ''}
+      </div>
+      <div class="file-list">${files.map((f) => {
       const icon = getFileIcon(f.original_name);
       const hasTitle = !!(f.title && f.title.trim());
       return `
         <div class="file-row">
           <div class="file-icon" style="background:${icon.color};">${icon.emoji}</div>
           <div class="file-info">
-            <div class="file-name">${escapeHtml(hasTitle ? f.title : f.original_name)}</div>
+            <div class="file-name">${escapeHtml(hasTitle ? f.title : f.original_name)}${hasTitle ? '' : `<span class="badge-pending">待完善</span>`}</div>
             <div class="file-meta">${hasTitle ? escapeHtml(f.original_name) + ' · ' : ''}${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>
             ${f.description ? `<div class="file-meta">${escapeHtml(f.description)}</div>` : ''}
           </div>
           <div class="file-actions">
-            <button class="btn btn-sm btn-ghost" data-edit="${f.id}">编辑</button>
+            <button class="btn btn-sm btn-ghost" data-edit="${f.id}">${hasTitle ? '编辑' : '完善'}</button>
             <button class="btn btn-sm btn-ghost" data-dl="${f.id}" data-name="${escapeHtml(f.original_name)}">下载</button>
             <button class="btn btn-sm btn-ghost" data-del="${f.id}" style="color:var(--danger);">删除</button>
           </div>
         </div>`;
     }).join('')}</div>`;
+
+    const batchBtn = document.getElementById('batch-fill-btn');
+    if (batchBtn) batchBtn.onclick = () => promptFileInfos(files.filter((f) => !(f.title && f.title.trim())));
 
     list.querySelectorAll('[data-edit]').forEach((b) => {
       b.onclick = () => {
@@ -259,20 +279,20 @@ Views.files = () => {
     const notShowReal = u.show_real_name === false || u.show_real_name === 0;
     openModal(`
       <h3 class="modal-title">展示设置</h3>
-      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">控制你的姓名是否在作品墙 / 提交总览中展示</p>
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;text-align:center;">控制你的姓名是否在作品墙 / 提交总览中展示</p>
       <div class="form-error" id="display-settings-error"></div>
       <div class="field">
         <label>是否授权展示真实姓名</label>
-        <div style="display:flex;gap:16px;margin-top:6px;">
-          <label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="radio" name="ds-show-real" value="1" ${notShowReal ? '' : 'checked'} /> 是</label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="radio" name="ds-show-real" value="0" ${notShowReal ? 'checked' : ''} /> 否，只展示昵称</label>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px;align-items:center;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="ds-show-real" value="1" ${notShowReal ? '' : 'checked'} /> 是，展示真实姓名</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="ds-show-real" value="0" ${notShowReal ? 'checked' : ''} /> 否，只展示昵称</label>
         </div>
       </div>
       <div class="field" id="ds-nickname-field" style="display:${notShowReal ? '' : 'none'};">
         <label>展示昵称</label>
         <input id="ds-nickname" type="text" maxlength="32" value="${escapeHtml(u.nickname || '')}" placeholder="作品墙上展示的昵称" />
       </div>
-      <div class="modal-actions">
+      <div class="modal-actions" style="justify-content:center;">
         <button class="btn" id="ds-cancel">取消</button>
         <button class="btn btn-primary" id="ds-save">保存</button>
       </div>`);
@@ -308,6 +328,7 @@ Views.files = () => {
   // ---- AI 轻应用 ----
   async function loadApps() {
     const list = document.getElementById('apps-list');
+    if (!list) return;
     try {
       const data = await API.get('/api/apps');
       const apps = data.apps;
@@ -339,13 +360,27 @@ Views.files = () => {
     }
   }
 
-  // 已识别但未提交的轻应用（累积，按 url 去重）
+  // 已识别但未提交的轻应用（累积，按 url 去重；localStorage 持久化，刷新不丢）
   let scanItems = [];
+  const scanStorageKey = 'pat-scanitems-' + ((API.getUser() || {}).id || 'anon');
+  function saveScanItems() {
+    try { localStorage.setItem(scanStorageKey, JSON.stringify(scanItems)); } catch (_) { /* 静默 */ }
+  }
+  function restoreScanItems() {
+    try {
+      const s = localStorage.getItem(scanStorageKey);
+      if (s) {
+        const arr = JSON.parse(s);
+        if (Array.isArray(arr)) scanItems = arr;
+      }
+    } catch (_) { scanItems = []; }
+  }
 
   function renderScanResults() {
     const status = document.getElementById('apps-status');
+    if (!status) return;
     if (!scanItems.length) {
-      status.innerHTML = `<div class="empty" style="padding:16px;">还没有识别结果</div>`;
+      status.innerHTML = `<div class="empty" style="padding:16px;">还没有识别结果，点「自动识别」从你的频道帖子中提取</div>`;
       return;
     }
     status.innerHTML = `
@@ -379,12 +414,14 @@ Views.files = () => {
         added++;
       }
     }
+    saveScanItems();
     renderScanResults();
     return added;
   }
 
   function showScanning(msg) {
     const status = document.getElementById('apps-status');
+    if (!status) return;
     status.innerHTML = `<div class="scan-loading"><div class="spinner"></div><p>${escapeHtml(msg)}</p></div>`;
   }
 
@@ -392,7 +429,7 @@ Views.files = () => {
     showScanning('正在识别你的近期帖子，可能需要一点时间…');
     try {
       const data = await API.post('/api/apps/auto-scan', JSON.stringify({}));
-      scanItems = []; // 自动识别重置结果
+      scanItems = []; // 自动识别重置结果（已提交的不受影响）
       addScanItems(data.posts || []);
       if (!scanItems.length) {
         document.getElementById('apps-status').innerHTML = `<div class="empty" style="padding:16px;">没有在近期帖子中识别到轻应用</div>`;
@@ -471,7 +508,10 @@ Views.files = () => {
         closeModal();
         toast('已提交');
         refreshPoints();
-        document.getElementById('apps-status').innerHTML = '';
+        // 提交成功 → 从识别结果移除（其余保留），持久化
+        scanItems = scanItems.filter((it) => it.url !== appUrl);
+        saveScanItems();
+        renderScanResults();
         await loadApps();
       } catch (err) {
         errEl.textContent = err.message;
@@ -482,8 +522,6 @@ Views.files = () => {
 
   const autoBtn = document.getElementById('auto-scan-btn');
   if (autoBtn) autoBtn.onclick = autoScan;
-  const topAutoBtn = document.getElementById('auto-scan-top-btn');
-  if (topAutoBtn) topAutoBtn.onclick = autoScan;
   const dsBtn = document.getElementById('display-settings-btn');
   if (dsBtn) dsBtn.onclick = showDisplaySettingsModal;
   if (isQqBound) {
@@ -491,26 +529,7 @@ Views.files = () => {
     if (manualBtn) manualBtn.onclick = manualScan;
   }
 
-  // QQ 会话失效检测：单设备登录被踢后 token 失效，提示重新登录
-  async function checkQqStatus() {
-    if (!isQqBound) return;
-    try {
-      const data = await API.get('/api/auth/qq/status');
-      if (data.valid === false) {
-        const banner = document.getElementById('qq-expired-banner');
-        if (banner) {
-          banner.innerHTML = `
-            <div style="background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:12px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-              <div style="font-size:14px;">⚠️ QQ 频道登录已失效（可能在其他设备登录了），AI 轻应用识别功能暂不可用。</div>
-              <button class="btn btn-sm" id="qq-relogin-btn" style="background:#9a3412;color:#fff;border:none;">重新登录</button>
-            </div>`;
-          document.getElementById('qq-relogin-btn').onclick = () => { API.clearToken(); location.hash = '#/login'; };
-        }
-      }
-    } catch (_) { /* 静默失败 */ }
-  }
-
+  restoreScanItems();
   loadFiles();
   loadApps();
-  checkQqStatus();
 };

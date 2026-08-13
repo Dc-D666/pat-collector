@@ -142,10 +142,12 @@ Views.login = () => {
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card">
-          <div class="auth-brand">
-            <img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" />
-            <h1>南中科技局</h1>
-            <p>高中 AI 社团 · 作品收集与展示平台</p>
+          <div class="auth-brand auth-brand-row">
+            <img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" />
+            <div class="auth-brand-text">
+              <h1>南中科创局</h1>
+              <p>高中 AI 社团 · 作品收集与展示平台</p>
+            </div>
           </div>
           <button class="btn btn-primary" id="qq-login-btn" style="width:100%;justify-content:center;padding:13px;font-size:15px;">🐧 QQ 频道登录</button>
           <div style="text-align:center;margin:14px 0;color:var(--text-dim);font-size:13px;">— 或 —</div>
@@ -180,7 +182,7 @@ Views.login = () => {
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card" style="text-align:center;">
-          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>QQ 频道登录</h1></div>
+          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>QQ 频道登录</h1></div>
           <p style="color:var(--text-dim);font-size:13px;margin:0 0 14px;">授权后即可进入系统</p>
 
           ${uri
@@ -191,10 +193,15 @@ Views.login = () => {
           <details class="qrcode-details">
             <summary>也可以用 QQ 扫码登录</summary>
             <img alt="登录二维码" src="data:image/png;base64,${initData.qrcode_base64}"
-                 style="width:180px;height:180px;border:1px solid var(--border);border-radius:12px;margin-top:8px;" />
+                 style="width:180px;height:180px;border:2px dashed var(--border);border-radius:20px;margin-top:8px;" />
           </details>
 
           <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin:12px 0;">等待授权…</div>
+          <div id="channel-join" style="display:none;margin-top:6px;padding:14px 12px;border:1px solid var(--border);border-radius:16px;background:var(--bg);">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤔 没找到你的频道身份？</div>
+            <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:150px;border-radius:12px;border:1px solid var(--border);" />
+            <div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7;">可能是还没加入频道。扫一扫加入「南方中学校友频道」后，重新扫码授权即可。</div>
+          </div>
           <button class="btn" id="qr-back" style="width:100%;justify-content:center;">返回</button>
         </div>
       </div>`;
@@ -238,6 +245,9 @@ Views.login = () => {
         statusEl.textContent = (r.status === 'pending_authorization' && r.error) ? r.error : '等待授权…';
       }
       if (r.status === 'pending_authorization' && r.error) {
+        // 身份反查失败/未加入频道：显示频道二维码引导加入（仅首次出现时展示，避免每次重绘闪烁）
+        const qrBox = document.getElementById('channel-join');
+        if (qrBox && qrBox.style.display === 'none') qrBox.style.display = '';
         // 身份反查类错误：重试有上限
         pollRetries++;
         if (pollRetries >= MAX_POLL_RETRIES) {
@@ -264,8 +274,13 @@ Views.login = () => {
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card" style="text-align:center;">
-          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>QQ 频道登录</h1></div>
+          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>QQ 频道登录</h1></div>
           <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin:16px 0;">等待授权…</div>
+          <div id="channel-join" style="display:none;margin-top:6px;padding:14px 12px;border:1px solid var(--border);border-radius:16px;background:var(--bg);">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤔 没找到你的频道身份？</div>
+            <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:150px;border-radius:12px;border:1px solid var(--border);" />
+            <div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7;">可能是还没加入频道。扫一扫加入「南方中学校友频道」后，重新扫码授权即可。</div>
+          </div>
           <button class="btn" id="qr-back" style="width:100%;justify-content:center;">重新扫码</button>
         </div>
       </div>`;
@@ -284,8 +299,13 @@ Views.login = () => {
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card">
-          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>完善信息</h1><p>QQ 登录成功，请确认你的班级与姓名</p></div>
+          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>完善信息</h1><p>QQ 登录成功，请确认你的班级与姓名</p></div>
           <div class="form-error" id="auth-error"></div>
+          <div id="channel-join" style="display:none;margin-bottom:14px;padding:14px 12px;border:1px solid var(--border);border-radius:16px;background:var(--bg);text-align:center;">
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤔 没找到你的频道身份？</div>
+            <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:150px;border-radius:12px;border:1px solid var(--border);" />
+            <div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7;">可能是还没加入频道。扫一扫加入「南方中学校友频道」后，重新扫码授权即可。</div>
+          </div>
           <div id="id-container"></div>
           <button class="btn btn-primary" id="bind-submit" style="width:100%;justify-content:center;">进入系统</button>
           <button class="btn btn-ghost" id="bind-back" style="width:100%;justify-content:center;margin-top:6px;">返回</button>
@@ -306,7 +326,12 @@ Views.login = () => {
           show_real_name: v.show_real_name, nickname: v.nickname,
         }));
         enterSystem(data);
-      } catch (err) { showError(err.message); }
+      } catch (err) {
+        showError(err.message);
+        // 身份/频道相关错误（如"无法识别你的 QQ 身份"）：展示频道二维码引导加入
+        const qrBox = document.getElementById('channel-join');
+        if (qrBox && /身份|频道|加入/.test(err.message)) qrBox.style.display = '';
+      }
     };
   }
 
@@ -316,7 +341,7 @@ Views.login = () => {
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card">
-          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>直接提交</h1><p>没有 QQ？填班级和姓名即可进入</p></div>
+          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>直接提交</h1><p>没有 QQ？填班级和姓名即可进入</p></div>
           <div class="form-error" id="auth-error"></div>
           <div id="id-container"></div>
           <button class="btn btn-primary" id="guest-submit" style="width:100%;justify-content:center;">进入系统</button>

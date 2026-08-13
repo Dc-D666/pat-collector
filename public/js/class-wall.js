@@ -62,15 +62,17 @@ Views.classWall = async () => {
 
     content.innerHTML = `<div class="wall-grid">${visible.map((p) => {
       const isFile = p.type === 'file';
-      const icon = isFile ? getFileIcon(p.original_name || '') : { emoji: '🤖', color: '#ede9fe' };
+      const icon = isFile ? getFileIcon(p.original_name || '') : { emoji: '🤖', color: '#EDE6D6' };
       const canDl = isFile && (p.is_mine || p.same_class);
+      const likeDisabled = p.is_mine || p.liked_by_me;
       return `
-        <div class="card project-card">
+        <div class="card project-card${p.topped ? ' topped' : ''}">
+          ${p.topped ? '<div class="top-badge">🔥 置顶 24h</div>' : ''}
           <div class="proj-head">
             <div class="proj-icon" style="background:${icon.color};">${icon.emoji}</div>
             <div class="proj-main">
               <div class="proj-title">${escapeHtml(p.title || (isFile ? p.original_name : 'AI 轻应用'))}</div>
-              <div class="proj-meta">${classTag(p)}<span class="proj-author">${escapeHtml(p.display_name)}</span></div>
+              <div class="proj-meta">${classTag(p)}<span class="proj-author">${escapeHtml(p.display_name)}</span>${p.title_tag ? `<span class="title-tag">${escapeHtml(p.title_tag)}</span>` : ''}</div>
             </div>
           </div>
           ${p.description ? `<div class="proj-desc">${escapeHtml(p.description)}</div>` : ''}
@@ -82,6 +84,10 @@ Views.classWall = async () => {
                 : formatTime(p.time)}
             </div>
             <div class="file-actions">
+              <button class="like-btn${p.liked_by_me ? ' liked' : ''}" data-like="${p.type}:${p.id}"
+                ${likeDisabled ? 'disabled' : ''} title="${p.is_mine ? '不能给自己点赞' : (p.liked_by_me ? '已点赞' : '点赞支持一下（+2⭐）')}">
+                ${p.liked_by_me ? '❤️' : '🤍'}<span>${p.like_count || 0}</span>
+              </button>
               ${isFile
                 ? (canDl
                     ? `<button class="btn btn-sm btn-ghost" data-dl="${p.id}" data-name="${escapeHtml(p.original_name)}">下载</button>`
@@ -96,6 +102,31 @@ Views.classWall = async () => {
       b.onclick = async () => {
         try { await API.download(b.dataset.dl, b.dataset.name); }
         catch (err) { toast(err.message); }
+      };
+    });
+
+    // 点赞：成功后按钮置为已赞态并 +1
+    content.querySelectorAll('[data-like]').forEach((b) => {
+      b.onclick = async () => {
+        if (b.disabled) return;
+        b.disabled = true;
+        const [targetType, targetId] = b.dataset.like.split(':');
+        try {
+          const r = await API.post('/api/points/like', JSON.stringify({ target_type: targetType, target_id: Number(targetId) }));
+          if (r && r.ok) {
+            b.classList.add('liked');
+            const num = b.querySelector('span');
+            num.textContent = (Number(num.textContent) || 0) + 1;
+            b.innerHTML = `❤️<span>${num.textContent}</span>`;
+            b.title = '已点赞';
+            toast('点赞成功 ❤️');
+          } else {
+            b.disabled = false;
+          }
+        } catch (err) {
+          b.disabled = false;
+          toast(err.message);
+        }
       };
     });
   }
