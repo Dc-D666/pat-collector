@@ -32,6 +32,7 @@ Views.overview = async () => {
     { label: '有提交班级', value: stats.classes_with_submissions },
     { label: '总文件数', value: stats.total_files },
     { label: '总大小', value: formatSize(stats.total_size) },
+    ...(stats.total_apps ? [{ label: 'AI 轻应用', value: stats.total_apps }] : []),
   ];
 
   const content = document.getElementById('overview-content');
@@ -55,12 +56,23 @@ Views.overview = async () => {
             ${c.students.map((s, si) => `
               <div class="student-row" id="stu-row-${ci}-${si}">
                 <button class="student-head" data-toggle="stu-${ci}-${si}">
-                  <span class="avatar" style="width:30px;height:30px;font-size:13px;">${escapeHtml(s.real_name.trim().charAt(0))}</span>
-                  <span class="stu-name">${escapeHtml(s.real_name)}</span>
-                  <span class="stu-stats">${s.file_count} 文件 · ${formatSize(s.total_size)} · ${formatTime(s.last_submit)}</span>
+                  <span class="avatar" style="width:30px;height:30px;font-size:13px;">${escapeHtml((s.display_name || s.real_name).trim().charAt(0))}</span>
+                  <span class="stu-name">${escapeHtml(s.display_name || s.real_name)}</span>
+                  <span class="stu-stats">${s.file_count} 文件${s.app_count ? ' · ' + s.app_count + ' 轻应用' : ''} · ${formatSize(s.total_size)} · ${formatTime(s.last_submit)}</span>
                   <span class="chevron">▾</span>
                 </button>
                 <div class="student-files">
+                  ${(s.apps || []).map((a) => `
+                    <div class="file-row">
+                      <div class="file-icon" style="width:32px;height:32px;font-size:16px;background:#ede9fe;">🤖</div>
+                      <div class="file-info">
+                        <div class="file-name">${escapeHtml(a.title || 'AI 轻应用')}</div>
+                        <div class="file-meta">${escapeHtml(a.description || '')}${a.gameplay ? ' · ' + escapeHtml(a.gameplay) : ''}</div>
+                      </div>
+                      <div class="file-actions">
+                        <a class="btn btn-sm btn-primary" href="${escapeHtml(a.app_url)}" target="_blank" rel="noopener">跳转试玩</a>
+                      </div>
+                    </div>`).join('')}
                   ${s.files.map((f) => {
                     const icon = getFileIcon(f.original_name);
                     const canDl = c.class_name === myClass;
@@ -68,8 +80,8 @@ Views.overview = async () => {
                       <div class="file-row">
                         <div class="file-icon" style="width:32px;height:32px;font-size:16px;background:${icon.color};">${icon.emoji}</div>
                         <div class="file-info">
-                          <div class="file-name">${escapeHtml(f.original_name)}</div>
-                          <div class="file-meta">${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>
+                          <div class="file-name">${escapeHtml(f.title && f.title.trim() ? f.title : f.original_name)}</div>
+                          <div class="file-meta">${escapeHtml(f.title && f.title.trim() ? f.original_name + ' · ' : '')}${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>
                         </div>
                         ${canDl ? `<div class="file-actions"><button class="btn btn-sm btn-ghost" data-dl="${f.id}" data-name="${escapeHtml(f.original_name)}">下载</button></div>` : ''}
                       </div>`;

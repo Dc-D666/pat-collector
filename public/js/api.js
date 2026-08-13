@@ -33,9 +33,13 @@ window.API = (() => {
       throw new Error('登录已过期，请重新登录');
     }
     let data = null;
-    try { data = await res.json(); } catch (e) { /* 无 JSON 体 */ }
+    try { data = await res.json(); } catch (e) { /* 无 JSON 体（如 nginx 拦截返回的 HTML 413） */ }
     if (!res.ok) {
-      const err = new Error((data && data.error) || `请求失败 (${res.status})`);
+      // 413：nginx 或 multer 层拦截的超限错误，若响应体非 JSON（HTML）则给固定文案
+      let msg = (data && data.error);
+      if (!msg && res.status === 413) msg = '文件过大，超出上传大小上限（200MB），无法上传';
+      if (!msg) msg = `请求失败 (${res.status})`;
+      const err = new Error(msg);
       err.status = res.status;
       err.code = data && data.code;
       throw err;
@@ -45,6 +49,7 @@ window.API = (() => {
 
   const get = (path) => request(path);
   const post = (path, body) => request(path, { method: 'POST', body });
+  const patch = (path, body) => request(path, { method: 'PATCH', body });
   const del = (path) => request(path, { method: 'DELETE' });
 
   // 下载：fetch → blob → 触发浏览器保存；统一走 Authorization 头
@@ -70,5 +75,5 @@ window.API = (() => {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  return { request, get, post, del, download, getToken, setToken, clearToken, setUser, getUser };
+  return { request, get, post, patch, del, download, getToken, setToken, clearToken, setUser, getUser };
 })();

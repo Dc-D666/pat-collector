@@ -30,6 +30,7 @@ Views.files = () => {
       <div class="page-head">
         <h1 class="page-title">我的文件</h1>
         <div class="page-sub">${isQqBound ? '上传程序文件，或自动收集你的 AI 轻应用' : '拖拽或点击上传，仅本人可见'}</div>
+        <button class="btn btn-sm btn-ghost" id="display-settings-btn" style="margin-top:10px;">👤 展示设置</button>
       </div>
 
       <div id="qq-expired-banner"></div>
@@ -71,9 +72,32 @@ Views.files = () => {
   ['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('dragover'); }));
   dz.addEventListener('drop', (e) => uploadFiles(e.dataTransfer.files));
 
+  // 上传大小上限（MB），从 /api/auth/me 获取，用于上传前预检（避免 nginx 413 直接拦截）
+  let maxUploadMb = null;
+  async function getMaxUploadMb() {
+    if (maxUploadMb) return maxUploadMb;
+    try {
+      const data = await API.get('/api/auth/me');
+      maxUploadMb = data.max_upload_mb || 200;
+    } catch (_) { maxUploadMb = 200; }
+    return maxUploadMb;
+  }
+
+  // 提交作品后刷新积分徽章（导航栏）
+  async function refreshPoints() {
+    try {
+      const data = await API.get('/api/points');
+      const u = API.getUser() || {};
+      u.points = data.points;
+      API.setUser(u);
+      Nav.render();
+    } catch (_) { /* 静默 */ }
+  }
+
   async function uploadFiles(fileList) {
     const files = [...fileList];
     if (!files.length) return;
+    const limitMb = await getMaxUploadMb();
     const queue = document.getElementById('upload-queue');
     queue.classList.add('show');
     queue.innerHTML = `
@@ -88,12 +112,30 @@ Views.files = () => {
       if (el) el.textContent = icon;
     };
     let done = 0;
+    const newFiles = []; // 本次上传成功的文件，稍后逐个填写作品信息
     for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      // 前端预检大小：超过上限直接拦截，避免 nginx 返回 HTML 413
+      if (f.size > limitMb * 1024 * 1024) {
+        setStatus(i, '❌');
+        const row = queue.querySelector(`[data-idx="${i}"]`);
+        if (row) {
+          const msg = `文件过大（超过 ${limitMb}MB 上限），无法上传`;
+          row.title = msg; row.querySelector('.fname').textContent += ' — ' + msg;
+        }
+        done++;
+        bar.style.width = (done / files.length) * 100 + '%';
+        continue;
+      }
       const fd = new FormData();
-      fd.append('file', files[i]);
+      fd.append('file', f);
       try {
-        await API.post('/api/files/upload', fd);
+        const data = await API.post('/api/files/upload', fd);
         setStatus(i, '✅');
+        if (data && data.file) {
+          newFiles.push({ id: data.file.id, original_name: data.file.original_name });
+          refreshPoints();
+        }
       } catch (err) {
         setStatus(i, '❌');
         const row = queue.querySelector(`[data-idx="${i}"]`);
@@ -101,6 +143,18 @@ Views.files = () => {
       }
       done++;
       bar.style.width = (done / files.length) * 100 + '%';
+    }
+    await loadFiles();
+    // 上传成功 → 逐个弹出「作品信息」表单（标题必填，默认文件名）
+    if (newFiles.length) await promptFileInfos(newFiles);
+  }
+
+  // 逐个为上传成功的文件填写作品信息
+  async function promptFileInfos(newFiles) {
+    for (const f of newFiles) {
+      await new Promise((resolve) => {
+        showFileInfoModal(f, { onDone: resolve });
+      });
     }
     await loadFiles();
   }
@@ -122,19 +176,29 @@ Views.files = () => {
     }
     list.innerHTML = `<div class="file-list">${files.map((f) => {
       const icon = getFileIcon(f.original_name);
+      const hasTitle = !!(f.title && f.title.trim());
       return `
         <div class="file-row">
           <div class="file-icon" style="background:${icon.color};">${icon.emoji}</div>
           <div class="file-info">
-            <div class="file-name">${escapeHtml(f.original_name)}</div>
-            <div class="file-meta">${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>
+            <div class="file-name">${escapeHtml(hasTitle ? f.title : f.original_name)}</div>
+            <div class="file-meta">${hasTitle ? escapeHtml(f.original_name) + ' · ' : ''}${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>
+            ${f.description ? `<div class="file-meta">${escapeHtml(f.description)}</div>` : ''}
           </div>
           <div class="file-actions">
+            <button class="btn btn-sm btn-ghost" data-edit="${f.id}">编辑</button>
             <button class="btn btn-sm btn-ghost" data-dl="${f.id}" data-name="${escapeHtml(f.original_name)}">下载</button>
             <button class="btn btn-sm btn-ghost" data-del="${f.id}" style="color:var(--danger);">删除</button>
           </div>
         </div>`;
     }).join('')}</div>`;
+
+    list.querySelectorAll('[data-edit]').forEach((b) => {
+      b.onclick = () => {
+        const f = files.find((x) => String(x.id) === b.dataset.edit);
+        if (f) showFileInfoModal(f);
+      };
+    });
 
     list.querySelectorAll('[data-dl]').forEach((b) => {
       b.onclick = async () => {
@@ -150,6 +214,95 @@ Views.files = () => {
         catch (err) { toast(err.message); }
       };
     });
+  }
+
+  // ---- 作品信息表单（新建/编辑）：标题必填（默认文件名），简介/玩法选填 ----
+  function showFileInfoModal(file, { onDone } = {}) {
+    const defaultTitle = (file.title && file.title.trim()) ? file.title : (file.original_name || '').replace(/\.[^.]+$/, '');
+    openModal(`
+      <h3 class="modal-title">作品信息</h3>
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">${escapeHtml(file.original_name || '')}</p>
+      <div class="form-error" id="file-info-error"></div>
+      <div class="field"><label>项目标题（必填）</label><input id="file-info-title" type="text" maxlength="255" value="${escapeHtml(defaultTitle)}" placeholder="请输入项目标题" /></div>
+      <div class="field"><label>应用简介（选填）</label><input id="file-info-desc" type="text" maxlength="2000" value="${escapeHtml(file.description || '')}" placeholder="一句话介绍这个作品" /></div>
+      <div class="field"><label>玩法（选填）</label><input id="file-info-gameplay" type="text" maxlength="2000" value="${escapeHtml(file.gameplay || '')}" placeholder="怎么玩" /></div>
+      <div class="modal-actions">
+        <button class="btn" id="file-info-skip">跳过</button>
+        <button class="btn btn-primary" id="file-info-save">保存</button>
+      </div>`);
+    document.getElementById('file-info-skip').onclick = () => { closeModal(); if (onDone) onDone(); };
+    document.getElementById('file-info-save').onclick = async () => {
+      const errEl = document.getElementById('file-info-error');
+      errEl.classList.remove('show');
+      const title = document.getElementById('file-info-title').value.trim();
+      if (!title) { errEl.textContent = '请输入项目标题'; errEl.classList.add('show'); return; }
+      try {
+        await API.patch('/api/files/' + file.id, JSON.stringify({
+          title,
+          description: document.getElementById('file-info-desc').value.trim(),
+          gameplay: document.getElementById('file-info-gameplay').value.trim(),
+        }));
+        closeModal();
+        toast('已保存');
+        await loadFiles();
+        if (onDone) onDone();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.add('show');
+      }
+    };
+  }
+
+  // ---- 展示设置：是否授权展示真实姓名 / 昵称 ----
+  function showDisplaySettingsModal() {
+    const u = API.getUser() || {};
+    const notShowReal = u.show_real_name === false || u.show_real_name === 0;
+    openModal(`
+      <h3 class="modal-title">展示设置</h3>
+      <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">控制你的姓名是否在作品墙 / 提交总览中展示</p>
+      <div class="form-error" id="display-settings-error"></div>
+      <div class="field">
+        <label>是否授权展示真实姓名</label>
+        <div style="display:flex;gap:16px;margin-top:6px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="radio" name="ds-show-real" value="1" ${notShowReal ? '' : 'checked'} /> 是</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="radio" name="ds-show-real" value="0" ${notShowReal ? 'checked' : ''} /> 否，只展示昵称</label>
+        </div>
+      </div>
+      <div class="field" id="ds-nickname-field" style="display:${notShowReal ? '' : 'none'};">
+        <label>展示昵称</label>
+        <input id="ds-nickname" type="text" maxlength="32" value="${escapeHtml(u.nickname || '')}" placeholder="作品墙上展示的昵称" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="ds-cancel">取消</button>
+        <button class="btn btn-primary" id="ds-save">保存</button>
+      </div>`);
+    const nicknameField = document.getElementById('ds-nickname-field');
+    document.querySelectorAll('input[name="ds-show-real"]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        nicknameField.style.display = radio.value === '0' ? '' : 'none';
+      });
+    });
+    document.getElementById('ds-cancel').onclick = closeModal;
+    document.getElementById('ds-save').onclick = async () => {
+      const errEl = document.getElementById('display-settings-error');
+      errEl.classList.remove('show');
+      const showReal = (document.querySelector('input[name="ds-show-real"]:checked') || {}).value !== '0';
+      const nickname = document.getElementById('ds-nickname').value.trim();
+      if (!showReal && !nickname) {
+        errEl.textContent = '选择只展示昵称后，请填写昵称';
+        errEl.classList.add('show');
+        return;
+      }
+      try {
+        const data = await API.patch('/api/auth/profile', JSON.stringify({ show_real_name: showReal, nickname }));
+        API.setUser(data.user);
+        closeModal();
+        toast('已保存');
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.add('show');
+      }
+    };
   }
 
   // ---- AI 轻应用 ----
@@ -317,6 +470,7 @@ Views.files = () => {
         }));
         closeModal();
         toast('已提交');
+        refreshPoints();
         document.getElementById('apps-status').innerHTML = '';
         await loadApps();
       } catch (err) {
@@ -330,6 +484,8 @@ Views.files = () => {
   if (autoBtn) autoBtn.onclick = autoScan;
   const topAutoBtn = document.getElementById('auto-scan-top-btn');
   if (topAutoBtn) topAutoBtn.onclick = autoScan;
+  const dsBtn = document.getElementById('display-settings-btn');
+  if (dsBtn) dsBtn.onclick = showDisplaySettingsModal;
   if (isQqBound) {
     const manualBtn = document.getElementById('manual-scan-btn');
     if (manualBtn) manualBtn.onclick = manualScan;

@@ -65,8 +65,8 @@ Views.login = () => {
     location.hash = '#/files';
   }
 
-  // 渲染「年级 → 班级」二级菜单 + 姓名字段；返回取值函数
-  // nickname：仅「其他」分支会预填到姓名（QQ 场景）；标准年级不预填
+  // 渲染「年级 → 班级」二级菜单 + 姓名字段 + 展示名授权；返回取值函数
+  // nickname：QQ 场景传入频道昵称，作为「只展示昵称」的默认值
   function renderIdentity(container, nickname) {
     container.innerHTML = `
       <div class="field">
@@ -80,11 +80,30 @@ Views.login = () => {
         </select>
       </div>
       <div class="field" id="id-class-field"></div>
-      <div class="field" id="id-name-field"></div>`;
+      <div class="field" id="id-name-field"></div>
+      <div class="field" style="margin-top:10px;">
+        <label>是否授权展示真实姓名</label>
+        <div style="display:flex;gap:16px;margin-top:6px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="radio" name="id-show-real" value="1" checked /> 是</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:14px;"><input type="radio" name="id-show-real" value="0" /> 否，只展示昵称</label>
+        </div>
+      </div>
+      <div class="field" id="id-nickname-field" style="display:none;">
+        <label>展示昵称</label>
+        <input id="id-nickname" type="text" maxlength="32" value="${escapeHtml(nickname || '')}" placeholder="作品墙上展示的昵称" />
+      </div>`;
 
     const gradeSel = container.querySelector('#id-grade');
     const classField = container.querySelector('#id-class-field');
     const nameField = container.querySelector('#id-name-field');
+    const nicknameField = container.querySelector('#id-nickname-field');
+
+    // 选「否，只展示昵称」→ 显示昵称输入框
+    container.querySelectorAll('input[name="id-show-real"]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        nicknameField.style.display = radio.value === '0' ? '' : 'none';
+      });
+    });
 
     function update() {
       const g = gradeSel.value;
@@ -111,6 +130,8 @@ Views.login = () => {
       grade: gradeSel.value,
       class_name: (container.querySelector('#id-class') ? container.querySelector('#id-class').value : '').trim(),
       real_name: (container.querySelector('#id-name') ? container.querySelector('#id-name').value : '').trim(),
+      show_real_name: (container.querySelector('input[name="id-show-real"]:checked') || {}).value !== '0',
+      nickname: (container.querySelector('#id-nickname') ? container.querySelector('#id-nickname').value : '').trim(),
     });
   }
 
@@ -122,8 +143,8 @@ Views.login = () => {
       <div class="auth-wrap">
         <div class="auth-card card">
           <div class="auth-brand">
-            <div class="brand-logo">P</div>
-            <h1>PatPlayer</h1>
+            <img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" />
+            <h1>南中科技局</h1>
             <p>高中 AI 社团 · 作品收集与展示平台</p>
           </div>
           <button class="btn btn-primary" id="qq-login-btn" style="width:100%;justify-content:center;padding:13px;font-size:15px;">🐧 QQ 频道登录</button>
@@ -159,7 +180,7 @@ Views.login = () => {
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card" style="text-align:center;">
-          <div class="auth-brand"><div class="brand-logo">P</div><h1>QQ 频道登录</h1></div>
+          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>QQ 频道登录</h1></div>
           <p style="color:var(--text-dim);font-size:13px;margin:0 0 14px;">授权后即可进入系统</p>
 
           ${uri
@@ -197,6 +218,9 @@ Views.login = () => {
   }
 
   // 轮询授权状态；返回 true 表示已结束（授权成功或出错），false 表示继续轮询
+  // 身份反查失败（tiny_id 拿不到）时最多重试 10 次（约 25 秒），避免无限轮询
+  let pollRetries = 0;
+  const MAX_POLL_RETRIES = 10;
   async function pollSession(sessionId, statusEl) {
     try {
       const r = await API.post('/api/auth/qq/poll', JSON.stringify({ session: sessionId }));
@@ -213,6 +237,19 @@ Views.login = () => {
       if (statusEl) {
         statusEl.textContent = (r.status === 'pending_authorization' && r.error) ? r.error : '等待授权…';
       }
+      if (r.status === 'pending_authorization' && r.error) {
+        // 身份反查类错误：重试有上限
+        pollRetries++;
+        if (pollRetries >= MAX_POLL_RETRIES) {
+          clearPoll();
+          if (statusEl) {
+            statusEl.innerHTML = `${Utils.escapeHtml(r.error)}<br><a href="#" id="retry-auth-link" style="color:var(--primary);font-weight:600;">重新扫码</a>`;
+            const link = document.getElementById('retry-auth-link');
+            if (link) link.onclick = (e) => { e.preventDefault(); renderHome(); };
+          }
+          return true;
+        }
+      }
       return false;
     } catch (err) {
       clearPoll();
@@ -227,7 +264,7 @@ Views.login = () => {
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card" style="text-align:center;">
-          <div class="auth-brand"><div class="brand-logo">P</div><h1>QQ 频道登录</h1></div>
+          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>QQ 频道登录</h1></div>
           <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin:16px 0;">等待授权…</div>
           <button class="btn" id="qr-back" style="width:100%;justify-content:center;">重新扫码</button>
         </div>
@@ -247,7 +284,7 @@ Views.login = () => {
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card">
-          <div class="auth-brand"><div class="brand-logo">P</div><h1>完善信息</h1><p>QQ 登录成功，请确认你的班级与姓名</p></div>
+          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>完善信息</h1><p>QQ 登录成功，请确认你的班级与姓名</p></div>
           <div class="form-error" id="auth-error"></div>
           <div id="id-container"></div>
           <button class="btn btn-primary" id="bind-submit" style="width:100%;justify-content:center;">进入系统</button>
@@ -262,8 +299,12 @@ Views.login = () => {
       if (!v.grade) return showError('请选择年级');
       if (v.grade !== '其他' && !v.class_name) return showError('请选择班级');
       if (v.grade !== '其他' && !v.real_name) return showError('请输入姓名');
+      if (!v.show_real_name && !v.nickname) return showError('选择只展示昵称后，请填写昵称');
       try {
-        const data = await API.post('/api/auth/qq/bind', JSON.stringify({ session, class_name: v.class_name, real_name: v.real_name }));
+        const data = await API.post('/api/auth/qq/bind', JSON.stringify({
+          session, class_name: v.class_name, real_name: v.real_name,
+          show_real_name: v.show_real_name, nickname: v.nickname,
+        }));
         enterSystem(data);
       } catch (err) { showError(err.message); }
     };
@@ -275,7 +316,7 @@ Views.login = () => {
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card">
-          <div class="auth-brand"><div class="brand-logo">P</div><h1>直接提交</h1><p>没有 QQ？填班级和姓名即可进入</p></div>
+          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>直接提交</h1><p>没有 QQ？填班级和姓名即可进入</p></div>
           <div class="form-error" id="auth-error"></div>
           <div id="id-container"></div>
           <button class="btn btn-primary" id="guest-submit" style="width:100%;justify-content:center;">进入系统</button>
@@ -290,8 +331,12 @@ Views.login = () => {
       if (!v.grade) return showError('请选择年级');
       if (v.grade !== '其他' && !v.class_name) return showError('请选择班级');
       if (v.grade !== '其他' && !v.real_name) return showError('请输入姓名');
+      if (!v.show_real_name && !v.nickname) return showError('选择只展示昵称后，请填写昵称');
       try {
-        const data = await API.post('/api/auth/guest', JSON.stringify({ class_name: v.class_name, real_name: v.real_name }));
+        const data = await API.post('/api/auth/guest', JSON.stringify({
+          class_name: v.class_name, real_name: v.real_name,
+          show_real_name: v.show_real_name, nickname: v.nickname,
+        }));
         enterSystem(data);
       } catch (err) { showError(err.message); }
     };

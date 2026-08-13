@@ -11,14 +11,20 @@ const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { rateLimit } = require('../utils/rateLimit');
 const { requireAuth } = require('../middleware/auth');
+const { grant } = require('../utils/points');
 
 const router = express.Router();
 
 function publicUser(row) {
+  const showReal = row.show_real_name !== 0; // 默认展示真实姓名
   return {
     id: row.id,
     class_name: row.class_name,
     real_name: row.real_name,
+    display_name: showReal ? row.real_name : (row.nickname || row.real_name),
+    show_real_name: showReal,
+    nickname: row.nickname || '',
+    points: row.points || 0,
     is_qq_bound: !!row.qq_tiny_id,
     created_at: row.created_at,
   };
@@ -96,6 +102,64 @@ router.post(
   })
 );
 
+// 已授权：从会话真实 token 反查 tiny_id + 频道昵称
+// 注意：get-user-info（全局/频道）都不返回 tiny_id，只能靠 guild-member-search 拿（字段 tinyid）
+// 关键坑：频道 get-user-info 的 nickname 是"频道内显示名"（可能带前缀/与全局昵称不同），
+// 用它搜索可能搜不到人；必须把频道昵称、全局昵称、member_name 等全部作为关键词依次尝试。
+async function resolveTinyId(s, env) {
+  let nickname = '';
+  let tinyId = '';
+  try {
+    const globalInfo = await runCli(['manage', 'get-user-info'], 10000, env);
+    const gd = (globalInfo && globalInfo.data) || {};
+    const globalNick = gd.nickname || gd.global_nickname || '';
+    nickname = globalNick;
+
+    if (config.guildId) {
+      const guildInfo = await runCli(['manage', 'get-user-info', '--guild-id=' + config.guildId], 10000, env);
+      const gi = (guildInfo && guildInfo.data) || {};
+      const guildNick = gi.nickname || gi.member_name || gi.global_nickname || '';
+      // 频道昵称优先用于展示；搜索关键词集合则同时包含频道/全局昵称
+      if (guildNick) nickname = guildNick;
+
+      // 搜索关键词去重集合：频道昵称、member_name、全局昵称、各自截断前缀
+      const kwSet = new Set();
+      const add = (v) => {
+        const str = String(v || '').trim();
+        if (str) kwSet.add(str);
+      };
+      add(gi.nickname);
+      add(gi.member_name);
+      add(gi.global_nickname);
+      add(gd.nickname);
+      add(gd.global_nickname);
+      // 对带装饰前缀的昵称（如【摸鱼打杂】Cemetary），追加去前缀版本
+      for (const kw of [...kwSet]) {
+        const cleaned = kw.replace(/^[【\[\(（][^】\]\)）]+[】\]\)）]\s*/, '').trim();
+        if (cleaned && cleaned !== kw) add(cleaned);
+      }
+
+      for (const kw of kwSet) {
+        if (tinyId) break;
+        const searchR = await runCli(
+          ['manage', 'guild-member-search', '--guild-id=' + config.guildId, '--keyword=' + kw],
+          10000,
+          env
+        );
+        const members = (searchR && searchR.data && searchR.data.members) || [];
+        if (members.length > 0) {
+          tinyId = String(members[0].tinyid || members[0].tiny_id || '');
+        }
+      }
+    }
+  } catch (_) { /* 反查失败返回空，调用方处理 */ }
+
+  // 更新 session 并标记（供 bind 复用）
+  if (nickname) s.nickname = nickname;
+  if (tinyId) s.tiny_id = tinyId;
+  return { nickname, tinyId };
+}
+
 // 2. 轮询授权状态（扫码期间高频调用，不设限流）
 router.post(
   '/poll',
@@ -105,6 +169,19 @@ router.post(
     const s = qqSessions.getSession(sessionId);
     if (!s) return res.status(404).json({ error: '会话已过期，请重新扫码' });
     if (s.token_obtained) {
+      // 快捷分支：已授权。但若 tiny_id 缺失（上次反查失败），必须重查，
+      // 否则前端拿到 authorized 但 bind 仍失败 → 用户看到的"弹表单又报扫码"循环
+      if (!s.tiny_id) {
+        const envRetry = qqSessions.sessionEnv(s);
+        const { tinyId: retryTinyId } = await resolveTinyId(s, envRetry);
+        if (!retryTinyId) {
+          return res.json({
+            session: sessionId,
+            status: 'pending_authorization',
+            error: '已授权但无法识别你的 QQ 身份（频道成员搜索失败），请稍后重试或检查是否已加入频道',
+          });
+        }
+      }
       return res.json({
         session: sessionId,
         status: 'authorized',
@@ -134,38 +211,23 @@ router.post(
     }
 
     // 已授权：取昵称 + tiny_id
-    // 注意：get-user-info（全局/频道）都不返回 tiny_id，只能靠 guild-member-search 拿（字段 tinyid）
     s.token_obtained = true;
-    try {
-      const globalInfo = await runCli(['manage', 'get-user-info'], 10000, env);
-      const gd = (globalInfo && globalInfo.data) || {};
-      s.nickname = gd.nickname || gd.global_nickname || '';
+    const { tinyId } = await resolveTinyId(s, env);
 
-      if (config.guildId) {
-        const guildInfo = await runCli(['manage', 'get-user-info', '--guild-id=' + config.guildId], 10000, env);
-        const gi = (guildInfo && guildInfo.data) || {};
-        const guildNick = gi.nickname || gi.member_name || gi.global_nickname || '';
-        if (guildNick) s.nickname = guildNick;
-
-        // 用昵称在频道内搜成员拿 tiny_id
-        const searchR = await runCli(
-          ['manage', 'guild-member-search', '--guild-id=' + config.guildId, '--keyword=' + s.nickname],
-          10000,
-          env
-        );
-        const members = (searchR && searchR.data && searchR.data.members) || [];
-        if (members.length > 0) {
-          s.tiny_id = String(members[0].tinyid || members[0].tiny_id || '');
-        }
-      }
-    } catch (_) { /* tiny_id 为空则后续 bind 会拒绝 */ }
+    // tiny_id 反查失败：不进入 bind（否则填完班级姓名 bind 才报"请先扫码授权"）。
+    // 返回 pending_authorization + 明确错误，前端重试；bind 侧也有兜底重查。
+    if (!tinyId) {
+      return res.json({
+        session: sessionId,
+        status: 'pending_authorization',
+        error: '已授权但无法识别你的 QQ 身份（频道成员搜索失败），请稍后重试或检查是否已加入频道',
+      });
+    }
 
     let bound = false;
     let user = null;
-    if (s.tiny_id) {
-      const rows = await query('SELECT * FROM users WHERE qq_tiny_id = ?', [s.tiny_id]);
-      if (rows.length > 0) { bound = true; user = rows[0]; }
-    }
+    const rows = await query('SELECT * FROM users WHERE qq_tiny_id = ?', [s.tiny_id]);
+    if (rows.length > 0) { bound = true; user = rows[0]; }
     s.bound_user = user;
     return res.json({
       session: sessionId,
@@ -185,11 +247,30 @@ router.post(
   asyncHandler(async (req, res) => {
     const sessionId = String((req.body && req.body.session) || '');
     const s = qqSessions.getSession(sessionId);
-    if (!s || !s.token_obtained || !s.tiny_id) {
+    if (!s || !s.token_obtained) {
       return res.status(401).json({ error: '请先完成扫码授权' });
     }
+
+    // 兜底：tiny_id 缺失时（poll 阶段反查失败/超时），用会话真实 token 再查一次
+    if (!s.tiny_id) {
+      const env = qqSessions.sessionEnv(s);
+      const { tinyId } = await resolveTinyId(s, env);
+      if (!tinyId) {
+        return res.status(401).json({
+          error: '无法识别你的 QQ 身份，请确认已加入频道后重新扫码，或稍后重试',
+        });
+      }
+    }
+
     let class_name = String((req.body && req.body.class_name) || '').trim();
     let real_name = String((req.body && req.body.real_name) || '').trim();
+
+    // 展示名授权：默认展示真实姓名；选「否」时昵称默认取频道昵称，仍为空则报错
+    const showReal = req.body && req.body.show_real_name !== false && req.body.show_real_name !== 0 && req.body.show_real_name !== '0';
+    let nickname = String((req.body && req.body.nickname) || '').trim().slice(0, 32) || s.nickname || null;
+    if (!showReal && !nickname) {
+      return res.status(400).json({ error: '选择只展示昵称后，请填写昵称' });
+    }
 
     // 该 tiny_id 已绑定 → 直接登录（无需再填班级姓名）
     const byQq = await query('SELECT * FROM users WHERE qq_tiny_id = ?', [s.tiny_id]);
@@ -224,10 +305,14 @@ router.post(
     }
 
     const result = await query(
-      'INSERT INTO users (class_name, real_name, qq_tiny_id) VALUES (?, ?, ?)',
-      [class_name, real_name, s.tiny_id]
+      'INSERT INTO users (class_name, real_name, qq_tiny_id, show_real_name, nickname) VALUES (?, ?, ?, ?, ?)',
+      [class_name, real_name, s.tiny_id, showReal ? 1 : 0, nickname]
     );
-    const created = { id: result.insertId, class_name, real_name, qq_tiny_id: s.tiny_id, created_at: new Date() };
+    const created = { id: result.insertId, class_name, real_name, qq_tiny_id: s.tiny_id, show_real_name: showReal ? 1 : 0, nickname, points: 0, created_at: new Date() };
+    // 首次登录奖励
+    await grant(created.id, 'first_login', 'once');
+    const fresh = await query('SELECT points FROM users WHERE id = ?', [created.id]);
+    created.points = fresh.length ? fresh[0].points : 0;
     await linkSession(sessionId, created.id);
     return res.json({ token: issue(created.id), user: publicUser(created) });
   })

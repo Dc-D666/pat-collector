@@ -9,6 +9,7 @@ const { rateLimit } = require('../utils/rateLimit');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { extractLinks, resolveShare } = require('../qq/feed-links');
+const { grant } = require('../utils/points');
 
 const router = express.Router();
 
@@ -152,6 +153,8 @@ router.post(
       [req.user.id, app_url, title, description, gameplay, source_feed_id]
     );
     const inserted = await query('SELECT created_at FROM apps WHERE id = ?', [result.insertId]);
+    // 提交 AI 轻应用奖励（每个作品一次）
+    await grant(req.user.id, 'app_submit', 'app:' + result.insertId);
     res.json({
       app: {
         id: result.insertId, app_url, title, description, gameplay, source_feed_id,

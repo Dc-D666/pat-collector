@@ -9,6 +9,7 @@ const config = require('../config');
 const { query } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
+const { grant } = require('../utils/points');
 
 const router = express.Router();
 
@@ -93,12 +94,17 @@ router.post(
         [req.user.id, req.file.filename, originalName, size, mimeType]
       );
       const inserted = await query('SELECT uploaded_at FROM files WHERE id = ?', [result.insertId]);
+      // 提交作品文件奖励（每个文件一次）
+      await grant(req.user.id, 'file_submit', 'file:' + result.insertId);
       return res.json({
         file: {
           id: result.insertId,
           original_name: originalName,
           size,
           mime_type: mimeType,
+          title: null,
+          description: null,
+          gameplay: null,
           uploaded_at: inserted[0].uploaded_at,
         },
       });
@@ -119,10 +125,43 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const rows = await query(
-      'SELECT id, original_name, size, mime_type, uploaded_at FROM files WHERE user_id = ? ORDER BY uploaded_at DESC, id DESC',
+      'SELECT id, original_name, size, mime_type, title, description, gameplay, uploaded_at FROM files WHERE user_id = ? ORDER BY uploaded_at DESC, id DESC',
       [req.user.id]
     );
     res.json({ files: rows });
+  })
+);
+
+// 更新作品信息（仅本人）：标题 / 简介 / 玩法
+router.patch(
+  '/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const rows = await query('SELECT id FROM files WHERE id = ? AND user_id = ?', [
+      req.params.id,
+      req.user.id,
+    ]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: '文件不存在' });
+    }
+    const body = req.body || {};
+    const title = String(body.title || '').trim().slice(0, 255);
+    if (!title) {
+      return res.status(400).json({ error: '请输入项目标题' });
+    }
+    const description = String(body.description || '').trim().slice(0, 2000) || null;
+    const gameplay = String(body.gameplay || '').trim().slice(0, 2000) || null;
+    await query('UPDATE files SET title = ?, description = ?, gameplay = ? WHERE id = ?', [
+      title,
+      description,
+      gameplay,
+      req.params.id,
+    ]);
+    const updated = await query(
+      'SELECT id, original_name, size, mime_type, title, description, gameplay, uploaded_at FROM files WHERE id = ?',
+      [req.params.id]
+    );
+    res.json({ file: updated[0] });
   })
 );
 

@@ -8,21 +8,48 @@ const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-function groupByStudent(rows) {
+function displayNameOf(row) {
+  // 未授权展示真实姓名 → 用昵称（无昵称兜底真实姓名）
+  return row.show_real_name !== 0 ? row.real_name : (row.nickname || row.real_name);
+}
+
+function groupByStudent(fileRows, appRows) {
   const map = new Map();
-  for (const r of rows) {
+  for (const r of fileRows) {
     if (!map.has(r.user_id)) {
       map.set(r.user_id, {
         user_id: r.user_id,
         real_name: r.real_name,
+        display_name: displayNameOf(r),
         files: [],
+        apps: [],
       });
     }
     map.get(r.user_id).files.push({
       id: r.file_id,
       original_name: r.original_name,
+      title: r.title || null,
       size: r.size,
       uploaded_at: r.uploaded_at,
+    });
+  }
+  for (const r of appRows) {
+    if (!map.has(r.user_id)) {
+      map.set(r.user_id, {
+        user_id: r.user_id,
+        real_name: r.real_name,
+        display_name: displayNameOf(r),
+        files: [],
+        apps: [],
+      });
+    }
+    map.get(r.user_id).apps.push({
+      id: r.app_id,
+      title: r.title,
+      app_url: r.app_url,
+      description: r.description,
+      gameplay: r.gameplay,
+      created_at: r.created_at,
     });
   }
   return [...map.values()].map((s) => {
@@ -30,31 +57,82 @@ function groupByStudent(rows) {
     for (const f of s.files) {
       if (f.uploaded_at && (last === null || f.uploaded_at > last)) last = f.uploaded_at;
     }
+    for (const a of s.apps) {
+      if (a.created_at && (last === null || a.created_at > last)) last = a.created_at;
+    }
     return {
       user_id: s.user_id,
       real_name: s.real_name,
+      display_name: s.display_name,
       file_count: s.files.length,
+      app_count: s.apps.length,
       last_submit: last,
       files: s.files,
+      apps: s.apps,
     };
   });
 }
 
-// 班级作品墙：仅本班，按姓名分组，文件倒序
+// 全校作品展：所有班级的项目平铺展示（文件 + 轻应用），每项带班级 tag 信息
 router.get(
   '/wall',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await query(
-      `SELECT u.id AS user_id, u.real_name,
-              f.id AS file_id, f.original_name, f.size, f.uploaded_at
-       FROM users u
-       JOIN files f ON f.user_id = u.id
-       WHERE u.class_name = ?
-       ORDER BY u.real_name ASC, f.uploaded_at DESC, f.id DESC`,
-      [req.user.class_name]
-    );
-    res.json({ class_name: req.user.class_name, students: groupByStudent(rows) });
+    const [fileRows, appRows] = await Promise.all([
+      query(
+        `SELECT u.id AS user_id, u.class_name, u.real_name, u.show_real_name, u.nickname,
+                f.id AS file_id, f.original_name, f.title, f.description, f.gameplay, f.size, f.uploaded_at
+         FROM users u
+         JOIN files f ON f.user_id = u.id`
+      ),
+      query(
+        `SELECT u.id AS user_id, u.class_name, u.real_name, u.show_real_name, u.nickname,
+                a.id AS app_id, a.app_url, a.title, a.description, a.gameplay, a.created_at
+         FROM users u
+         JOIN apps a ON a.user_id = u.id`
+      ),
+    ]);
+
+    const projects = [];
+    for (const r of fileRows) {
+      projects.push({
+        type: 'file',
+        id: r.file_id,
+        user_id: r.user_id,
+        class_name: r.class_name,
+        grade: config.gradeOf(r.class_name),
+        display_name: displayNameOf(r),
+        title: r.title || r.original_name,
+        original_name: r.original_name,
+        description: r.description,
+        gameplay: r.gameplay,
+        size: r.size,
+        time: r.uploaded_at,
+        is_mine: r.user_id === req.user.id,
+        same_class: r.class_name === req.user.class_name,
+      });
+    }
+    for (const r of appRows) {
+      projects.push({
+        type: 'app',
+        id: r.app_id,
+        user_id: r.user_id,
+        class_name: r.class_name,
+        grade: config.gradeOf(r.class_name),
+        display_name: displayNameOf(r),
+        title: r.title || 'AI 轻应用',
+        app_url: r.app_url,
+        description: r.description,
+        gameplay: r.gameplay,
+        time: r.created_at,
+        is_mine: r.user_id === req.user.id,
+        same_class: r.class_name === req.user.class_name,
+      });
+    }
+    // 按时间倒序混排
+    projects.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
+
+    res.json({ class_name: req.user.class_name, projects });
   })
 );
 
@@ -63,30 +141,48 @@ router.get(
   '/overview',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await query(
-      `SELECT u.class_name, u.id AS user_id, u.real_name,
-              f.id AS file_id, f.original_name, f.size, f.uploaded_at
-       FROM users u
-       JOIN files f ON f.user_id = u.id
-       ORDER BY u.class_name ASC, u.real_name ASC, f.uploaded_at DESC, f.id DESC`
-    );
+    const [fileRows, appRows] = await Promise.all([
+      query(
+        `SELECT u.class_name, u.id AS user_id, u.real_name, u.show_real_name, u.nickname,
+                f.id AS file_id, f.original_name, f.title, f.size, f.uploaded_at
+         FROM users u
+         JOIN files f ON f.user_id = u.id
+         ORDER BY u.class_name ASC, u.real_name ASC, f.uploaded_at DESC, f.id DESC`
+      ),
+      query(
+        `SELECT u.class_name, u.id AS user_id, u.real_name, u.show_real_name, u.nickname,
+                a.id AS app_id, a.app_url, a.title, a.description, a.gameplay, a.created_at
+         FROM users u
+         JOIN apps a ON a.user_id = u.id
+         ORDER BY u.class_name ASC, u.real_name ASC, a.created_at DESC, a.id DESC`
+      ),
+    ]);
 
     let totalFiles = 0;
     let totalSize = 0;
+    let totalApps = 0;
     const classMap = new Map();
 
-    for (const r of rows) {
+    for (const r of fileRows) {
       totalFiles += 1;
       totalSize += Number(r.size);
       if (!classMap.has(r.class_name)) {
-        classMap.set(r.class_name, { class_name: r.class_name, rows: [] });
+        classMap.set(r.class_name, { class_name: r.class_name, fileRows: [], appRows: [] });
       }
-      classMap.get(r.class_name).rows.push(r);
+      classMap.get(r.class_name).fileRows.push(r);
+    }
+    for (const r of appRows) {
+      totalApps += 1;
+      if (!classMap.has(r.class_name)) {
+        classMap.set(r.class_name, { class_name: r.class_name, fileRows: [], appRows: [] });
+      }
+      classMap.get(r.class_name).appRows.push(r);
     }
 
     const classes = [...classMap.values()].map((c) => {
-      const students = groupByStudent(c.rows);
+      const students = groupByStudent(c.fileRows, c.appRows);
       const fileCount = students.reduce((n, s) => n + s.file_count, 0);
+      const appCount = students.reduce((n, s) => n + s.app_count, 0);
       const size = students.reduce(
         (n, s) => n + s.files.reduce((m, f) => m + Number(f.size), 0),
         0
@@ -100,15 +196,19 @@ router.get(
         grade: config.gradeOf(c.class_name),
         student_count: students.length,
         file_count: fileCount,
+        app_count: appCount,
         total_size: size,
         last_submit: last,
         students: students.map((s) => ({
           user_id: s.user_id,
           real_name: s.real_name,
+          display_name: s.display_name,
           file_count: s.file_count,
+          app_count: s.app_count,
           total_size: s.files.reduce((m, f) => m + Number(f.size), 0),
           last_submit: s.last_submit,
           files: s.files,
+          apps: s.apps,
         })),
       };
     });
@@ -119,6 +219,7 @@ router.get(
         classes_with_submissions: classes.length,
         total_files: totalFiles,
         total_size: totalSize,
+        total_apps: totalApps,
       },
       classes,
     });

@@ -89,6 +89,15 @@ const config = {
   qqSessionsDir: path.resolve(PROJECT_ROOT, process.env.QQ_SESSIONS_DIR || 'storage/qq-sessions'),
   // QQ 登录需在频道内搜成员拿到 tiny_id（get-user-info 不返回 tiny_id）；默认南方中学频道，可用 GUILD_ID 覆盖
   guildId: process.env.GUILD_ID || '621631744026206738',
+  // 跨站体验任务（NFTI）：ticket 签名密钥 + NFTI 库只读连接（判定"已体验"）
+  patTicketSecret: process.env.PAT_TICKET_SECRET || '',
+  nftiDb: {
+    host: process.env.NFTI_DB_HOST || '127.0.0.1',
+    port: parseInt(process.env.NFTI_DB_PORT || '3306', 10),
+    database: process.env.NFTI_DB_NAME || 'nfti',
+    user: process.env.NFTI_DB_USER || 'pat',
+    password: process.env.NFTI_DB_PASSWORD || '',
+  },
   projectRoot: PROJECT_ROOT,
   classes: CLASSES,
   grades: GRADES,

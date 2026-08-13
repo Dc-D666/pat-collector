@@ -4,14 +4,18 @@
 window.Nav = (() => {
   const ITEMS = [
     { hash: '#/files', icon: '🗂️', label: '我的文件', key: 'files' },
-    { hash: '#/class-wall', icon: '🏫', label: '班级作品墙', key: 'class-wall' },
+    { hash: '#/class-wall', icon: '🏫', label: '全校作品展', key: 'class-wall' },
     { hash: '#/overview', icon: '📊', label: '提交总览', key: 'overview' },
+    { hash: '#/learn', icon: '🤖', label: '学AI', key: 'learn' },
+    { hash: '#/points', icon: '🏆', label: '积分榜', key: 'points' },
   ];
 
   function currentKey() {
     const h = location.hash || '#/files';
     if (h.startsWith('#/class-wall')) return 'class-wall';
     if (h.startsWith('#/overview')) return 'overview';
+    if (h.startsWith('#/learn')) return 'learn';
+    if (h.startsWith('#/points')) return 'points';
     return 'files';
   }
 
@@ -19,11 +23,12 @@ window.Nav = (() => {
     const u = API.getUser() || {};
     const key = currentKey();
     const { escapeHtml } = Utils;
-    const initial = (u.real_name || '?').trim().charAt(0);
+    const displayName = u.display_name || u.real_name || '';
+    const initial = displayName.trim().charAt(0);
 
     document.getElementById('rail').innerHTML = `
       <div class="brand">
-        <span class="brand-logo">P</span><span class="brand-name">PatPlayer</span>
+        <img class="brand-logo" src="/img/logo.png" alt="南中科技局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><span class="brand-name">南中科技局</span>
       </div>
       <nav class="rail-nav">
         ${ITEMS.map((it) => `
@@ -34,17 +39,20 @@ window.Nav = (() => {
       <div class="rail-user">
         <div class="avatar">${escapeHtml(initial)}</div>
         <div class="user-meta">
-          <div class="user-name">${escapeHtml(u.real_name || '')}</div>
+          <div class="user-name">${escapeHtml(displayName)}</div>
           <div class="user-class">${u.class_name ? escapeHtml(u.class_name + '班') : ''}</div>
         </div>
-        <button class="icon-btn logout-btn" title="退出登录">⎋</button>
-      </div>`;
+        <span class="points-badge" title="我的积分">⭐ ${u.points || 0}</span>
+      </div>
+      <button class="logout-btn" title="退出登录">⎋ 退出登录</button>
+    `;
 
     document.getElementById('topbar').innerHTML = `
-      <div class="topbar-title">PatPlayer</div>
+      <div class="topbar-title">南中科技局</div>
       <div style="display:flex;align-items:center;gap:10px;">
-        <div class="topbar-user">${u.class_name ? escapeHtml(u.class_name + '班 ' + u.real_name) : ''}</div>
-        <button class="icon-btn logout-btn" title="退出登录">⎋</button>
+        <span class="points-badge" title="我的积分">⭐ ${u.points || 0}</span>
+        <div class="topbar-user">${u.class_name ? escapeHtml(u.class_name + '班 ' + displayName) : ''}</div>
+        <button class="logout-btn" title="退出登录">⎋ 退出</button>
       </div>`;
 
     document.getElementById('appbar').innerHTML = ITEMS.map((it) => `

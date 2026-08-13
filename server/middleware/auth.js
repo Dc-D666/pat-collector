@@ -16,7 +16,7 @@ async function requireAuth(req, res, next) {
   }
   try {
     const rows = await query(
-      'SELECT id, class_name, real_name, qq_tiny_id, created_at FROM users WHERE id = ?',
+      'SELECT id, class_name, real_name, qq_tiny_id, show_real_name, nickname, points, created_at FROM users WHERE id = ?',
       [payload.uid]
     );
     if (rows.length === 0) {
