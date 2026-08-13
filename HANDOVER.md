@@ -61,7 +61,9 @@ ecosystem.config.cjs  PM2 配置
 deploy/pat.weaxi.cn.conf  nginx 反代配置（含 www 301 归一化）
 ```
 
-## 4. 数据库（库 pat / 用户 pat / WtfAYXjWMkJi78WM，本机 MySQL 3306）
+## 4. 数据库（库 pat / 用户 pat，本机 MySQL 3306）
+
+> ⚠️ **密码不写入本文档**：真实密码在服务器 `.env`（`DB_PASSWORD`）。2026-08 曾把明文密码提交到 GitHub 触发安全告警，已改密；今后文档一律用占位符，密码只放 `.env`（gitignore）。
 
 - **users**：id, class_name, real_name, qq_tiny_id(可空唯一), qq_session_id(可空), show_real_name(展示名授权,默认1), nickname(昵称), **points(积分)**, created_at；唯一键 `(class_name, real_name)`
 - **files**：id, user_id, stored_name(uuid落盘), original_name, size, mime_type, **title/description/gameplay(作品信息)**, uploaded_at
@@ -199,9 +201,9 @@ node seed-articles.js
 docker compose -f /home/nfti/NF-BTI/docker-compose.yml up -d --build backend
 docker compose -f /home/nfti/NF-BTI/docker-compose.yml up -d --build nginx   # 前端改动必须重建这个
 
-# 查积分/任务
-mysql -h127.0.0.1 -upat -pWtfAYXjWMkJi78WM pat -e "SELECT id,real_name,points FROM users ORDER BY points DESC;"
-mysql -h127.0.0.1 -upat -pWtfAYXjWMkJi78WM pat -e "SELECT * FROM points_log ORDER BY id DESC LIMIT 20;"
+# 查积分/任务（密码从 .env 取，勿写死）
+mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT id,real_name,points FROM users ORDER BY points DESC;"
+mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER BY id DESC LIMIT 20;"
 ```
 
 ## 11. 已知待办 / 风险
