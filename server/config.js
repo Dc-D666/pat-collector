@@ -47,22 +47,19 @@ function isStandardClass(name) {
   return CLASS_SET.has(name);
 }
 
-// ---- 扩展名白名单（约 50 种）----
+// ---- 扩展名白名单：代码/文本 + 压缩包（图片/视频/音频/Office/3D 均已关闭）----
+// 代码/文本类走 AI 内容审查 + 超长限制；压缩包为二进制（不审查，仅作多文件打包途径）
 const ALLOWED_EXTENSIONS = new Set([
-  // 图片
-  'jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tiff', 'tif', 'heic',
-  // 视频
-  'mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v',
-  // 音频
-  'mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'wma',
-  // Office / 文档
-  'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'pdf', 'txt', 'md', 'csv',
-  // 压缩包
+  // 网页 / 代码 / 文本（审查集合）
+  'html', 'htm', 'py', 'js', 'ts', 'c', 'cpp', 'java', 'css', 'json', 'ipynb',
+  'md', 'txt', 'csv', 'svg',
+  // 压缩包（多文件打包上传）
   'zip', 'rar', '7z', 'tar', 'gz',
-  // 代码
-  'py', 'js', 'ts', 'c', 'cpp', 'java', 'html', 'css', 'json', 'ipynb',
-  // 3D
-  'stl', 'obj', 'glb', 'gltf', 'fbx', 'blend',
+]);
+// 文本/代码类：走 AI 内容审查 + 百万字符超长限制
+const TEXT_FORMATS = new Set([
+  'html', 'htm', 'py', 'js', 'ts', 'c', 'cpp', 'java', 'css', 'json', 'ipynb',
+  'md', 'txt', 'csv', 'svg',
 ]);
 
 const config = {
@@ -81,9 +78,21 @@ const config = {
   },
   tokenSecret: process.env.TOKEN_SECRET,
   tokenTtlMs: 24 * 60 * 60 * 1000, // 24h
+  // DeepSeek 内容审查（文本/代码类上传时调用；key 放 .env，勿入库）
+  deepseek: {
+    apiKey: process.env.DEEPSEEK_API_KEY || '',
+    baseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
+    model: process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash',
+    auditEnabled: process.env.DEEPSEEK_AUDIT !== '0', // 默认开启，设 0 关闭
+    timeoutMs: 20000,
+    maxChars: 16000, // 送入模型的文本截断长度
+    maxFileChars: 1000000, // 单文件内容达百万级字符 → 直接拒绝上传
+    maxFileBytesBeforeRead: 4 * 1024 * 1024, // 字节超此值必超百万字符（UTF-8 中文 3B/字），不读直接拒
+  },
   maxUploadBytes: (parseInt(process.env.MAX_UPLOAD_MB || '200', 10) || 200) * 1024 * 1024,
   maxUserStorageBytes:
     (parseInt(process.env.MAX_USER_STORAGE_MB || '2048', 10) || 2048) * 1024 * 1024,
+  maxUploadsPerDay: parseInt(process.env.MAX_UPLOADS_PER_DAY || '20', 10) || 20, // 每人每天上传次数上限（含删除）
   storageDir: path.resolve(PROJECT_ROOT, process.env.STORAGE_DIR || 'storage/uploads'),
   publicDir: path.resolve(PROJECT_ROOT, 'public'),
   qqSessionsDir: path.resolve(PROJECT_ROOT, process.env.QQ_SESSIONS_DIR || 'storage/qq-sessions'),
@@ -106,6 +115,7 @@ const config = {
   normalizeClass,
   isStandardClass,
   allowedExtensions: ALLOWED_EXTENSIONS,
+  textFormats: TEXT_FORMATS,
 };
 
 // 启动前强校验：生产环境不允许无密钥裸奔

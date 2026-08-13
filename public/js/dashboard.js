@@ -31,7 +31,7 @@ Views.files = () => {
         <div class="dropzone" id="dropzone">
           <div class="dz-icon">📤</div>
           <div class="dz-title">点击选择 或 拖拽文件到此处</div>
-          <div class="dz-hint">支持多文件上传，失败的文件会自动跳过</div>
+          <div class="dz-hint">仅支持代码 / 文本文件（.html .py .js .md 等），多文件可一次上传</div>
           <input type="file" id="file-input" multiple style="display:none;" />
         </div>
         <div class="card upload-queue" id="upload-queue"></div>
@@ -106,6 +106,11 @@ Views.files = () => {
   async function uploadFiles(fileList) {
     const files = [...fileList];
     if (!files.length) return;
+    // 一次最多 5 个文件，更多请打包压缩包
+    if (files.length > 5) {
+      toast('最多一次上传 5 个文件；如需提交更多文件，请打包成压缩包后上传');
+      return;
+    }
     const limitMb = await getMaxUploadMb();
     const queue = document.getElementById('upload-queue');
     if (!queue) return;
@@ -121,7 +126,15 @@ Views.files = () => {
       const el = queue.querySelector(`[data-idx="${i}"] .fstatus`);
       if (el) el.textContent = icon;
     };
+    // 浏览器式加载进度：上传期间平滑爬升（封顶 88%），完成后推进到真实比例
+    let fakePct = 0;
+    const fakeTimer = setInterval(() => {
+      fakePct = Math.min(88, fakePct + (Math.random() * 1.4 + 0.2));
+      const real = files.length ? (done / files.length) * 100 : 100;
+      bar.style.width = Math.max(real, fakePct) + '%';
+    }, 260);
     let done = 0;
+    let failedCount = 0; // 失败文件数：有失败时保留上传队列，避免错误提示一闪而过
     const newFiles = []; // 本次上传成功的文件，列表中以「待完善」标记，可随时补齐作品信息
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
@@ -130,15 +143,31 @@ Views.files = () => {
         setStatus(i, '❌');
         const row = queue.querySelector(`[data-idx="${i}"]`);
         if (row) {
-          const msg = `文件过大（超过 ${limitMb}MB 上限），无法上传`;
+          const msg = `文件过大（超过 ${limitMb}MB 上限），无法上传；如确需上传大文件/文件夹，请联系频道主或 QQ：3303188265`;
           row.title = msg; row.querySelector('.fname').textContent += ' — ' + msg;
         }
         done++;
-        bar.style.width = (done / files.length) * 100 + '%';
+        failedCount++;
         continue;
       }
       const fd = new FormData();
       fd.append('file', f);
+      // HTML 文件：上传后需 AI 安全审查（数秒），显示「安全审查中」动画提示
+      const isHtml = /\.(html?|htm)$/i.test(f.name || '');
+      let auditRow = null;
+      if (isHtml) {
+        const rowEl = queue.querySelector(`[data-idx="${i}"]`);
+        if (rowEl) {
+          const st = rowEl.querySelector('.fstatus');
+          if (st) st.innerHTML = '<span class="audit-loader"></span>';
+          const tag = document.createElement('span');
+          tag.className = 'audit-tag';
+          tag.textContent = '安全审查中…';
+          const nameEl = rowEl.querySelector('.fname');
+          if (nameEl) nameEl.appendChild(tag);
+          auditRow = rowEl;
+        }
+      }
       try {
         const data = await API.post('/api/files/upload', fd);
         setStatus(i, '✅');
@@ -150,13 +179,28 @@ Views.files = () => {
         setStatus(i, '❌');
         const row = queue.querySelector(`[data-idx="${i}"]`);
         if (row) { row.title = err.message; row.querySelector('.fname').textContent += ' — ' + err.message; }
+        failedCount++;
+      } finally {
+        // 审查结束：移除「安全审查中」标记
+        if (auditRow) {
+          const tag = auditRow.querySelector('.audit-tag');
+          if (tag) tag.remove();
+        }
       }
       done++;
-      bar.style.width = (done / files.length) * 100 + '%';
+    }
+    // 全部完成：进度条 100%
+    clearInterval(fakeTimer);
+    bar.style.width = '100%';
+    if (failedCount > 0) {
+      // 有失败：保留队列显示错误原因，不自动关闭
+      toast(`上传完成：成功 ${newFiles.length} 个，失败 ${failedCount} 个，原因见上方列表`);
+    } else {
+      setTimeout(() => { queue.classList.remove('show'); queue.innerHTML = ''; }, 900);
     }
     await loadFiles();
     // 上传成功不强制弹表单：toast 提示，列表项带「待完善」标记，可随时编辑或一键补齐
-    if (newFiles.length) toast(`✅ 上传成功 ${newFiles.length} 个，可补充作品信息`);
+    if (newFiles.length && failedCount === 0) toast(`✅ 上传成功 ${newFiles.length} 个，可补充作品信息`);
   }
 
   // 逐个为文件填写作品信息（「补齐作品信息」批量入口 / 编辑入口共用）
@@ -244,10 +288,10 @@ Views.files = () => {
       <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">${escapeHtml(file.original_name || '')}</p>
       <div class="form-error" id="file-info-error"></div>
       <div class="field"><label>项目标题（必填）</label><input id="file-info-title" type="text" maxlength="255" value="${escapeHtml(defaultTitle)}" placeholder="请输入项目标题" /></div>
-      <div class="field"><label>应用简介（选填）</label><input id="file-info-desc" type="text" maxlength="2000" value="${escapeHtml(file.description || '')}" placeholder="一句话介绍这个作品" /></div>
-      <div class="field"><label>玩法（选填）</label><input id="file-info-gameplay" type="text" maxlength="2000" value="${escapeHtml(file.gameplay || '')}" placeholder="怎么玩" /></div>
+      <div class="field"><label>应用简介（选填）</label><textarea id="file-info-desc" rows="3" maxlength="2000" placeholder="一句话介绍这个作品">${escapeHtml(file.description || '')}</textarea></div>
+      <div class="field"><label>玩法（选填）</label><textarea id="file-info-gameplay" rows="3" maxlength="2000" placeholder="怎么玩">${escapeHtml(file.gameplay || '')}</textarea></div>
       <div class="modal-actions">
-        <button class="btn" id="file-info-skip">跳过</button>
+        <button class="btn" id="file-info-skip">取消</button>
         <button class="btn btn-primary" id="file-info-save">保存</button>
       </div>`);
     document.getElementById('file-info-skip').onclick = () => { closeModal(); if (onDone) onDone(); };

@@ -17,10 +17,15 @@ Views.classWall = async () => {
         <span class="search-icon">🔍</span>
         <input id="wall-search" placeholder="搜索项目标题 / 作者 / 班级" />
       </div>
+      <div class="wall-sort">
+        <button class="sort-btn active" data-sort="time">🕐 最新发表</button>
+        <button class="sort-btn" data-sort="likes">❤️ 点赞最多</button>
+      </div>
       <div id="wall-content"><div class="spinner"></div></div>
     </div>`;
 
   let projects = [];
+  let sortMode = 'time'; // time = 发表时间从新到旧（默认）；likes = 点赞数从多到少
 
   try {
     const data = await API.get('/api/class/wall');
@@ -55,6 +60,13 @@ Views.classWall = async () => {
       return hay.includes(q);
     });
 
+    // 排序：置顶始终优先；其余按所选模式（默认发表时间从新到旧 / 点赞数从多到少）
+    visible.sort((a, b) => {
+      if (a.topped !== b.topped) return a.topped ? -1 : 1;
+      if (sortMode === 'likes') return (b.like_count || 0) - (a.like_count || 0);
+      return a.time < b.time ? 1 : a.time > b.time ? -1 : 0;
+    });
+
     if (!visible.length) {
       content.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div>没有匹配的项目</div>`;
       return;
@@ -63,7 +75,10 @@ Views.classWall = async () => {
     content.innerHTML = `<div class="wall-grid">${visible.map((p) => {
       const isFile = p.type === 'file';
       const icon = isFile ? getFileIcon(p.original_name || '') : { emoji: '🤖', color: '#EDE6D6' };
-      const canDl = isFile && (p.is_mine || p.same_class);
+      // 全校公开：所有文件都可下载/预览（不再限同班）
+      const canDl = isFile;
+      // HTML 文件额外提供「预览」：新窗口直接打开（CSP sandbox 隔离）
+      const isHtml = isFile && /\.(html?|htm)$/i.test(p.original_name || '');
       const likeDisabled = p.is_mine || p.liked_by_me;
       return `
         <div class="card project-card${p.topped ? ' topped' : ''}">
@@ -90,7 +105,9 @@ Views.classWall = async () => {
               </button>
               ${isFile
                 ? (canDl
-                    ? `<button class="btn btn-sm btn-ghost" data-dl="${p.id}" data-name="${escapeHtml(p.original_name)}">下载</button>`
+                    ? `<button class="btn btn-sm btn-ghost" data-dl="${p.id}" data-name="${escapeHtml(p.original_name)}">下载</button>${isHtml
+                        ? `<a class="btn btn-sm btn-primary" href="/api/files/preview/${p.id}?token=${encodeURIComponent(API.getToken() || '')}" target="_blank" rel="noopener">预览</a>`
+                        : ''}`
                     : `<span class="proj-lock" title="仅同班可下载">🔒</span>`)
                 : `<a class="btn btn-sm btn-primary" href="${escapeHtml(p.app_url)}" target="_blank" rel="noopener">跳转试玩</a>`}
             </div>
@@ -119,7 +136,7 @@ Views.classWall = async () => {
             num.textContent = (Number(num.textContent) || 0) + 1;
             b.innerHTML = `❤️<span>${num.textContent}</span>`;
             b.title = '已点赞';
-            toast('点赞成功 ❤️');
+            toast(r.author_gained ? '点赞成功 ❤️ 作者 +2⭐' : '点赞成功 ❤️');
           } else {
             b.disabled = false;
           }
@@ -132,5 +149,15 @@ Views.classWall = async () => {
   }
 
   document.getElementById('wall-search').oninput = (e) => render(e.target.value);
+
+  // 排序切换
+  view.querySelectorAll('.sort-btn').forEach((b) => {
+    b.onclick = () => {
+      sortMode = b.dataset.sort;
+      view.querySelectorAll('.sort-btn').forEach((x) => x.classList.toggle('active', x === b));
+      render(document.getElementById('wall-search').value);
+    };
+  });
+
   render('');
 };

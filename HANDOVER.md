@@ -31,15 +31,15 @@
 ```
 server/
   index.js            入口（路由挂载/静态托管/SPA 回退，监听 127.0.0.1:3001）
-  config.js           班级白名单、扩展名白名单、GUILD_ID、路径、dateStrings、NFTI 跨站配置
+  config.js           班级白名单、扩展名白名单（**代码/文本 15 种 + 压缩包 5 种**，图片视频等已关）、每日上传次数 20 次/人/天、GUILD_ID、路径、dateStrings、NFTI 跨站配置、DeepSeek 审查配置
   db.js               mysql2 连接池（dateStrings:true 直返字符串，规避时区）
   schema.sql          建表（users/files/apps/articles/points_log/task_progress/likes/purchases/feed_like_snapshots）
   init-db.js          建表脚本（npm run init-db，IF NOT EXISTS 幂等，可增量建新表）
-  jobs.js             后台定时任务：过期置顶/精华自动回收（10 分钟）；帖子被赞积分按用户触发（refreshUserFeedLikes）
+  jobs.js             后台定时任务：过期置顶/精华自动回收（10 分钟）
   middleware/auth.js  Bearer token 鉴权（requireAuth）
   routes/auth.js      无QQ直通(guest)/me/PATCH profile(展示名)/classes
   routes/auth-qq.js   QQ 扫码登录(init/poll/bind) + /status 失效检测
-  routes/files.js     文件上传/列表/PATCH 元数据/下载/删除
+  routes/files.js     文件上传（每日20次限制+AI审查+百万字符拦截）/列表/PATCH/下载/删除（回扣积分）/HTML 预览（CSP sandbox）
   routes/class.js     全校作品展(wall)/总览(overview)——含 apps 混排 + display_name
   routes/apps.js      AI 轻应用 auto-scan/manual-scan/submit/list/delete
   routes/learn.js     学AI 栏目：章节列表/文章详情/nfti-ticket/nfti-status/app-status/project-status/tinyid-check
@@ -50,6 +50,7 @@ server/
   utils/token.js      HMAC token 签发/校验
   utils/points.js     积分服务（grant 幂等发放 + 流水）
   utils/async.js, rateLimit.js
+  utils/audit.js       DeepSeek 内容审查（文本/代码类上传时调用，reviewContent；key 在 .env 的 DEEPSEEK_API_KEY）
 public/
   index.html          SPA 壳
   css/style.css
@@ -71,14 +72,15 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 > ⚠️ **密码不写入本文档**：真实密码在服务器 `.env`（`DB_PASSWORD`）。2026-08 曾把明文密码提交到 GitHub 触发安全告警，已改密；今后文档一律用占位符，密码只放 `.env`（gitignore）。
 
 - **users**：id, class_name, real_name, qq_tiny_id(可空唯一), qq_session_id(可空), show_real_name(展示名授权,默认1), nickname(昵称), **points(积分)**, created_at；唯一键 `(class_name, real_name)`
-- **files**：id, user_id, stored_name(uuid落盘), original_name, size, mime_type, **title/description/gameplay(作品信息)**, uploaded_at
+- **files**：id, user_id, stored_name(uuid落盘), original_name, size, mime_type, **title/description/gameplay(作品信息)**, **audit_status(pending/reviewed/flagged)**, **audit_reason**, uploaded_at
 - **apps**：id, user_id, app_url, title, description, gameplay, source_feed_id, created_at
 - **articles**：id, slug(唯一), chapter(章节号), title, summary, content(Markdown), **tasks(JSON 任务数组)**, sort_order, created_at, updated_at
 - **points_log**：id, user_id, amount, reason(first_login/read_article/task/app_submit/file_submit), ref_id(防重), created_at；唯一键 `(user_id, reason, ref_id)`
 - **task_progress**：id, user_id, article_id, task_index, created_at；唯一键 `(user_id, article_id, task_index)`
 - **likes**：id, user_id(点赞人), target_type(file/app), target_id, created_at；唯一键 `(user_id, target_type, target_id)`
-- **feed_like_snapshots**：id, feed_id(帖子BID), like_count(本次 prefer_count), owner_user_id, delta(增量), points_granted, created_at；**追加式**快照，每轮轮询插一行
+- **feed_like_snapshots**：~~已废弃~~（原 CLI 增量被赞统计用，表保留不删，代码不再写入）
 - **purchases**：id, user_id, item(wall_top/app_top/app_essence/title), cost, ref_type, ref_id, feed_id(帖子BID), feed_extra(JSON: create_time/author_id，取消置顶用), title(称号), status(active/expired), expires_at, created_at
+- **upload_log**：id, user_id, created_at；每次上传动作插一行，**每人每天最多 20 次（含删除）**，`DATE(created_at)=CURDATE()` 计数
 
 > 线上库有真实数据，改表用 ALTER 不要 DROP；`npm run init-db` 只在全新环境用。
 
@@ -130,7 +132,7 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 | 提交 AI 轻应用（每个作品一次） | 25 |
 | 提交作品文件（每个文件一次） | 50 |
 | **主动点赞他人**（网页操作，每次 +2⭐，每日票数不限，点赞者每日上限 10） | 2 |
-| **帖子被点赞**（打开「我的积分」页时按用户刷新，作者每日上限 30） | 2/赞 |
+| **作品被点赞**（站内直接发放，作者每日上限 30） | 2/赞 |
 | **课程毕业**（5 章全读完+任务全完成，仅一次） | 50 |
 | **彩蛋**（连续点击顶栏积分徽章 5 次，仅一次） | 5 |
 
@@ -138,7 +140,8 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 - 任务积分是**整章判定**：`/api/points/task` 记 `task_progress` → 该章全完成才 `grant('task','article:<id>')`
 - 排行榜 `/api/points/leaderboard`（top20 降序 + 我的排名 + 称号），前端「🏆 我的积分」页
 - 主动点赞：`/api/points/like`，**每日票数不限**，禁自赞（400），重复赞 409；点赞者 `like_give` +2⭐（每日上限 LIKE_GIVE_DAILY=10）
-- **被赞增量（关键机制）**：用户打开「我的积分」页 → 前端先调 `GET /api/points/refresh-likes`（rateLimit 60s/10 次）→ 后端 `jobs.refreshUserFeedLikes(userId)` 只遍历**该用户**带 `source_feed_id` 的 apps → 用本人 QQ 会话调 `get-feed-detail` 取 `prefer_count` → 与 `feed_like_snapshots` 上次快照对比，**只发增量**（delta×2⭐，`like_receive`，作者每日上限 30）→ 追加快照行（ref_id=`feed:<feed_id>:<snapId>` 防重）。**首次建立基线不补发历史赞**；无有效会话直接跳过（前端提示重新扫码登录）。CLI 耗时约 0.7s/帖，页面串行 await 刷新后再拉积分
+- **删除回扣**：删除文件时 `revoke()` 扣回提交奖励（`file_submit_revoke` 负数流水对冲）；审查拒绝/超长拒绝的文件同样回扣（防止白送 50⭐）；app 删除暂未回扣（如需再补）
+- **被赞积分（站内直发，不用 CLI）**：`POST /api/points/like` 时同步双向发分——点赞者本人 `like_give` +2⭐（每日上限 LIKE_GIVE_DAILY=10，票数不限、禁自赞 400、重复赞 409），作品作者 `like_receive` +2⭐（每日上限 LIKE_RECEIVE_DAILY=30）；同一 `likes.id` 作 ref_id、reason 区分，均幂等。~~原 CLI 增量方案~~（`jobs.refreshUserFeedLikes`、`/api/points/refresh-likes` 已删除；`feed_like_snapshots` 表废弃保留不删）
 - 彩蛋：前端 `app.js` 事件委托监听 `.points-badge` 连点 5 次（2s 窗口）→ `POST /api/points/easter-egg`（幂等 once）
 
 ### 积分商城（已下架：前端无入口，后端接口+定时回收保留，待重新上架）
@@ -159,6 +162,18 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 - **完成判定**：`GET /api/learn/nfti-status` 直查 nfti 库 `test_results WHERE tiny_id=? AND assessment_type='nfti'`（PatPlayer 的 DB 账号被授权只读 nfti 库）；有记录 → 前端自动标记任务完成
 - 未 QQ 登录（无 tiny_id）：前端提示必须 QQ 登录，ticket 接口拒绝
 - **注意**：借用会话拥有与本人扫码登录**完全等价**的权限（含管理员/发帖）——这是设计意图，不是漏洞
+
+### 上传限制与内容审查（2026-08 新增，重要）
+
+- **白名单**：`config.js` 仅允许**代码/文本 15 种**（html/htm/py/js/ts/c/cpp/java/css/json/ipynb/md/txt/csv/svg）+ **压缩包 5 种**（zip/rar/7z/tar/gz）；图片/视频/音频/Office/3D 已全部关闭（历史文件不受影响）
+- **上传限制**：一次最多 5 个文件（前端拦截，更多提示打包压缩包）；每人每天最多 **20 次上传**（含删除，`upload_log` 表计数，`config.maxUploadsPerDay`）
+- **AI 内容审查**（`utils/audit.js` + DeepSeek，key 在 `.env` 的 `DEEPSEEK_API_KEY`）：
+  - 代码/文本类上传时**同步审查**：色情/未成年不宜、违法违规、恶意代码注入
+  - 违规/超长 → 拒绝收录 + **回扣已发积分**（revoke）；AI 超时/异常 → 降级放行标记 `pending`
+  - **百万级字符超长拦截**：`deepseek.maxFileChars=1000000`，字节 >4MB 兜底不读直接拒（提示联系频道主/QQ：3303188265）
+  - 压缩包为二进制不审查（多文件打包途径）
+- **HTML 预览**：`GET /api/files/preview/:id`（登录即可，?token= 传参），响应带 `Content-Security-Policy: sandbox allow-scripts`（脚本可跑但 unique origin，读不了 localStorage/API，防存储型 XSS）
+- **第2章任务双条件**：`/api/learn/app-status` 返回 `posted`（频道发帖）+ `submitted`（本站投稿 apps），两者都满足才算完成
 
 ## 8. 关键结论与坑（最重要，避免重复踩坑）
 
@@ -194,6 +209,10 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 25. **任务上报失败要可见**：前端 `reportTask` 不能静默吞错（`catch {}`）——失败时按钮已置灰但服务端没记录，用户以为完成了。失败要 toast + 回滚按钮状态允许重试
 26. **`poll` 的 `token_obtained` 快捷分支要检查 tiny_id**：已授权但 tiny_id 反查失败时，下一次 poll 不能直接返回 `authorized`（会弹 bind 表单 → bind 又报错），必须重查 tiny_id，仍失败返回 `pending_authorization` + 明确错误
 27. **B站视频链接获取**：`search.bilibili.com` 直接 curl 会被反爬（412），需带浏览器 UA + Referer；`api.bilibili.com/x/web-interface/view?bvid=` 可验证 BV 有效性（标题/时长/UP主）。教程任务里的 BV 号失效需更新 `seed-articles.js` 重跑
+28. **Content-Disposition 不能直接放中文文件名**：HTTP 头仅 ASCII，中文会抛 `ERR_INVALID_CHAR`（预览 500）。用 `filename="preview.html"; filename*=UTF-8''<encodeURIComponent(中文名)>`（RFC 5987）
+29. **`query()` 返回值解构陷阱**：`db.query()` 对 INSERT/UPDATE 返回 ResultSetHeader（对象），对 SELECT 返回行数组。`const [rows] = await query('INSERT ...')` 会解构 ResultSetHeader 报 "not iterable"；SELECT 想取整组用 `const rows = await query(...)`，取首行才 `const [row] = ...`。已踩：点赞 INSERT、learn.js app-status 的 `[appRows]`
+30. **审查拒绝曾白送积分**：原 upload 顺序 INSERT→grant(+50)→审查拒绝→删记录但积分留下。修复：违规/超长分支加 `revoke()` 回扣（file_submit_revoke 负数流水对冲）
+31. **`upload_log` 计数含删除**：删除文件不删 upload_log 行，`file_submit` 流水也保留（revoke 只加负数对冲），保证"每天 20 次含删除"计数准确
 
 ## 9. 部署环境
 
@@ -203,7 +222,7 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 - **nginx**：`/www/server/panel/vhost/nginx/pat.weaxi.cn.conf`（反代 3001，`client_max_body_size 200m`）
 - **SSL**：certbot webroot 模式（`/var/www/certbot`），证书 `/etc/letsencrypt/live/pat.weaxi.cn`（SAN 含 www）
 - **NFTI**：`/home/nfti/NF-BTI`（Docker，backend 9000 + nginx 8081→80），与 PatPlayer 共享 MySQL、共享频道；**backend 容器只读挂载 `/home/PatPlayer/storage/qq-sessions → /patplayer-sessions:ro`**
-- `.env`（生产，已 gitignore）：`NODE_ENV=production`、强随机 `TOKEN_SECRET`、DB 连接、**`PAT_TICKET_SECRET`（与 NFTI docker-compose 一致）+ `NFTI_DB_*` 只读连接**；配置项模板见仓库 `.env.example`（全部占位符，可安全提交）
+- `.env`（生产，已 gitignore）：`NODE_ENV=production`、强随机 `TOKEN_SECRET`、DB 连接、**`PAT_TICKET_SECRET`（与 NFTI docker-compose 一致）+ `NFTI_DB_*` 只读连接 + **`DEEPSEEK_API_KEY`（内容审查，模型 `DEEPSEEK_MODEL` 默认 deepseek-v4-flash）****；配置项模板见仓库 `.env.example`（全部占位符，可安全提交）
 
 ## 10. 常用运维命令
 

@@ -48,7 +48,7 @@ window.API = (() => {
     if (!res.ok) {
       // 413：nginx 或 multer 层拦截的超限错误，若响应体非 JSON（HTML）则给固定文案
       let msg = (data && data.error);
-      if (!msg && res.status === 413) msg = '文件过大，超出上传大小上限（200MB），无法上传';
+      if (!msg && res.status === 413) msg = '文件过大，超出上传大小上限；如确需上传大文件/文件夹，请联系频道主或 QQ：3303188265';
       if (!msg) msg = `请求失败 (${res.status})`;
       const err = new Error(msg);
       err.status = res.status;

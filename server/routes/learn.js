@@ -146,14 +146,20 @@ router.get(
   '/app-status',
   requireAuth,
   asyncHandler(async (req, res) => {
+    // 是否已在本站投稿轻应用（apps 表有带来源帖子的记录）
+    const appRows = await query(
+      "SELECT COUNT(*) AS cnt FROM apps WHERE user_id = ? AND source_feed_id IS NOT NULL AND source_feed_id != ''",
+      [req.user.id]
+    );
+    const submitted = Number(appRows[0].cnt) > 0;
     if (!req.user.qq_tiny_id) {
-      return res.json({ posted: false, need_login: true });
+      return res.json({ posted: false, submitted, need_login: true });
     }
     const rows = await query('SELECT qq_session_id FROM users WHERE id = ?', [req.user.id]);
     const sid = rows.length && rows[0].qq_session_id ? rows[0].qq_session_id : '';
     const s = sid ? qqSessions.getSession(sid) : null;
     if (!s || !s.token_obtained || !s.tiny_id) {
-      return res.json({ posted: false, need_login: true });
+      return res.json({ posted: false, submitted, need_login: true });
     }
     const env = qqSessions.sessionEnv(s);
     let posted = false;
@@ -183,7 +189,7 @@ router.get(
       }
       posted = postCount > 0;
     } catch (_) { /* CLI 异常：返回未检测到，前端可重试 */ }
-    res.json({ posted, post_count: postCount });
+    res.json({ posted, post_count: postCount, submitted });
   })
 );
 

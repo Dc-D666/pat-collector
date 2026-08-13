@@ -66,6 +66,7 @@ async function getPoints(userId) {
     graduate: '课程毕业奖励',
     easter_egg: '彩蛋奖励',
     purchase: '积分商城兑换',
+    file_submit_revoke: '删除作品文件（回扣）',
   };
   return {
     points: rows.length ? rows[0].points : 0,
@@ -115,4 +116,40 @@ async function spend(userId, { item, cost, refType = '', refId = 0, feedId = '',
   }
 }
 
-module.exports = { RULES, grant, getPoints, spend };
+/**
+ * 撤销积分（删除文件/应用等回扣对应奖励）：事务内扣回原发放金额，写负数流水（reason + '_revoke'）。
+ * @returns {number|null} 回扣的积分数；无原发放记录返回 null
+ */
+async function revoke(userId, reason, refId) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [logs] = await conn.execute(
+      'SELECT amount FROM points_log WHERE user_id = ? AND reason = ? AND ref_id = ?',
+      [userId, reason, refId]
+    );
+    if (logs.length === 0) {
+      await conn.commit();
+      return null;
+    }
+    const amount = Number(logs[0].amount);
+    if (amount <= 0) {
+      await conn.commit();
+      return null;
+    }
+    await conn.execute('UPDATE users SET points = points - ? WHERE id = ?', [amount, userId]);
+    await conn.execute(
+      'INSERT INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+      [userId, -amount, reason + '_revoke', refId]
+    );
+    await conn.commit();
+    return amount;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+module.exports = { RULES, grant, getPoints, spend, revoke };

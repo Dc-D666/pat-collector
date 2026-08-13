@@ -9,7 +9,6 @@ const { rateLimit } = require('../utils/rateLimit');
 const { grant, getPoints, spend } = require('../utils/points');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
-const { refreshUserFeedLikes } = require('../jobs');
 
 const router = express.Router();
 
@@ -205,8 +204,8 @@ router.get(
   })
 );
 
-// ---- 作品点赞（主动）：每日票数不限；点赞者本人 +2⭐/次（每日上限 LIKE_GIVE_DAILY）----
-// 被赞作者的积分由 jobs 定时用 CLI 查频道帖子 prefer_count 增量发放（like_receive，每日上限 30）
+// ---- 作品点赞：每日票数不限；点赞者本人 +2⭐/次（每日上限 LIKE_GIVE_DAILY），
+// 被赞作者 +2⭐/赞（站内直接发放，每日上限 LIKE_RECEIVE_DAILY）----
 router.post(
   '/like',
   requireAuth,
@@ -232,12 +231,14 @@ router.post(
 
     // 插入点赞（唯一键防重复赞同一作品）；每日票数不限
     let inserted = false;
+    let likeId = 0;
     try {
       const ins = await query(
         'INSERT INTO likes (user_id, target_type, target_id) VALUES (?, ?, ?)',
         [req.user.id, targetType, targetId]
       );
       inserted = ins.affectedRows > 0;
+      likeId = ins.insertId;
     } catch (err) {
       if (err.code === 'ER_DUP_ENTRY') {
         return res.status(409).json({ error: '你已经赞过这个作品了' });
@@ -245,19 +246,25 @@ router.post(
       throw err;
     }
 
-    // 点赞者自己 +2⭐（每日上限 LIKE_GIVE_DAILY；到上限本次点赞仍记录，但不发分）
-    let gained = 0;
-    if (inserted) {
-      const [earnedRows] = await query(
+    // 双向发分（同一 likes.id 作 ref_id；reason 不同互不冲突，均幂等）
+    let gained = 0;        // 点赞者 +2
+    let authorGained = 0;  // 作者 +2
+    if (inserted && likeId) {
+      // 点赞者（每日上限 LIKE_GIVE_DAILY；到上限本次点赞仍记录，但不发分）
+      const [giveEarned] = await query(
         "SELECT COALESCE(SUM(amount), 0) AS total FROM points_log WHERE user_id = ? AND reason = 'like_give' AND DATE(created_at) = CURDATE()",
         [req.user.id]
       );
-      if (Number(earnedRows.total) < LIKE_GIVE_DAILY) {
-        const likeRows = await query('SELECT id FROM likes WHERE user_id = ? AND target_type = ? AND target_id = ?', [
-          req.user.id, targetType, targetId,
-        ]);
-        const g = likeRows.length ? await grant(req.user.id, 'like_give', 'like:' + likeRows[0].id, 2) : null;
-        gained = g || 0;
+      if (Number(giveEarned.total) < LIKE_GIVE_DAILY) {
+        gained = (await grant(req.user.id, 'like_give', 'like:' + likeId, 2)) || 0;
+      }
+      // 作者（站内直接发放，每日上限 LIKE_RECEIVE_DAILY）
+      const [recvEarned] = await query(
+        "SELECT COALESCE(SUM(amount), 0) AS total FROM points_log WHERE user_id = ? AND reason = 'like_receive' AND DATE(created_at) = CURDATE()",
+        [owner]
+      );
+      if (Number(recvEarned.total) < LIKE_RECEIVE_DAILY) {
+        authorGained = (await grant(owner, 'like_receive', 'like:' + likeId, 2)) || 0;
       }
     }
 
@@ -265,6 +272,7 @@ router.post(
       ok: true,
       liked: inserted,
       gained,
+      author_gained: authorGained,
       daily_left: Math.max(0, LIKE_GIVE_DAILY - (Number((await query(
         "SELECT COALESCE(SUM(amount), 0) AS t FROM points_log WHERE user_id = ? AND reason = 'like_give' AND DATE(created_at) = CURDATE()",
         [req.user.id]
@@ -324,18 +332,6 @@ router.post(
     const granted = await grant(req.user.id, 'easter_egg', 'once');
     const points = await getPoints(req.user.id);
     res.json({ ok: !!granted, granted: granted || null, points: points.points });
-  })
-);
-
-// ---- 刷新我的被赞数据（「我的积分」页打开时调用）：CLI 查频道帖子 prefer_count 增量发分 ----
-router.get(
-  '/refresh-likes',
-  requireAuth,
-  rateLimit({ windowMs: 60 * 1000, max: 10, keyFn: (req) => String(req.user.id) }),
-  asyncHandler(async (req, res) => {
-    const result = await refreshUserFeedLikes(req.user.id);
-    const points = await getPoints(req.user.id);
-    res.json({ ok: true, ...result, points: points.points });
   })
 );
 

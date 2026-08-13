@@ -18,10 +18,6 @@ Views.points = async () => {
 
   let data, mine, graduate;
   try {
-    // 先刷新被赞数据（CLI 增量统计频道帖子点赞），再拉取最新积分
-    try {
-      await API.get('/api/points/refresh-likes');
-    } catch (_) { /* 刷新失败（如未 QQ 登录）不阻塞页面 */ }
     [data, mine, graduate] = await Promise.all([
       API.get('/api/points/leaderboard'),
       API.get('/api/points'),
@@ -75,7 +71,7 @@ Views.points = async () => {
       <div style="font-size:13px;color:var(--text-dim);line-height:2;">
         ✍️ 提交作品文件 +50⭐ / 提交 AI 轻应用 +25⭐<br>
         🧑‍🤝‍🧑 主动点赞他人 +2⭐/次（每天上限 10⭐，票数不限）<br>
-        💬 你的帖子被点赞 +2⭐/赞（每天上限 30⭐，打开本页自动统计）<br>
+        💬 你的作品被点赞 +2⭐/赞（每天上限 30⭐）<br>
         🎓 读完 5 章全部任务完成，毕业大奖 +50⭐<br>
         🥚 连续点击顶栏的积分徽章 5 次，有惊喜
       </div>

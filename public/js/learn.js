@@ -424,7 +424,7 @@ function renderTasks(tasks, articleId) {
                   ${t.desc ? `<p class="learn-task-desc">${escapeHtml(t.desc)}</p>` : ''}
                   <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <a class="btn btn-sm btn-primary" href="#/files">📦 去「我的项目」上传</a>
-                    <button class="btn btn-sm btn-ghost project-done-btn">✅ 我已上传</button>
+                    <button class="btn btn-sm btn-primary project-done-btn">✅ 我已上传</button>
                   </div>
                   <div class="project-status" style="margin-top:8px;font-size:13px;"></div>
                 </div>
@@ -693,18 +693,20 @@ function initAutoTasks() {
 
 // 发表应用核验：服务端检测频道发帖，有才给分
 async function checkAppPosted(task, btn, statusEl) {
-  if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">正在检测你的频道发帖…</span>`;
+  if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">正在检测你的发帖与投稿记录…</span>`;
   try {
     const data = await API.get('/api/learn/app-status');
-    if (data.posted) {
+    if (data.posted && data.submitted) {
       task.dataset.done = '1';
       btn.disabled = true;
       btn.textContent = '✓ 已完成';
       btn.classList.add('task-done');
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">✓ 核验通过，任务完成！</span>`;
       reportTask(parseInt(task.dataset.article, 10), parseInt(task.dataset.task, 10));
+    } else if (!data.posted) {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">还没检测到你的频道发帖记录。确认已在频道发表？发表后过 1-2 分钟再试～</span>`;
     } else {
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">还没检测到你的发帖记录。确认已在频道发表？发表后过 1-2 分钟再试～</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">已检测到发帖 ✓，但还没投稿到本站。请到「我的项目」→「AI 轻应用」点「自动识别」，把作品提交上来后再试～</span>`;
     }
   } catch (err) {
     if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">${Utils.escapeHtml((err && err.message) || '检测失败，请重试')}</span>`;

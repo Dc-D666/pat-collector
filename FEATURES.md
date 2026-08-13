@@ -29,8 +29,12 @@
 
 | 功能 | 说明 | 位置 |
 | --- | --- | --- |
-| 上传 | multer 单文件/次；前端逐文件上传：拖拽/点击多文件、进度条（按文件）、失败自动跳过 | files.js:61 |
-| 扩展名白名单 | 约 50 种：图片/视频/音频/Office/压缩包/代码/3D | config.js:51 |
+| 上传 | multer 单文件/次；前端逐文件上传：拖拽/点击多文件、进度条（浏览器式平滑加载）、失败自动跳过 | files.js:61 |
+| **内容审查（全部文本/代码类）** | 上传任意代码/文本格式（html/py/js/ts/c/java/css/json/md/txt/csv/svg 等）都同步调用 DeepSeek 审查（色情/未成年不宜、违法违规、恶意代码注入），**违规/超长拒绝时回扣已发积分**（file_submit_revoke）；AI 不可用降级放行标记 `pending`；压缩包为二进制不审查 | utils/audit.js + files.js |
+| **超长限制** | 文本/代码类单文件内容达**百万级字符**直接拒绝上传，提示联系频道主/QQ：3303188265（字节 >4MB 兜底不读文件） | files.js |
+| 超 200MB 提示 | 413 及前端预检文案均附「请联系频道主或 QQ：3303188265」 | files.js / api.js / dashboard.js |
+| 扩展名白名单 | **代码/文本 15 种 + 压缩包 5 种**：html/htm/py/js/ts/c/cpp/java/css/json/ipynb/md/txt/csv/svg + zip/rar/7z/tar/gz；图片/视频/音频/Office/3D 已关闭 | config.js |
+| 上传限制 | 一次最多 **5 个文件**（更多提示打包压缩包）；每人每天最多 **20 次上传**（含删除，`upload_log` 表计数） | dashboard.js / files.js |
 | 大小限制 | 单文件默认 **200MB**（`MAX_UPLOAD_MB`）；每用户配额默认 **2GB**（`MAX_USER_STORAGE_MB`，超限回滚落盘） | config.js:84 / files.js:82 |
 | 文件列表 | 仅列本人文件（含标题/简介/玩法） | files.js:123 |
 | 作品信息 | `PATCH /api/files/:id` 补标题/简介/玩法（标题必填） | files.js:136 |
@@ -55,6 +59,7 @@
 - 每项标注 `is_mine` / `same_class`；文件可下载（本人/同班），应用可跳转
 - **点赞**：每日票数不限（🤍→❤️），主动点赞 +2⭐/次；重复点赞 409；置顶作品排最前 + 🔥 徽标
 - 实时搜索：按项目标题 / 作者 / 班级过滤（前端 oninput 即时渲染）
+- **排序切换**：🕐 最新发表（默认，从新到旧）/ ❤️ 点赞最多；置顶作品始终优先 | class-wall.js
 
 ## 五、全校提交总览（server/routes/class.js:140 + public/js/overview.js）
 
@@ -87,13 +92,13 @@
 | 提交 AI 轻应用（每个作品一次） | 25 ⭐ | `app:<id>` |
 | 提交作品文件（每个文件一次） | 50 ⭐ | `file:<id>` |
 | **主动点赞他人**（网页操作，每次 +2⭐） | 2 ⭐ | `like:<likes.id>`；**每日票数不限**，点赞者每日积分上限 10⭐，禁自赞 |
-| **帖子被点赞**（打开「我的积分」页时刷新） | 2 ⭐/赞 | 用户打开积分页 → `GET /api/points/refresh-likes` 用本人 QQ 会话查频道帖子 `prefer_count`，与快照对比只发增量；作者每日上限 30⭐ |
+| **作品被点赞**（站内直接发放） | 2 ⭐/赞 | 点赞时同步给作品作者发放；作者每日上限 30⭐ |
 | **课程毕业**（5 章读完全部任务完成，仅一次） | 50 ⭐ | `once` |
 | **彩蛋**（连续点击顶栏积分徽章 5 次，仅一次） | 5 ⭐ | `once`（前端 app.js 事件委托连点计数） |
 
 - **幂等发放**：`points_log` 唯一键 `(user_id, reason, ref_id)` + 事务内插流水/更新 `users.points` | utils/points.js:19
 - **整章判定**：`POST /api/points/task` 记 `task_progress` → 该章任务全完成才发整章积分；`GET /api/points/task-progress` 回填完成状态 | points.js
-- **被动获赞增量机制**：用户打开「我的积分」页时，前端先调 `GET /api/points/refresh-likes`（60s 限流 10 次）→ 后端 `refreshUserFeedLikes` 用**该用户自己的 QQ 会话**遍历其带 `source_feed_id` 的轻应用，调 CLI `get-feed-detail` 拿 `prefer_count`，与 `feed_like_snapshots` 上次快照对比，仅对增量发分（如上次 5 赞→本次 10 赞，只发 5 个赞的 10⭐）；首次建立基线不补发历史赞；无会话/查询失败跳过（前端提示重新扫码登录）
+- **被赞积分（站内直发）**：`POST /api/points/like` 时，除点赞者本人 +2⭐（`like_give`，每日上限 10）外，同步给作品作者 +2⭐（`like_receive`，每日上限 30）；同一 `likes.id` 作 ref_id、reason 区分，均幂等。**不使用 CLI 查频道点赞**（原 CLI 增量方案及 `feed_like_snapshots` 表已废弃，表保留不删）
 - 排行榜：`GET /api/points/leaderboard` top20 降序 + 我的排名（0 分不占榜），展示名/称号遵循授权 | points.js
 - 流水：`GET /api/points` 积分+最近 50 条记录（含中文原因文案，消费为负数） | utils/points.js
 
@@ -118,7 +123,7 @@
 | --- | --- | --- |
 | 体验 ticket | `GET /api/learn/nfti-ticket`：HMAC 签名一次性 ticket（tiny_id+pat_sid+5min 过期）→ 跳 `https://nfti.weaxi.cn/?pat_ticket=...` 免登录体验 | learn.js:107 |
 | 体验判定 | `GET /api/learn/nfti-status`：只读连接 nfti 库查 `test_results`（`assessment_type='nfti'`） | learn.js:132 |
-| 第2章任务 | `GET /api/learn/app-status`：近 7 天是否在频道发表过帖子 | learn.js:145 |
+| 第2章任务 | `GET /api/learn/app-status`：近 7 天是否在频道发帖 **+ 是否已在本站投稿轻应用**，两者都满足才算完成 | learn.js:145 |
 | 第3章任务 | `GET /api/learn/project-status`：近 14 天是否上传过项目文件 | learn.js:191 |
 | 第5章任务 | `POST /api/learn/tinyid-check`：提交的 tiny_id 与登录身份一致性核验 | learn.js:205 |
 
@@ -149,7 +154,7 @@
 | 启动 | `npm start`（`node server/index.js`）监听 `127.0.0.1:3001`；PM2 服务名 `patplayer`（`ecosystem.config.cjs`，fork 单实例） |
 | 数据库 | MySQL（库 `pat`，`dateStrings:true` 直返字符串规避时区）；`npm run init-db` 建 9 张表（users/files/apps/articles/points_log/task_progress/likes/purchases/**feed_like_snapshots**） |
 | 文件存储 | 本地磁盘 `storage/uploads`（UUID 落盘名 + 原始名映射）；QQ 会话 `storage/qq-sessions` |
-| 环境变量 | `.env`（模板见 `.env.example`）：`PORT / DB_* / TOKEN_SECRET / MAX_UPLOAD_MB / MAX_USER_STORAGE_MB / STORAGE_DIR / QQ_SESSIONS_DIR / GUILD_ID / PAT_TICKET_SECRET / NFTI_DB_*` |
+| 环境变量 | `.env`（模板见 `.env.example`）：`PORT / DB_* / TOKEN_SECRET / MAX_UPLOAD_MB / MAX_USER_STORAGE_MB / STORAGE_DIR / QQ_SESSIONS_DIR / GUILD_ID / PAT_TICKET_SECRET / NFTI_DB_* / DEEPSEEK_API_KEY / DEEPSEEK_MODEL / DEEPSEEK_BASE_URL / DEEPSEEK_AUDIT` |
 | 安全 | 生产环境 `TOKEN_SECRET` 缺失/示例值 → 启动 fail-fast（config.assertConfig）；`.env` 已 gitignore |
 | nginx | `deploy/pat.weaxi.cn.conf`：反代 3001、`client_max_body_size 200m`、`proxy_cache off`（保 Range 请求不被吞）、www 301 归一化、certbot ACME 段 |
 | 域名 | `https://pat.weaxi.cn`（证书 SAN 含 www；`deploy/pat.weaxi.cn.http.conf` 为签证书前的临时 HTTP 段） |

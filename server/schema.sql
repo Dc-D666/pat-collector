@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS files (
   title VARCHAR(255) NULL COMMENT '作品标题',
   description VARCHAR(2000) NULL COMMENT '作品简介',
   gameplay VARCHAR(2000) NULL COMMENT '玩法',
+  audit_status VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT 'HTML 审查状态：pending 待审 / reviewed 已过审 / flagged 违规（非 HTML 直接 reviewed）',
+  audit_reason VARCHAR(500) NOT NULL DEFAULT '' COMMENT '审查不通过原因',
   uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_user_file (user_id, original_name),
   KEY idx_user (user_id),
@@ -83,6 +85,14 @@ CREATE TABLE IF NOT EXISTS task_progress (
   CONSTRAINT fk_tp_article FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 作品点赞：一人对同一作品只能赞一次；点赞人每日票数、作者每日积分收入上限在接口层控制
+CREATE TABLE IF NOT EXISTS upload_log (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_user_created (user_id, created_at),
+  CONSTRAINT fk_ulog_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- 作品点赞：一人对同一作品只能赞一次；点赞人每日票数、作者每日积分收入上限在接口层控制
 CREATE TABLE IF NOT EXISTS likes (
   id INT AUTO_INCREMENT PRIMARY KEY,
