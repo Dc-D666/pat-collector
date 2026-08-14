@@ -97,5 +97,29 @@ window.Utils = (() => {
     setTimeout(() => el.remove(), 2600);
   }
 
-  return { formatSize, formatTime, escapeHtml, extOf, getFileIcon, openModal, closeModal, confirm, toast };
+  // 上传实时速度计算器：每次传入已传字节，返回平滑后的速度（字节/秒）。
+  // 用指数滑动平均（EWMA）平滑瞬时抖动，展示更稳定。
+  function createSpeedTracker() {
+    let last = null;
+    let avg = 0;
+    return (loaded) => {
+      const now = Date.now();
+      if (last === null) { last = { loaded, t: now }; return 0; }
+      const dt = (now - last.t) / 1000;
+      const dl = loaded - last.loaded;
+      last = { loaded, t: now };
+      if (dt <= 0 || dl < 0) return avg;
+      const inst = dl / dt;
+      avg = avg ? avg * 0.7 + inst * 0.3 : inst;
+      return avg;
+    };
+  }
+
+  // 上传进度文案：'12.6 MB / 198.8 MB · 1.2 MB/s'（speed 为 0 或未给时省略速度）
+  function formatProgress(loaded, total, speed) {
+    const base = formatSize(loaded) + ' / ' + formatSize(total);
+    return speed > 0 ? base + ' · ' + formatSize(speed) + '/s' : base;
+  }
+
+  return { formatSize, formatTime, escapeHtml, extOf, getFileIcon, openModal, closeModal, confirm, toast, createSpeedTracker, formatProgress };
 })();

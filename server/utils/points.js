@@ -66,6 +66,7 @@ async function getPoints(userId) {
     graduate: '课程毕业奖励',
     easter_egg: '彩蛋奖励',
     purchase: '积分商城兑换',
+    admin_adjust: '管理员调整',
     file_submit_revoke: '删除作品文件（回扣）',
   };
   return {

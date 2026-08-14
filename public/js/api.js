@@ -97,5 +97,39 @@ window.API = (() => {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  return { request, get, post, patch, del, download, getToken, setToken, clearToken, setUser, getUser };
+  // 上传（带实时进度）：XMLHttpRequest 支持 upload.onprogress，可显示已传/总字节与速度。
+  // 注意：不设超时——单文件最大 200MB，慢网速下可能传很久（fetch 版的 15s 超时不适用于上传）。
+  function uploadWithProgress(path, formData, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', path);
+      const token = getToken();
+      const hadToken = !!token;
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
+      };
+      xhr.onload = () => {
+        let data = null;
+        try { data = JSON.parse(xhr.responseText); } catch (e) { /* 非 JSON（如 nginx 拦截返回的 HTML 413） */ }
+        if (xhr.status >= 200 && xhr.status < 300) { resolve(data); return; }
+        if (xhr.status === 401 && hadToken) {
+          goLogin();
+          reject(new Error('登录已过期，请重新登录'));
+          return;
+        }
+        let msg = data && data.error;
+        if (!msg && xhr.status === 413) msg = '文件过大，超出上传大小上限；如确需上传大文件/文件夹，请联系频道主或 QQ：3303188265';
+        if (!msg) msg = `请求失败 (${xhr.status})`;
+        const err = new Error(msg);
+        err.status = xhr.status;
+        reject(err);
+      };
+      xhr.onerror = () => reject(new Error('网络错误，请稍后重试'));
+      xhr.upload.onerror = () => reject(new Error('网络错误，请稍后重试'));
+      xhr.send(formData);
+    });
+  }
+
+  return { request, get, post, patch, del, download, uploadWithProgress, getToken, setToken, clearToken, setUser, getUser };
 })();

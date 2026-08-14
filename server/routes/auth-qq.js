@@ -26,8 +26,16 @@ function publicUser(row) {
     nickname: row.nickname || '',
     points: row.points || 0,
     is_qq_bound: !!row.qq_tiny_id,
+    is_admin: row.is_admin === 1,
+    status: row.status || 'active',
     created_at: row.created_at,
   };
+}
+
+// 管理员引导：tiny_id 命中 ADMIN_QQ_TINY_IDS 白名单 → 自动置 is_admin=1（幂等）
+async function maybeGrantAdmin(userId, tinyId) {
+  if (!tinyId || !config.adminQqTinyIds.has(String(tinyId))) return;
+  await query('UPDATE users SET is_admin = 1 WHERE id = ? AND is_admin = 0', [userId]);
 }
 
 const ipKey = (req) => req.ip || req.connection.remoteAddress || 'unknown';
@@ -275,12 +283,22 @@ router.post(
     // 该 tiny_id 已绑定 → 直接登录（无需再填班级姓名）
     const byQq = await query('SELECT * FROM users WHERE qq_tiny_id = ?', [s.tiny_id]);
     if (byQq.length > 0) {
+      // 停用用户：拒绝登录
+      if (byQq[0].status !== 'active') {
+        return res.status(403).json({ error: '账号已停用' });
+      }
+      await maybeGrantAdmin(byQq[0].id, s.tiny_id);
       await linkSession(sessionId, byQq[0].id);
-      return res.json({ token: issue(byQq[0].id), user: publicUser(byQq[0]) });
+      const fresh = await query('SELECT * FROM users WHERE id = ?', [byQq[0].id]);
+      return res.json({ token: issue(byQq[0].id), user: publicUser(fresh[0]) });
     }
 
     class_name = config.normalizeClass(class_name);
     const isStandard = config.isStandardClass(class_name);
+    // 「其他」年级：班级必填，仅接受 4 位班级号（毕业生）或 0（外校）
+    if (!isStandard && (class_name !== '0' && !/^\d{4}$/.test(class_name))) {
+      return res.status(400).json({ error: '毕业生请填自己班级（4 位数字），外校请填 0' });
+    }
     if (isStandard && !real_name) {
       return res.status(400).json({ error: '请输入姓名' });
     }
@@ -295,13 +313,19 @@ router.post(
     );
     if (byName.length > 0) {
       const u = byName[0];
+      // 停用用户：拒绝绑定登录
+      if (u.status !== 'active') {
+        return res.status(403).json({ error: '账号已停用' });
+      }
       if (u.qq_tiny_id && u.qq_tiny_id !== s.tiny_id) {
         return res.status(409).json({ error: '该姓名已绑定其他 QQ，请勿冒用' });
       }
       await query('UPDATE users SET qq_tiny_id = ? WHERE id = ?', [s.tiny_id, u.id]);
       u.qq_tiny_id = s.tiny_id;
+      await maybeGrantAdmin(u.id, s.tiny_id);
       await linkSession(sessionId, u.id);
-      return res.json({ token: issue(u.id), user: publicUser(u) });
+      const fresh = await query('SELECT * FROM users WHERE id = ?', [u.id]);
+      return res.json({ token: issue(u.id), user: publicUser(fresh[0]) });
     }
 
     const result = await query(
@@ -311,8 +335,11 @@ router.post(
     const created = { id: result.insertId, class_name, real_name, qq_tiny_id: s.tiny_id, show_real_name: showReal ? 1 : 0, nickname, points: 0, created_at: new Date() };
     // 首次登录奖励
     await grant(created.id, 'first_login', 'once');
-    const fresh = await query('SELECT points FROM users WHERE id = ?', [created.id]);
+    await maybeGrantAdmin(created.id, s.tiny_id);
+    const fresh = await query('SELECT points, is_admin, status FROM users WHERE id = ?', [created.id]);
     created.points = fresh.length ? fresh[0].points : 0;
+    created.is_admin = fresh.length ? fresh[0].is_admin : 0;
+    created.status = fresh.length ? fresh[0].status : 'active';
     await linkSession(sessionId, created.id);
     return res.json({ token: issue(created.id), user: publicUser(created) });
   })

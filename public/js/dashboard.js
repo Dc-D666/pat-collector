@@ -116,24 +116,28 @@ Views.files = () => {
     if (!queue) return;
     queue.classList.add('show');
     queue.innerHTML = `
-      <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+      <div class="progress"><div class="progress-bar" id="progress-bar"></div><div class="upload-summary" id="upload-summary" style="font-size:12px;color:var(--text-dim);margin-top:4px;"></div></div>
       <div id="upload-items">${files.map((f, i) => `
         <div class="upload-item" data-idx="${i}">
-          <span class="fstatus">⏳</span><span class="fname">${escapeHtml(f.name)}</span>
+          <span class="fstatus">⏳</span><span class="fname">${escapeHtml(f.name)}</span><span class="fprog"></span>
         </div>`).join('')}</div>`;
     const bar = document.getElementById('progress-bar');
+    const summary = document.getElementById('upload-summary');
     const setStatus = (i, icon) => {
       const el = queue.querySelector(`[data-idx="${i}"] .fstatus`);
       if (el) el.textContent = icon;
     };
-    // 浏览器式加载进度：上传期间平滑爬升（封顶 88%），完成后推进到真实比例
-    let fakePct = 0;
-    const fakeTimer = setInterval(() => {
-      fakePct = Math.min(88, fakePct + (Math.random() * 1.4 + 0.2));
-      const real = files.length ? (done / files.length) * 100 : 100;
-      bar.style.width = Math.max(real, fakePct) + '%';
-    }, 260);
-    let done = 0;
+    const setProg = (i, text) => {
+      const el = queue.querySelector(`[data-idx="${i}"] .fprog`);
+      if (el) { el.textContent = text; el.style.color = 'var(--text-dim)'; el.style.fontSize = '12px'; el.style.flexShrink = '0'; }
+    };
+    // 真实字节进度：顶部进度条 = 全部文件已传字节 / 总字节；每行显示 已传/总 + 实时速度
+    const totalBytes = files.reduce((s, f) => s + f.size, 0);
+    let doneBytes = 0;
+    const updateBar = () => {
+      if (bar) bar.style.width = (totalBytes ? Math.min(100, (doneBytes / totalBytes) * 100) : 100) + '%';
+      if (summary) summary.textContent = `${Utils.formatSize(doneBytes)} / ${Utils.formatSize(totalBytes)}`;
+    };
     let failedCount = 0; // 失败文件数：有失败时保留上传队列，避免错误提示一闪而过
     const newFiles = []; // 本次上传成功的文件，列表中以「待完善」标记，可随时补齐作品信息
     for (let i = 0; i < files.length; i++) {
@@ -141,12 +145,12 @@ Views.files = () => {
       // 前端预检大小：超过上限直接拦截，避免 nginx 返回 HTML 413
       if (f.size > limitMb * 1024 * 1024) {
         setStatus(i, '❌');
+        setProg(i, `超过 ${limitMb}MB 上限`);
         const row = queue.querySelector(`[data-idx="${i}"]`);
         if (row) {
           const msg = `文件过大（超过 ${limitMb}MB 上限），无法上传；如确需上传大文件/文件夹，请联系频道主或 QQ：3303188265`;
           row.title = msg; row.querySelector('.fname').textContent += ' — ' + msg;
         }
-        done++;
         failedCount++;
         continue;
       }
@@ -168,15 +172,25 @@ Views.files = () => {
           auditRow = rowEl;
         }
       }
+      const tracker = Utils.createSpeedTracker();
       try {
-        const data = await API.post('/api/files/upload', fd);
+        const data = await API.uploadWithProgress('/api/files/upload', fd, (loaded, total) => {
+          // 顶部进度 = 已完成文件字节 + 当前文件已传字节
+          setProg(i, Utils.formatProgress(loaded, total, tracker(loaded)));
+          if (bar) bar.style.width = (totalBytes ? Math.min(100, ((doneBytes + loaded) / totalBytes) * 100) : 100) + '%';
+          if (summary) summary.textContent = `${Utils.formatSize(doneBytes + loaded)} / ${Utils.formatSize(totalBytes)}`;
+        });
+        doneBytes += f.size;
+        updateBar();
         setStatus(i, '✅');
+        setProg(i, '已完成');
         if (data && data.file) {
           newFiles.push({ id: data.file.id, original_name: data.file.original_name });
           refreshPoints();
         }
       } catch (err) {
         setStatus(i, '❌');
+        setProg(i, err.message);
         const row = queue.querySelector(`[data-idx="${i}"]`);
         if (row) { row.title = err.message; row.querySelector('.fname').textContent += ' — ' + err.message; }
         failedCount++;
@@ -187,11 +201,10 @@ Views.files = () => {
           if (tag) tag.remove();
         }
       }
-      done++;
     }
     // 全部完成：进度条 100%
-    clearInterval(fakeTimer);
     bar.style.width = '100%';
+    if (summary) summary.textContent = `${Utils.formatSize(totalBytes)} / ${Utils.formatSize(totalBytes)}`;
     if (failedCount > 0) {
       // 有失败：保留队列显示错误原因，不自动关闭
       toast(`上传完成：成功 ${newFiles.length} 个，失败 ${failedCount} 个，原因见上方列表`);

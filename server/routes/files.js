@@ -2,67 +2,25 @@
 
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
 const config = require('../config');
 const { query } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
-const { grant, revoke } = require('../utils/points');
-const { reviewContent } = require('../utils/audit');
+const { revoke } = require('../utils/points');
+const { runMulter, ensureDiskSpace, runUploadPipeline, sanitizeName, extOf } = require('../utils/upload');
 
 const router = express.Router();
-
-// multer 把 originalname 按 latin1 解析，中文会乱码；转回 utf8
-function decodeName(name) {
-  return Buffer.from(name || '', 'latin1').toString('utf8');
-}
-
-// 清洗文件名：去控制字符（防止 Content-Disposition 头注入/崩溃）、非法字符、限长
-function sanitizeName(name) {
-  const cleaned = String(name || '')
-    .replace(/[\x00-\x1f\x7f]/g, '')
-    .replace(/[\\/:*?"<>|]/g, '_')
-    .slice(0, 255);
-  return cleaned || 'file';
-}
-
-function extOf(name) {
-  return path.extname(name).slice(1).toLowerCase();
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, config.storageDir),
-  filename: (req, file, cb) => {
-    const ext = extOf(decodeName(file.originalname));
-    cb(null, crypto.randomUUID() + (ext ? '.' + ext : ''));
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: config.maxUploadBytes, files: 1 },
-  fileFilter: (req, file, cb) => {
-    const ext = extOf(decodeName(file.originalname));
-    if (!config.allowedExtensions.has(ext)) {
-      return cb(new Error('仅支持代码/文本文件（.html .py .js .md 等），不支持 .' + ext + ' 类型'));
-    }
-    cb(null, true);
-  },
-});
-
-function runMulter(req, res) {
-  return new Promise((resolve, reject) => {
-    upload.single('file')(req, res, (err) => (err ? reject(err) : resolve()));
-  });
-}
 
 // 上传（单文件/次；前端逐文件上传以支持按文件进度与失败跳过）
 router.post(
   '/upload',
   requireAuth,
   asyncHandler(async (req, res) => {
+    // 上传前磁盘自检：剩余空间不足时直接拒绝（不落盘任何文件）
+    if (!ensureDiskSpace(res)) return;
+
     try {
       await runMulter(req, res);
     } catch (err) {
@@ -71,108 +29,8 @@ router.post(
       }
       return res.status(400).json({ error: err.message || '上传失败' });
     }
-    if (!req.file) {
-      return res.status(400).json({ error: '未收到文件' });
-    }
-
-    const originalName = sanitizeName(path.basename(decodeName(req.file.originalname)));
-    const size = req.file.size;
-    const mimeType = req.file.mimetype || 'application/octet-stream';
-    const ext = extOf(originalName);
-    const isText = config.textFormats.has(ext); // 文本/代码类：需 AI 审查 + 超长限制
-    const isHtml = ext === 'html' || ext === 'htm'; // 预览按钮仅 HTML
-
-    // 每人每天上传次数限制（含上传后删除的）：先检查再记录
-    const [ulogCnt] = await query(
-      'SELECT COUNT(*) AS c FROM upload_log WHERE user_id = ? AND DATE(created_at) = CURDATE()',
-      [req.user.id]
-    );
-    if (Number(ulogCnt.c) >= config.maxUploadsPerDay) {
-      fs.promises.unlink(req.file.path).catch(() => {});
-      return res.status(400).json({ error: `今日上传次数已达上限（${config.maxUploadsPerDay} 次），请明天再试` });
-    }
-    await query('INSERT INTO upload_log (user_id) VALUES (?)', [req.user.id]);
-
-    try {
-      // 每用户存储配额检查
-      const [used] = await query(
-        'SELECT COALESCE(SUM(size), 0) AS total FROM files WHERE user_id = ?',
-        [req.user.id]
-      );
-      if (Number(used.total) + size > config.maxUserStorageBytes) {
-        fs.promises.unlink(req.file.path).catch(() => {});
-        return res.status(413).json({ error: '超出个人存储配额，请删除部分文件后再试' });
-      }
-
-      const result = await query(
-        `INSERT INTO files (user_id, stored_name, original_name, size, mime_type, audit_status)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [req.user.id, req.file.filename, originalName, size, mimeType, isText ? 'pending' : 'reviewed']
-      );
-      const inserted = await query('SELECT uploaded_at FROM files WHERE id = ?', [result.insertId]);
-      // 提交作品文件奖励（每个文件一次）
-      await grant(req.user.id, 'file_submit', 'file:' + result.insertId);
-
-      // 文本/代码类文件：先做超长限制（单文件达百万级字符直接拒绝），再同步 AI 内容审查
-      let auditStatus = isText ? 'pending' : 'reviewed';
-      let auditReason = '';
-      if (isText && config.deepseek.auditEnabled) {
-        const ds = config.deepseek;
-        try {
-          // 超长检查：字节超阈值必超百万字符（不读文件直接拒）；否则读内容精确按字符数判断
-          if (size > ds.maxFileBytesBeforeRead) {
-            await query('DELETE FROM files WHERE id = ?', [result.insertId]);
-            await revoke(req.user.id, 'file_submit', 'file:' + result.insertId);
-            fs.promises.unlink(req.file.path).catch(() => {});
-            return res.status(400).json({ error: '文件过大（内容超长），请压缩后分多次上传；或私信联系频道主 / QQ：3303188265 解决' });
-          }
-          const content = await fs.promises.readFile(req.file.path, 'utf8');
-          if (content.length >= ds.maxFileChars) {
-            await query('DELETE FROM files WHERE id = ?', [result.insertId]);
-            await revoke(req.user.id, 'file_submit', 'file:' + result.insertId);
-            fs.promises.unlink(req.file.path).catch(() => {});
-            return res.status(400).json({ error: '文件过大（内容超长），请压缩后分多次上传；或私信联系频道主 / QQ：3303188265 解决' });
-          }
-          const r = await reviewContent(content);
-          if (!r.safe) {
-            // 违规：删除文件与记录 + 回扣已发积分，拒绝收录
-            await query('DELETE FROM files WHERE id = ?', [result.insertId]);
-            await revoke(req.user.id, 'file_submit', 'file:' + result.insertId);
-            fs.promises.unlink(req.file.path).catch(() => {});
-            return res.status(400).json({ error: '内容未通过审核：' + (r.reason || '可能包含违规内容（如色情、违法内容或恶意代码）') });
-          }
-          auditStatus = 'reviewed';
-        } catch (err) {
-          // AI 审查不可用（超时/接口错误）：放行并标记待审，不阻塞学生上传
-          console.warn('[audit] 内容审查失败（放行，标记待审）：', err.message);
-          auditStatus = 'pending';
-        }
-      }
-      if (auditStatus !== 'pending') {
-        await query('UPDATE files SET audit_status = ?, audit_reason = ? WHERE id = ?', [auditStatus, auditReason, result.insertId]);
-      }
-
-      return res.json({
-        file: {
-          id: result.insertId,
-          original_name: originalName,
-          size,
-          mime_type: mimeType,
-          title: null,
-          description: null,
-          gameplay: null,
-          audit_status: auditStatus,
-          uploaded_at: inserted[0].uploaded_at,
-        },
-      });
-    } catch (err) {
-      // 唯一约束冲突（同名文件）或其它 DB 错误 → 回滚落盘文件
-      fs.promises.unlink(req.file.path).catch(() => {});
-      if (err.code === 'ER_DUP_ENTRY') {
-        return res.status(409).json({ error: '同名文件已存在，请先删除或重命名' });
-      }
-      throw err;
-    }
+    // 已登录用户沿用全局每日上传上限（config.maxUploadsPerDay）
+    return runUploadPipeline(req, res, req.user, { maxUploadsPerDay: config.maxUploadsPerDay });
   })
 );
 

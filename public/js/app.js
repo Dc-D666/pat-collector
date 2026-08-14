@@ -11,6 +11,9 @@ window.App = (() => {
     learn: () => Views.learnList(),
     'learn/:slug': (slug) => Views.learnArticle(slug),
     points: () => Views.points(),
+    'p/:token': (token) => Views.project(token),
+    admin: () => Views.admin(''),
+    'admin/:page': (page) => Views.admin(page),
   };
 
   function parseKey() {
@@ -28,11 +31,18 @@ window.App = (() => {
 
     const { key, arg } = parseKey();
     const isLogin = key === 'login';
-    // is-auth = 登录页标记：登录页隐藏主页壳（rail/appbar/topbar），进入系统后移除恢复
-    document.body.classList.toggle('is-auth', isLogin);
+    // 项目地址页（#/p/:token）：访客独立页，同样隐藏主页壳
+    const isProject = key === 'p' && !!arg;
+    // is-auth = 登录页/独立页标记：隐藏主页壳（rail/appbar/topbar），进入系统后移除恢复
+    document.body.classList.toggle('is-auth', isLogin || isProject);
 
     if (isLogin) {
       routes.login();
+      animateView();
+      return;
+    }
+    if (isProject) {
+      routes['p/:token'](arg);
       animateView();
       return;
     }
@@ -44,6 +54,13 @@ window.App = (() => {
     checkQqStatusGlobal(); // 全站 QQ 会话失效检测（节流 60s）
     if (key === 'learn' && arg) {
       routes['learn/:slug'](arg);
+      animateView();
+      return;
+    }
+    if (key === 'admin') {
+      // 管理后台：非管理员由 Views.admin 内部拦截（后端 requireAdmin 双保险）
+      if (arg) routes['admin/:page'](arg);
+      else routes.admin();
       animateView();
       return;
     }

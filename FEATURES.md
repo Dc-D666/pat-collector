@@ -17,12 +17,15 @@
 | 功能 | 说明 | 位置 |
 | --- | --- | --- |
 | QQ 频道扫码登录（主） | `init` 拿二维码 → `poll` 轮询授权并反查 tiny_id → `bind` 绑定班级+姓名；已绑定直接登录；身份识别失败（未加入频道）时自动展示频道二维码引导加入（`public/img/qq-channel.jpg`） | auth-qq.js:73/164/244 / auth.js(前端) |
-| 无 QQ 直通（兜底） | 班级+姓名直接进系统，无密码、无学号 | auth.js:39 |
-| Token | HMAC-SHA256 签名（`TOKEN_SECRET`），base64url，**24h 过期**，Bearer 头携带 | utils/token.js |
+| **访客直传（无 QQ）** | 登录页点「我没有QQ，或直接提交我的程序文件」→ 表单：**年级 → 班级 → 姓名 → 展示名授权 → 安全密码（选填）** → 上传程序文件 → 提交后签发**专属项目地址**（`#/p/<token>`），凭地址查看/下载/继续上传/删除；**不进入系统**（无系统令牌，其余功能全部不可用）。额度：单文件 ≤200MB（`MAX_UPLOAD_MB`），每天最多 5 次（`GUEST_MAX_UPLOADS_PER_DAY`） | auth.js(前端) / routes/auth.js:44 / routes/guest.js / public/js/project.js |
+| 访客项目地址 | `GET /api/guest/files?token=`（身份+文件列表+今日额度）、`POST /api/guest/upload`（multipart file+token）、`GET /api/guest/download/:id?token=`、`GET /api/guest/preview/:id?token=`（HTML，CSP sandbox）；令牌为 64 位 hex 长随机串、无过期、同一身份幂等返回同一地址 | routes/guest.js |
+| **访客删除（密码保护）** | `DELETE /api/guest/files/:id?token=&password=`：仅删本项目地址下的文件；密码 = 提交时自定义（scrypt 加盐哈希存 `users.guest_pwd_hash`）或未设置时的默认密码（`GUEST_DEFAULT_PASSWORD`）；错误 403、限流（10 次/10 分钟/令牌+IP）防爆破；删除回扣提交积分（与系统内删除一致），不返还当天上传次数 | routes/guest.js / utils/pwd.js / public/js/project.js |
+| 上传磁盘自检 | **每次上传前**（登录与访客共用）检测服务器磁盘剩余空间，低于 `MIN_FREE_DISK_GB`（默认 2GB）返回 507「磁盘即将爆满，文件上传失败，请联系频道主扩容处理」，不落盘 | utils/upload.js:63（ensureDiskSpace）/ utils/disk.js |
+| Token | 系统：HMAC-SHA256 签名（`TOKEN_SECRET`），base64url，**24h 过期**，Bearer 头携带；访客：`guest_token` 列 | utils/token.js |
 | 当前用户 | `GET /api/auth/me`（附单文件上传上限供前端预检） | auth.js:85 |
 | 班级数据源 | `GET /api/auth/classes` 年级→班级二级菜单；前端有兜底常量 | auth.js:32 / auth.js(前端) |
 | 展示名授权 | `PATCH /api/auth/profile`：是否展示真实姓名；选否需填昵称（QQ 登录默认预填频道昵称） | auth.js:90 |
-| 班级白名单 | 高一 2601–2624、高二 2501–2524、高三 2401–2425，另有「其他」自由文本（归一化+限长） | config.js:15 |
+| 班级白名单 | 高一 2601–2624、高二 2501–2524、高三 2401–2425，另有「其他」：毕业生填自己班级（4 位数字），外校填 0（必填校验） | config.js:15 |
 | QQ 会话失效检测 | `GET /api/auth/qq/status` 调 CLI `login status`，失效清理会话；前端全站横幅检测（60s 节流） | auth-qq.js:36 / app.js |
 
 ## 二、个人文件管理（server/routes/files.js + public/js/dashboard.js「项目文件」tab）
@@ -136,6 +139,21 @@
 - 灵感 & 常见问题（details 折叠：创作方向 + FAQ）
 - 时间与奖项；底部一行社团介绍小字
 
+## 九.五、管理后台（server/routes/admin.js + public/js/admin.js，仅 QQ 管理员）
+
+- **权限**：`users.is_admin` 标志 + `ADMIN_QQ_TINY_IDS` 白名单引导（QQ 绑定自动授权）；全部接口 `requireAdmin`（非管理员 403）；`users.status='disabled'` 停用（禁登录/登记/上传）；所有写操作记 `admin_log` 审计
+- **总览**：用户/文件/轻应用/积分/存储统计、磁盘剩余、待审核数（`GET /api/admin/stats`）
+- **用户**：搜索（姓名/昵称/班级/访客令牌前缀）、身份与状态筛选；调积分（±，防自肥）、设/取消管理员（仅 QQ）、停用/恢复、重置访客删除密码、删除（级联+物理文件）
+- **文件**：搜索（文件名/标题/作者/班级/审核状态）、预览/下载、改作品信息与审核状态（flagged→reviewed 自动补发积分）、删除（回扣 +50）
+- **审核**：pending/flagged/reviewed 队列，通过（补发回扣积分）/拒绝（+原因，回扣积分）/删除；**批量**勾选通过/删除
+- **轻应用**：搜索、删除（回扣 +25——普通用户路径未回扣，管理端补齐）
+- **积分**：排行榜 TOP50、流水检索（用户/类型）
+- **运营**：置顶/称号/精华记录、手动过期、免费手动置顶（file/app，≤168h）、发放称号、商城开关（`settings.shop_enabled`）
+- **运维**：按班级存储占用、大文件 TOP20、磁盘剩余、QQ 会话列表/一键失效
+- **教程**：在线编辑 `articles`（**独立全屏编辑页** `#/admin/articles/new|edit/:id`，双栏实时预览 + Ctrl+S 保存；tasks 须 JSON 数组；改教程保留 id 不影响学员进度）；`seed-articles.js` 仅作初始种子
+- **设置**：运行时开关 `shop_enabled` / `audit_enabled`（覆盖 DeepSeek 审核，30s 缓存写后即时生效）
+- **审计**：管理员操作日志检索（谁/何时/对什么/IP）
+
 ## 十、全局框架（public/index.html + app.js / nav.js / api.js / utils.js）
 
 - **hash 路由 SPA**：`#/activity`（活动简介）、`#/files`（我的项目）、`#/class-wall`（全校作品展）、`#/overview`（提交总览，路由保留但导航不展示）、`#/learn` + `#/learn/:slug`（学AI）、`#/points`（我的积分） | app.js:5
@@ -152,9 +170,9 @@
 | 项 | 值 |
 | --- | --- |
 | 启动 | `npm start`（`node server/index.js`）监听 `127.0.0.1:3001`；PM2 服务名 `patplayer`（`ecosystem.config.cjs`，fork 单实例） |
-| 数据库 | MySQL（库 `pat`，`dateStrings:true` 直返字符串规避时区）；`npm run init-db` 建 9 张表（users/files/apps/articles/points_log/task_progress/likes/purchases/**feed_like_snapshots**） |
+| 数据库 | MySQL（库 `pat`，`dateStrings:true` 直返字符串规避时区）；`npm run init-db` 建 11 张表（users/files/apps/articles/points_log/task_progress/likes/purchases/**feed_like_snapshots**/admin_log/settings） |
 | 文件存储 | 本地磁盘 `storage/uploads`（UUID 落盘名 + 原始名映射）；QQ 会话 `storage/qq-sessions` |
-| 环境变量 | `.env`（模板见 `.env.example`）：`PORT / DB_* / TOKEN_SECRET / MAX_UPLOAD_MB / MAX_USER_STORAGE_MB / STORAGE_DIR / QQ_SESSIONS_DIR / GUILD_ID / PAT_TICKET_SECRET / NFTI_DB_* / DEEPSEEK_API_KEY / DEEPSEEK_MODEL / DEEPSEEK_BASE_URL / DEEPSEEK_AUDIT` |
+| 环境变量 | `.env`（模板见 `.env.example`）：`PORT / DB_* / TOKEN_SECRET / MAX_UPLOAD_MB / MAX_USER_STORAGE_MB / MAX_UPLOADS_PER_DAY / GUEST_MAX_UPLOADS_PER_DAY / GUEST_DEFAULT_PASSWORD / MIN_FREE_DISK_GB / ADMIN_QQ_TINY_IDS / STORAGE_DIR / QQ_SESSIONS_DIR / GUILD_ID / PAT_TICKET_SECRET / NFTI_DB_* / DEEPSEEK_API_KEY / DEEPSEEK_MODEL / DEEPSEEK_BASE_URL / DEEPSEEK_AUDIT` |
 | 安全 | 生产环境 `TOKEN_SECRET` 缺失/示例值 → 启动 fail-fast（config.assertConfig）；`.env` 已 gitignore |
 | nginx | `deploy/pat.weaxi.cn.conf`：反代 3001、`client_max_body_size 200m`、`proxy_cache off`（保 Range 请求不被吞）、www 301 归一化、certbot ACME 段 |
 | 域名 | `https://pat.weaxi.cn`（证书 SAN 含 www；`deploy/pat.weaxi.cn.http.conf` 为签证书前的临时 HTTP 段） |

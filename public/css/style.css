@@ -322,6 +322,22 @@ span.brand-logo {
 .dropzone .dz-title { font-weight: 600; color: var(--text); margin: 8px 0 2px; }
 .dropzone .dz-hint { font-size: 12px; }
 
+/* 访客直传表单的上传区（登录卡片内，紧凑版） */
+.guest-dropzone {
+  border: 2px dashed var(--border); border-radius: var(--radius);
+  padding: 18px 14px; text-align: center; color: var(--text-dim);
+  transition: border-color .15s, background .15s; cursor: pointer; margin-top: 6px;
+}
+.guest-dropzone.dragover { border-color: var(--primary); background: var(--primary-soft); }
+.guest-dropzone .dz-icon { font-size: 30px; }
+.guest-dropzone .dz-title { font-weight: 600; color: var(--text); margin: 6px 0 2px; font-size: 14px; }
+.guest-dropzone .dz-hint { font-size: 12px; line-height: 1.7; }
+
+/* 教程独立编辑页：桌面双栏（表单 + 实时预览），窄屏单栏 */
+.ae-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+@media (max-width: 900px) { .ae-grid { grid-template-columns: 1fr; } }
+.ae-grid .field textarea { resize: vertical; }
+
 .upload-queue { margin-bottom: 18px; display: none; }
 .upload-queue.show { display: block; }
 .progress { height: 8px; background: var(--bg); border-radius: 9999px; overflow: hidden; margin-bottom: 12px; }

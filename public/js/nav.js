@@ -3,11 +3,11 @@
 // 导航：桌面左 rail + 移动端顶部栏 + 底部 app bar
 window.Nav = (() => {
   const ITEMS = [
-    { hash: '#/activity', icon: '🎉', label: '活动简介', key: 'activity' },
-    { hash: '#/learn', icon: '🎓', label: 'AI 小学堂', key: 'learn' },
-    { hash: '#/class-wall', icon: '🏫', label: '全校作品展', key: 'class-wall' },
-    { hash: '#/files', icon: '🗂️', label: '我的项目', key: 'files' },
-    { hash: '#/points', icon: '🏆', label: '我的积分', key: 'points' },
+    { hash: '#/activity', icon: '', label: '活动简介', key: 'activity' },
+    { hash: '#/learn', icon: '', label: 'AI 小学堂', key: 'learn' },
+    { hash: '#/class-wall', icon: '', label: '全校作品展', key: 'class-wall' },
+    { hash: '#/files', icon: '', label: '我的项目', key: 'files' },
+    { hash: '#/points', icon: '', label: '我的积分', key: 'points' },
   ];
 
   function currentKey() {
@@ -17,6 +17,7 @@ window.Nav = (() => {
     if (h.startsWith('#/overview')) return 'overview';
     if (h.startsWith('#/learn')) return 'learn';
     if (h.startsWith('#/points')) return 'points';
+    if (h.startsWith('#/admin')) return 'admin';
     return 'files';
   }
 
@@ -26,15 +27,18 @@ window.Nav = (() => {
     const { escapeHtml } = Utils;
     const displayName = u.display_name || u.real_name || '';
     const initial = displayName.trim().charAt(0);
+    // 管理后台入口：仅管理员可见
+    const items = [...ITEMS];
+    if (u.is_admin) items.push({ hash: '#/admin', icon: '', label: '管理后台', key: 'admin' });
 
     document.getElementById('rail').innerHTML = `
       <div class="brand">
         <img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><span class="brand-name">南中科创局</span>
       </div>
       <nav class="rail-nav">
-        ${ITEMS.map((it) => `
+        ${items.map((it) => `
           <a class="nav-item ${it.key === key ? 'active' : ''}" href="${it.hash}">
-            <span class="nav-icon">${it.icon}</span><span>${it.label}</span>
+            ${it.icon ? `<span class="nav-icon">${it.icon}</span>` : ''}<span>${it.label}</span>
           </a>`).join('')}
       </nav>
       <div class="rail-user">
@@ -55,9 +59,9 @@ window.Nav = (() => {
         <button class="logout-btn" title="退出登录">退出</button>
       </div>`;
 
-    document.getElementById('appbar').innerHTML = ITEMS.map((it) => `
+    document.getElementById('appbar').innerHTML = items.map((it) => `
       <a class="appbar-item ${it.key === key ? 'active' : ''}" href="${it.hash}">
-        <span class="nav-icon">${it.icon}</span><span>${it.label}</span>
+        ${it.icon ? `<span class="nav-icon">${it.icon}</span>` : ''}<span>${it.label}</span>
       </a>`).join('');
 
     document.querySelectorAll('.logout-btn').forEach((btn) => {

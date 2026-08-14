@@ -8,7 +8,7 @@
 
 高中 AI 社团「作品收集与展示平台」，品牌名**南中科创局**。核心能力：
 
-- QQ 频道扫码登录（主）+ 无 QQ 直通（姓名+班级直接进）
+- QQ 频道扫码登录（主）+ **访客直传**（无 QQ：登录页填年级/班级/姓名 + 上传程序文件 → 给专属项目地址，不进入系统）
 - 个人文件上传（多文件/拖拽/进度）
 - 全校作品展（按项目平铺 + 班级 tag）+ 全校提交总览
 - **AI 轻应用自动/手动识别收集**（从 QQ 频道帖子提取 AI 轻应用链接）
@@ -37,7 +37,8 @@ server/
   init-db.js          建表脚本（npm run init-db，IF NOT EXISTS 幂等，可增量建新表）
   jobs.js             后台定时任务：过期置顶/精华自动回收（10 分钟）
   middleware/auth.js  Bearer token 鉴权（requireAuth）
-  routes/auth.js      无QQ直通(guest)/me/PATCH profile(展示名)/classes
+  routes/auth.js      访客直传登记(guest：签发项目地址令牌，不签发系统令牌)/me/PATCH profile(展示名)/classes
+  routes/guest.js     访客项目地址：files(列表+额度)/upload/download/preview（凭 guest_token，仅本项目文件）
   routes/auth-qq.js   QQ 扫码登录(init/poll/bind) + /status 失效检测
   routes/files.js     文件上传（每日20次限制+AI审查+百万字符拦截）/列表/PATCH/下载/删除（回扣积分）/HTML 预览（CSP sandbox）
   routes/class.js     全校作品展(wall)/总览(overview)——含 apps 混排 + display_name
@@ -51,10 +52,18 @@ server/
   utils/points.js     积分服务（grant 幂等发放 + 流水）
   utils/async.js, rateLimit.js
   utils/audit.js       DeepSeek 内容审查（文本/代码类上传时调用，reviewContent；key 在 .env 的 DEEPSEEK_API_KEY）
+  utils/pwd.js        访客删除安全密码（scrypt 加盐哈希 salt:hash + timingSafeEqual）
+  utils/adminLog.js   管理后台审计（writeAdminLog 写 admin_log）
+  utils/settings.js   运行时设置（settings 表，30s 进程内缓存，PUT 后 invalidate）
+  middleware/admin.js requireAdmin（Bearer + is_admin，非管理员 403）
+  routes/admin.js     管理后台全部接口（requireAdmin + 审计；教程编辑/批量审核/置顶/称号/会话等）
+  utils/upload.js     共享上传管线（multer 配置 + ensureDiskSpace 磁盘自检 + runUploadPipeline：每日次数/配额/入库/积分/审查）——登录与访客共用，勿各自复制逻辑
+  utils/disk.js       磁盘剩余空间检测（fs.statfsSync 优先，df -k 兜底；Node<18.15 走 df）
 public/
   index.html          SPA 壳
   css/style.css
-  js/                 app/api/utils/nav/auth/dashboard/class-wall/overview/learn/points/activity
+  js/                 app/api/utils/nav/auth/dashboard/class-wall/overview/learn/points/activity/project/admin（管理后台 11 页签）
+  js/project.js       访客项目地址页（#/p/:token，独立页不进入系统）
   img/                logo.png（本地化，onerror 降级"南"字）+ learn-ch1.png/learn-ch3-trae*.png/learn-ch5-skillhub.png
   videos/ch2-create-app.mp4  第2章配套操作视频
 feed_links.py         从 BID 提取 AI 轻应用链接（用户提供）
@@ -71,7 +80,7 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 
 > ⚠️ **密码不写入本文档**：真实密码在服务器 `.env`（`DB_PASSWORD`）。2026-08 曾把明文密码提交到 GitHub 触发安全告警，已改密；今后文档一律用占位符，密码只放 `.env`（gitignore）。
 
-- **users**：id, class_name, real_name, qq_tiny_id(可空唯一), qq_session_id(可空), show_real_name(展示名授权,默认1), nickname(昵称), **points(积分)**, created_at；唯一键 `(class_name, real_name)`
+- **users**：id, class_name, real_name, qq_tiny_id(可空唯一), qq_session_id(可空), show_real_name(展示名授权,默认1), nickname(昵称), **guest_token(访客项目地址令牌,可空唯一,64位hex无过期)**, **guest_pwd_hash(访客删除安全密码 scrypt 哈希,空=默认密码)**, **points(积分)**, created_at；唯一键 `(class_name, real_name)`
 - **files**：id, user_id, stored_name(uuid落盘), original_name, size, mime_type, **title/description/gameplay(作品信息)**, **audit_status(pending/reviewed/flagged)**, **audit_reason**, uploaded_at
 - **apps**：id, user_id, app_url, title, description, gameplay, source_feed_id, created_at
 - **articles**：id, slug(唯一), chapter(章节号), title, summary, content(Markdown), **tasks(JSON 任务数组)**, sort_order, created_at, updated_at
@@ -80,6 +89,8 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 - **likes**：id, user_id(点赞人), target_type(file/app), target_id, created_at；唯一键 `(user_id, target_type, target_id)`
 - **feed_like_snapshots**：~~已废弃~~（原 CLI 增量被赞统计用，表保留不删，代码不再写入）
 - **purchases**：id, user_id, item(wall_top/app_top/app_essence/title), cost, ref_type, ref_id, feed_id(帖子BID), feed_extra(JSON: create_time/author_id，取消置顶用), title(称号), status(active/expired), expires_at, created_at
+- **admin_log**：管理后台操作审计（admin_id, action, target_type/id, detail(JSON), ip, created_at）
+- **settings**：运行时设置（skey/svalue，商城/审核开关等，`utils/settings.js` 30s 缓存）
 - **upload_log**：id, user_id, created_at；每次上传动作插一行，**每人每天最多 20 次（含删除）**，`DATE(created_at)=CURDATE()` 计数
 
 > 线上库有真实数据，改表用 ALTER 不要 DROP；`npm run init-db` 只在全新环境用。
@@ -88,9 +99,9 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 
 **两种登录**：
 1. **QQ 扫码登录**（主）：`init` 拿二维码/链接 → 用户扫 → `poll` 轮询 → `bind` 绑定班级姓名
-2. **无 QQ 直通**：`guest` 填姓名+班级直接进（无密码、无学号）
+2. **访客直传**：登录页「我没有QQ…」→ 表单（年级→班级→姓名→展示名授权）→ 上传文件 → 拿项目地址（`#/p/<token>`）。**只发 guest_token（长随机串），不发系统 Bearer 令牌**——访客无法进入系统（其余功能全部不可用），只能看/下/传自己地址下的文件
 
-**班级白名单**（`config.js`）：高一 2601-2624、高二 2501-2524、高三 2401-2425，另有「其他」自由文本。
+**班级白名单**（`config.js`）：高一 2601-2624、高二 2501-2524、高三 2401-2425，另有「其他」：毕业生填自己班级（4 位数字），外校填 0（必填，前后端均校验）。
 
 **身份模型**：`(class_name, real_name)` 唯一身份；`qq_tiny_id` 是 QQ 绑定（可空唯一）。
 
@@ -199,7 +210,7 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 15. **mysql2 对 JSON 列自动解析**：读 `articles.tasks`/JSON 字段时，别再做 `JSON.parse`（会抛错被 catch 吞掉变空数组）；`typeof === 'string'` 才 parse
 16. **Express 路由顺序**：固定路径（如 `/api/learn/nfti-ticket`）必须放在参数路由（`/:slug`）**之前**，否则被 `:slug` 捕获返回"文章不存在"
 17. **前端阅读计时**：SPA hash 切换不触发 `pagehide`/`beforeunload`——离开文章页（回首页/切文章）定时器仍会触发。**必须**：每次路由切换时取消计时器（`app.js render()` 调 `window.__cancelLearnReadTimer()`）+ 每篇文章独立 `readStart`（不能跨文章共享变量，否则第二篇秒读发分）；兜底上报用 `fetch keepalive` 带 Bearer（`sendBeacon` 不带 Authorization 会 401）
-18. **前端文件无构建步骤**：改 `public/` 下 JS/CSS 后只需 `pm2 restart patplayer`（静态文件直接伺服），但**改了 index.html 的 script 引用必须同步**（新增 JS 文件要加 `<script>` 标签）
+18. **前端文件无构建步骤**：改 `public/` 下 JS/CSS 后只需 `pm2 restart patplayer`（静态文件直接伺服），但**改了 index.html 的 script 引用必须同步**（新增 JS 文件要加 `<script>` 标签）。**改 JS/CSS 后记得把 index.html 里所有 `?v=N` 版本号 +1**（2026-08 起引入：浏览器/QQ webview 会缓存旧 JS，曾出现"改了代码用户看不到"的困惑；`Cache-Control: max-age=0` 只保证刷新时重校验，已打开的旧标签页 SPA 内跳转不会重载 JS）
 19. **NFTI 是 Docker 部署**：改 NFTI 代码要 `docker compose -f /home/nfti/NF-BTI/docker-compose.yml up -d --build <服务>`。**前端由 nginx 容器托管，改前端必须 rebuild nginx 服务**（光 rebuild backend 前端不生效——本 session 踩过）
 20. **CSS 编辑风险**：SEARCH/REPLACE 误删选择器行（`.empty {` 的规则体被吞）会导致全站空态样式丢失；改完 grep 确认 `.empty`/`.spinner` 等关键规则完整
 21. **logo 用外链 CDN 会卡加载**：腾讯图片 CDN（groupprohead.gtimg.cn）在部分网络下慢/被墙，已本地化到 `public/img/logo.png` 并加 `onerror` 降级为"南"字
@@ -213,6 +224,19 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 29. **`query()` 返回值解构陷阱**：`db.query()` 对 INSERT/UPDATE 返回 ResultSetHeader（对象），对 SELECT 返回行数组。`const [rows] = await query('INSERT ...')` 会解构 ResultSetHeader 报 "not iterable"；SELECT 想取整组用 `const rows = await query(...)`，取首行才 `const [row] = ...`。已踩：点赞 INSERT、learn.js app-status 的 `[appRows]`
 30. **审查拒绝曾白送积分**：原 upload 顺序 INSERT→grant(+50)→审查拒绝→删记录但积分留下。修复：违规/超长分支加 `revoke()` 回扣（file_submit_revoke 负数流水对冲）
 31. **`upload_log` 计数含删除**：删除文件不删 upload_log 行，`file_submit` 流水也保留（revoke 只加负数对冲），保证"每天 20 次含删除"计数准确
+
+### 本 session（访客直传）新踩/新增的坑
+32. **访客令牌 ≠ 系统令牌**：`POST /api/auth/guest` 现在返回 `{ token: guestToken, project_path: '#/p/<token>', ... }`——`token` 是 64 位 hex 的 `guest_token`（无过期、随地址分享），**不是** HMAC Bearer。前端不要把 guest_token 塞进 `API.setToken`（会把访客带进系统），上传时以 multipart 字段 `token` 单独传
+33. **`guest_token` 是存量库迁移**：MySQL 不支持 `ADD COLUMN IF NOT EXISTS`，`init-db.js` 先查 `information_schema.COLUMNS` 再 `ALTER TABLE users ADD COLUMN guest_token ... ADD UNIQUE KEY uq_guest`；`schema.sql` 已同步（新库直接建）。**线上跑过 `npm run init-db` 后列才存在**，改表用 ALTER 勿 DROP
+34. **磁盘自检必须在 multer 之前**：multer 会把文件写进磁盘，`ensureDiskSpace()` 必须放在 `runMulter()` 之前调用，否则空间不足时文件已落盘（虽会被清理，但已造成瞬时写入）。用 `fs.statfsSync`（Node ≥18.15，本机 v22 可用），老 Node 兜底 `df -k`
+35. **上传管线已抽取共享**：`utils/upload.js` 的 `runUploadPipeline(req, res, user, { maxUploadsPerDay })` 是登录（`/api/files/upload`，20 次/天）与访客（`/api/guest/upload`，5 次/天）共用的唯一实现；改上传逻辑只改这一处。`files.js` 只保留路由壳 + multer 错误映射
+36. **访客项目页绕过系统登录检查**：`app.js render()` 里 `#/p/:token` 在 `if (!API.getToken())` 之前 return，且复用 `body.is-auth` 隐藏主页壳；新增独立页路由时别忘了这两点（否则访客没系统令牌会被踢回登录页）
+37. **`#/p/` 页内下载/预览带 token 走 query**：`API.download()` 只带 Bearer 头，访客页要用 `fetch('/api/guest/download/:id?token=...')`（`public/js/project.js` 里独立实现）
+38. **同一身份重复登记返回同一项目地址**（`ensureGuestToken` 幂等）：用户丢了地址重新填表即可找回；也因此「谁拿到地址谁可看文件」是设计行为（地址即凭证），文档已标注
+39. **访客表单必须「提交前」校验文件类型/大小**：曾出现用户选 PDF → 提交 → 先弹「🎉 提交成功」页再在页面里提示「1 个文件上传失败（不支持 .pdf）」，体验很差。修复：新增公开接口 `GET /api/auth/upload-rules`（允许扩展名 + max_upload_mb，单一数据源在 config.js），前端选文件时即拦截不支持的扩展名/超限文件，点提交时再兜底校验一遍，**任何文件不过校验就不进入登记/上传流程**；成功页标题也改为失败时不显示「提交成功」。改白名单记得同步 `FALLBACK_UPLOAD_RULES`（auth.js 前端兜底常量）
+40. **上传必须用 XHR，不能用 fetch**：`api.js` 的 `request()` 对所有请求套了 **15s 超时**（AbortController），200MB 大文件慢网速下必被掐断。上传统一走 `API.uploadWithProgress(path, formData, onProgress)`（XMLHttpRequest `upload.onprogress`，**不设超时**），三处上传（访客表单 auth.js / 项目页 project.js / 我的项目 dashboard.js）已全部接入；`Utils.createSpeedTracker()`（EWMA 平滑）算速度、`Utils.formatProgress(loaded, total, speed)` 输出 `12.6 MB / 198.8 MB · 1.2 MB/s`。dashboard 原「假进度条」（fakePct 封顶 88%）已删，改由真实字节驱动顶部进度条
+41. **访客删除 = 安全密码 + 限流**：`DELETE /api/guest/files/:id?token=&password=`。密码逻辑在 `utils/pwd.js`：scrypt 加盐哈希（`salt:hash`，Node 内置 crypto，无新依赖），`timingSafeEqual` 常量时间比对；`users.guest_pwd_hash` 为 NULL 时按默认密码 `config.guestDefaultPassword`（env `GUEST_DEFAULT_PASSWORD`，默认 `nanfang1958`）比对。**默认密码已明示在客户端提示里 = 公开，留空 = 不设防**——这是产品取舍（用户要求直接告知默认值，否则留空用户删文件时无从知晓）。**改默认密码必须同步三处**：`config.js`、`public/js/auth.js` 提交表单提示、`public/js/project.js` 删除弹窗提示。删除接口限流 `guestDeleteRateLimit`（10 次/10 分钟/令牌+IP）防爆破；删除回扣 `file_submit` 积分、**不返还当天上传次数**（与 QQ 用户删除一致）
+42. **管理后台 P0（2026-08-14 上线）**：设计见 `ADMIN-DESIGN.md`，代码在 `routes/admin.js`（全部 `requireAdmin`）+ `public/js/admin.js`（`#/admin*` 四页：总览/用户/文件/审核）。要点：① 管理员引导 = `ADMIN_QQ_TINY_IDS` 环境变量（QQ 绑定 `maybeGrantAdmin` 自动置 `is_admin`），或已有管理员在后台授权，或手动 SQL `UPDATE users SET is_admin=1 WHERE ...`；② `users.status='disabled'` 停用生效点：`middleware/auth.js`（登录态 401「账号已停用」）、`auth.js /guest`（403）、`guest.js loadActiveGuest`（401）；③ `publicUser` 两处（auth.js / auth-qq.js）都要带 `is_admin`/`status`，middleware SELECT 也要带（坑 #24）；④ **`db.query()` 返回行数组：SELECT 多行直接 `const rows = await query(...)`（解构 `[x]` 只取首行），SELECT 单行聚合才 `const [row] = ...` 且用 `row.c` 别用 `row[0].c`，INSERT/UPDATE 返回 ResultSetHeader（对象）用 `const r = await query(...)` 取 `r.insertId`——**绝不可解构**（P0 stats、P1 pins/titles/storage 都在这上面 500 过）**；⑤ 管理端删除文件/拒绝审核走 `revoke()` 回扣 +50，删除轻应用回扣 +25（普通用户路径 app 删除未回扣，管理端补齐），审核「重新通过」会补发被回扣的 +50（ref 用 `file:<id>:restore`）；⑥ 前端管理入口仅 `API.getUser().is_admin` 显示，非管理员访问 `#/admin*` 被 Views.admin 内部拦截；⑦ **`DATE_ADD(NOW(), INTERVAL ? HOUR)` 在预处理语句不可用**——置顶/称号的到期时间用 JS `mysqlNow(offsetMs)` 计算传参（`routes/admin.js` 顶部 helper）；⑧ 管理页下载走 `API.download`（带 Bearer），预览链接要拼 `?token=`，普通 `<a href>` 会 401；⑨ **P2**：教程编辑 `routes/admin.js` 的 `upsertArticle`（slug 唯一校验 + tasks 必须 JSON 数组；改教程不动学员 task_progress——FK 按 article_id，保留 id）；`utils/settings.js` 运行时设置（30s 进程内缓存，PUT 后 `invalidate()` 立即生效；`upload.js` 上传管线读 `audit_enabled` 覆盖 DeepSeek 审核）；批量审核 `/api/admin/audit/batch` 逐条 try/catch 不中断；教程预览复用 `learn.js` 顶层 `renderMarkdown()`（全局函数，learn.js 必须先于 admin.js 加载）；⑩ **教程独立编辑页** `#/admin/articles/new` / `#/admin/articles/edit/:id`（`Views.admin` 内解析 `location.hash` 子路由分发，`renderArticleEditor` 双栏：左表单右实时预览，`.ae-grid` CSS 响应式，Ctrl+S 保存；已废弃弹窗版 showArticleModal）
 
 ## 9. 部署环境
 
@@ -257,7 +281,8 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 - **QQ 扫码完整链路**（poll-token → tiny_id → bind）需真人扫一次码验证（沙箱无法模拟）；**NFTI 借用会话的 CLI 调用（发帖等）也依赖真实 token，同样需真人扫码后验证一次**
 - **auto-scan 较慢**：串行跑最多 24 个 python 子进程（首次几十秒），已加限流 5 次/分钟
 - **`share_resolve.py` 依赖 QQ 反爬策略**：QQ 换反爬会失效，需重新逆向
-- **无 QQ 直通是自报身份、无鉴权**：可冒名（产品取舍）；NFTI 体验任务强制 QQ 登录规避了该问题
+- **访客直传是自报身份、无鉴权**：可冒名登记，且项目地址即凭证（谁拿到地址谁可看文件）；访客不进入系统，NFTI 体验任务强制 QQ 登录规避了系统侧冒名问题
+- **访客项目地址需要真人走一遍**：填表 → 上传 → 复制地址 → 用地址回访下载/继续上传（本 session 已用 curl 冒烟验证接口，前端交互建议浏览器实测一次）
 - **NFTI 借用会话依赖 PatPlayer 会话存活**：PatPlayer 30 天闲置回收会连带 NFTI 借用失效（提示重新登录，符合预期）
 - **跨站 ticket 安全**：HMAC + 5min 过期 + 16 位 hex pat_sid 白名单 + 常量时间比较；密钥在两边 .env，勿泄露/勿改一侧
 - `feed_links.py` 提取正则依赖轻应用链接格式，变了需更新
@@ -265,7 +290,7 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 
 ## 12. 下一步建议
 
-- **上线前必须真人验证**：QQ 扫码 → 绑定（含展示名授权表单）→ 自动识别轻应用 → 第1章 NFTI 体验任务全链路
+- **上线前必须真人验证**：QQ 扫码 → 绑定（含展示名授权表单）→ 自动识别轻应用 → 第1章 NFTI 体验任务全链路；访客直传（填表→上传→地址回访）浏览器实测一次
 - 若 PatPlayer 要独立 QQ 频道（不用南方中学频道），改 `.env` 的 `GUILD_ID`（会连带 NFTI 跨站失效，两边都要改）
-- 若要给"无 QQ 直通"加防冒名，可参考 NFTI 的邀请码 + 设备指纹方案
+- 若访客直传也要防冒名/防盗链，可参考 NFTI 的邀请码 + 设备指纹方案，或给 `guest_token` 加过期/重置机制
 - NFTI 项目 `/home/nfti/NF-BTI`，QQ 集成思路同源；跨站体验的 import-session/cliHome 机制在其 backend/server.js 中

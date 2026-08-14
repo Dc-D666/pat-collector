@@ -16,11 +16,15 @@ async function requireAuth(req, res, next) {
   }
   try {
     const rows = await query(
-      'SELECT id, class_name, real_name, qq_tiny_id, show_real_name, nickname, points, created_at FROM users WHERE id = ?',
+      'SELECT id, class_name, real_name, qq_tiny_id, show_real_name, nickname, points, is_admin, status, created_at FROM users WHERE id = ?',
       [payload.uid]
     );
     if (rows.length === 0) {
       return res.status(401).json({ error: '用户不存在' });
+    }
+    // 停用账号：登录态直接失效
+    if (rows[0].status !== 'active') {
+      return res.status(401).json({ error: '账号已停用' });
     }
     req.user = rows[0];
     next();

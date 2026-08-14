@@ -117,4 +117,20 @@ module.exports = {
   cleanupSession,
   markDirty,
   saveIndex,
+  // 管理后台用：内存会话快照（含最后活跃时间）
+  listSessions: () => {
+    const out = [];
+    for (const [id, s] of sessions) {
+      out.push({
+        sessionId: id,
+        tiny_id: s.tiny_id || '',
+        nickname: s.nickname || '',
+        user_id: s.user_id || null,
+        token_obtained: !!s.token_obtained,
+        homeDir: s.homeDir || '',
+        last_active: s.lastActive || 0,
+      });
+    }
+    return out;
+  },
 };

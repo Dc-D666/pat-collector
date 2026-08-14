@@ -9,10 +9,15 @@ CREATE TABLE IF NOT EXISTS users (
   qq_session_id VARCHAR(32) NULL COMMENT 'QQ 会话 id（自动识别轻应用用，可空）',
   show_real_name TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否授权展示真实姓名（0=只展示昵称）',
   nickname VARCHAR(32) NULL COMMENT '展示昵称（未授权时用）',
+  guest_token VARCHAR(64) NULL COMMENT '访客直传项目地址令牌（长随机串，无过期）',
+  guest_pwd_hash VARCHAR(200) NULL COMMENT '访客删除安全密码哈希（scrypt salt:hash；空=默认密码）',
+  is_admin TINYINT(1) NOT NULL DEFAULT 0 COMMENT '管理员（仅 QQ 登录用户可为）',
+  status VARCHAR(16) NOT NULL DEFAULT 'active' COMMENT 'active / disabled（停用：禁登录/上传）',
   points INT NOT NULL DEFAULT 0 COMMENT '积分（⭐）',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_name (class_name, real_name),
-  UNIQUE KEY uq_qq (qq_tiny_id)
+  UNIQUE KEY uq_qq (qq_tiny_id),
+  UNIQUE KEY uq_guest (guest_token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS files (
@@ -143,4 +148,25 @@ CREATE TABLE IF NOT EXISTS purchases (
   KEY idx_user (user_id),
   KEY idx_item_expires (item, expires_at),
   CONSTRAINT fk_purchases_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 管理后台操作审计：管理员每次写操作记一行（谁/何时/对什么/做了什么/IP）
+CREATE TABLE IF NOT EXISTS admin_log (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  admin_id INT NOT NULL COMMENT '操作管理员 user_id',
+  action VARCHAR(64) NOT NULL COMMENT '如 user.points.adjust / file.delete',
+  target_type VARCHAR(16) NOT NULL DEFAULT '' COMMENT 'user / file / app / ...',
+  target_id INT NOT NULL DEFAULT 0,
+  detail VARCHAR(1000) NOT NULL DEFAULT '' COMMENT 'JSON 备注',
+  ip VARCHAR(64) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_admin (admin_id),
+  KEY idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 运行时设置（管理后台：商城开关 shop_enabled 等，不重启生效）
+CREATE TABLE IF NOT EXISTS settings (
+  skey VARCHAR(64) PRIMARY KEY,
+  svalue VARCHAR(500) NOT NULL DEFAULT '',
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

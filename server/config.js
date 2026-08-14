@@ -47,7 +47,7 @@ function isStandardClass(name) {
   return CLASS_SET.has(name);
 }
 
-// ---- 扩展名白名单：代码/文本 + 压缩包（图片/视频/音频/Office/3D 均已关闭）----
+// ---- 扩展名白名单：代码/文本 + 压缩包（图片/视频/音频/Office/PDF/3D 均已关闭）----
 // 代码/文本类走 AI 内容审查 + 超长限制；压缩包为二进制（不审查，仅作多文件打包途径）
 const ALLOWED_EXTENSIONS = new Set([
   // 网页 / 代码 / 文本（审查集合）
@@ -93,6 +93,22 @@ const config = {
   maxUserStorageBytes:
     (parseInt(process.env.MAX_USER_STORAGE_MB || '2048', 10) || 2048) * 1024 * 1024,
   maxUploadsPerDay: parseInt(process.env.MAX_UPLOADS_PER_DAY || '20', 10) || 20, // 每人每天上传次数上限（含删除）
+  // 访客（无 QQ 直传）专用：每天最多上传次数（默认 5），单次大小仍走 MAX_UPLOAD_MB（默认 200MB）
+  guestMaxUploadsPerDay: parseInt(process.env.GUEST_MAX_UPLOADS_PER_DAY || '5', 10) || 5,
+  // 访客删除安全密码：提交时可自定义（选填）；留空则使用此默认密码。
+  // 注意：默认密码写在客户端提示里等于公开——留空=不设防，设置自定义密码才是真保护。
+  guestDefaultPassword: process.env.GUEST_DEFAULT_PASSWORD || 'nanfang1958',
+  // 访客删除接口限流（防密码爆破）：每令牌/IP 窗口内最多尝试次数
+  guestDeleteRateLimit: { windowMs: 10 * 60 * 1000, max: 10 },
+  // 上传前磁盘自检：剩余空间低于该值（GB）时拒绝上传，提示联系频道主扩容
+  minFreeDiskBytes: (parseFloat(process.env.MIN_FREE_DISK_GB || '2') || 2) * 1024 * 1024 * 1024,
+  // 管理后台：QQ tiny_id 白名单（逗号分隔）——命中者在 QQ 绑定时自动成为管理员（首个管理员引导）
+  adminQqTinyIds: new Set(
+    String(process.env.ADMIN_QQ_TINY_IDS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  ),
   storageDir: path.resolve(PROJECT_ROOT, process.env.STORAGE_DIR || 'storage/uploads'),
   publicDir: path.resolve(PROJECT_ROOT, 'public'),
   qqSessionsDir: path.resolve(PROJECT_ROOT, process.env.QQ_SESSIONS_DIR || 'storage/qq-sessions'),

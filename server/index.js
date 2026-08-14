@@ -11,6 +11,8 @@ const classRoutes = require('./routes/class');
 const appRoutes = require('./routes/apps');
 const learnRoutes = require('./routes/learn');
 const pointsRoutes = require('./routes/points');
+const guestRoutes = require('./routes/guest');
+const adminRoutes = require('./routes/admin');
 const { startJobs } = require('./jobs');
 
 config.assertConfig();
@@ -33,6 +35,8 @@ app.use('/api/class', classRoutes);
 app.use('/api/apps', appRoutes);
 app.use('/api/learn', learnRoutes);
 app.use('/api/points', pointsRoutes);
+app.use('/api/guest', guestRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 未知 API 路径 → 404 JSON
 app.use('/api', (req, res) => {
