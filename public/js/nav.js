@@ -3,11 +3,11 @@
 // 导航：桌面左 rail + 移动端顶部栏 + 底部 app bar
 window.Nav = (() => {
   const ITEMS = [
-    { hash: '#/activity', icon: '', label: '活动简介', key: 'activity' },
-    { hash: '#/learn', icon: '', label: 'AI 小学堂', key: 'learn' },
-    { hash: '#/class-wall', icon: '', label: '全校作品展', key: 'class-wall' },
-    { hash: '#/files', icon: '', label: '我的项目', key: 'files' },
-    { hash: '#/points', icon: '', label: '我的积分', key: 'points' },
+    { hash: '#/activity', icon: '🎉', label: '活动简介', key: 'activity' },
+    { hash: '#/learn', icon: '🎓', label: 'AI 小学堂', key: 'learn' },
+    { hash: '#/class-wall', icon: '🏫', label: '全校作品展', key: 'class-wall' },
+    { hash: '#/files', icon: '🗂️', label: '我的项目', key: 'files' },
+    { hash: '#/points', icon: '🏆', label: '我的积分', key: 'points' },
   ];
 
   function currentKey() {
@@ -29,7 +29,7 @@ window.Nav = (() => {
     const initial = displayName.trim().charAt(0);
     // 管理后台入口：仅管理员可见
     const items = [...ITEMS];
-    if (u.is_admin) items.push({ hash: '#/admin', icon: '', label: '管理后台', key: 'admin' });
+    if (u.is_admin) items.push({ hash: '#/admin', icon: '🛠️', label: '管理后台', key: 'admin' });
 
     document.getElementById('rail').innerHTML = `
       <div class="brand">

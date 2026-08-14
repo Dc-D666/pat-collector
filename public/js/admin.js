@@ -166,7 +166,7 @@ Views.admin = (page) => {
           try {
             await API.post('/api/admin/users/' + id + '/admin', JSON.stringify({ enabled: !on }));
             toast(on ? '已取消管理员' : '已设为管理员');
-            doSearch();
+            if (refreshUsers) refreshUsers();
           } catch (err) { toast(err.message); }
           return;
         }
@@ -327,7 +327,7 @@ Views.admin = (page) => {
         }));
         closeModal();
         toast('已保存');
-        doSearch();
+        if (refreshFiles) refreshFiles();
       } catch (err) { errEl.textContent = err.message; errEl.classList.add('show'); }
     };
   }
