@@ -295,14 +295,14 @@ router.post('/audit/:id/review', asyncHandler(async (req, res) => {
 
 // ==================== P1 ====================
 
-// 曾被拒绝回扣过的文件，重新通过时补发 +50（原 grant 幂等 key 不变，用新 ref 补一条）
+// 曾被拒绝回扣过的文件，重新通过时补发 +30（reason 用 file_submit_restore，不占 file_submit 的 5 个名额）
 async function restoreFilePoints(userId, fileId) {
   const rv = await query(
     "SELECT id FROM points_log WHERE user_id = ? AND reason = 'file_submit_revoke' AND ref_id = ?",
     [userId, 'file:' + fileId]
   );
   if (!rv.length) return 0;
-  return (await grant(userId, 'file_submit', 'file:' + fileId + ':restore', 50)) || 0;
+  return (await grant(userId, 'file_submit_restore', 'file:' + fileId + ':restore', 30)) || 0;
 }
 
 // ---- 积分管理 ----
@@ -310,8 +310,8 @@ const REASON_TEXT = {
   first_login: '首次登录奖励', read_article: '阅读课程', task: '完成任务',
   app_submit: '提交 AI 轻应用', file_submit: '提交作品文件', like_give: '点赞他人',
   like_receive: '作品被点赞', graduate: '课程毕业奖励', easter_egg: '彩蛋奖励',
-  purchase: '积分商城兑换', admin_adjust: '管理员调整', file_submit_revoke: '删除作品文件（回扣）',
-  app_submit_revoke: '删除轻应用（回扣）',
+  purchase: '积分商城兑换', admin_adjust: '管理员调整', file_submit_restore: '审核通过补发',
+  file_submit_revoke: '删除作品文件（回扣）', app_submit_revoke: '删除轻应用（回扣）',
 };
 
 router.get('/points/leaderboard', asyncHandler(async (req, res) => {

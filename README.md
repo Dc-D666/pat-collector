@@ -10,7 +10,7 @@
 | 班级 | 二级菜单：高一 2601–2624、高二 2501–2524、高三 2401–2425，另有「其他」：毕业生填自己班级（4 位数字），外校填 0（必填校验）|
 | 展示名 | 「是否授权展示真实姓名」设置：授权显示真名，否则显示昵称（QQ 登录默认预填频道昵称） |
 | 令牌 | 系统 HMAC-SHA256 签名 + base64url，24h 过期，`Authorization: Bearer` 携带；**访客项目地址令牌**为 64 位十六进制长随机串（无过期，随地址分享） |
-| 个人文件 | multipart 上传（多文件、拖拽、按文件进度、失败跳过）、上传后填写作品信息（标题/简介/玩法）、列表、下载、删除（二次确认）；**上传前自检服务器磁盘剩余空间，低于 2GB 拒绝并提示联系频道主扩容** |
+| 个人文件 | multipart 上传（多文件、拖拽、按文件进度、失败跳过）、上传后填写作品信息（标题/简介/玩法）、列表、下载、删除（二次确认）；**上传前自检服务器磁盘剩余空间**（低于 2GB 拒绝）；每人作品文件总数上限 20 个、总容量 1GB（超限提示联系频道主扩容） |
 | 访客直传 | 无 QQ 用户专用：登录页填「年级→班级→姓名→展示名授权→安全密码」后直接上传程序文件，提交后生成**专属项目地址**（`#/p/<token>`），以后凭此地址查看/下载/继续上传/删除；额度：单文件 ≤200MB，每天最多 5 次 |
 | 访客删除保护 | 项目页删除文件需输入**安全密码**（提交时设置，选填；留空用默认密码 `nanfang1958`），防拿到 URL 的人误删/批量删；密码 scrypt 加盐哈希存库、常量时间比较、删除接口限流防爆破 |
 | 管理后台 | 仅 QQ 登录管理员可用（`ADMIN_QQ_TINY_IDS` 白名单引导）：总览 / 用户 / 文件 / 内容审核 / 轻应用 / 积分 / 运营（置顶/称号/商城开关）/ 运维（存储/会话）/ 教程在线编辑（**独立全屏编辑页**，双栏实时预览，Ctrl+S 保存）/ 系统设置 / 审计日志；支持批量审核；全部操作记 `admin_log` 审计 |
@@ -19,7 +19,7 @@
 | 提交总览 | 统计卡片 + 每班卡片（学生数 / 文件数 / 轻应用数 / 总大小），可展开学生与项目明细 |
 | AI 轻应用 | 自动/手动识别 QQ 频道帖子中的 AI 轻应用并收集（作者硬校验） |
 | 学AI 栏目 | 5 章 AI 教程（Markdown，自研渲染器），每章含 B站视频 / 单选题 / 实操任务 |
-| 积分体系 | 首次登录 / 阅读课程 / 完成整章任务 / 提交作品赚 ⭐ 积分，含排行榜与获取记录 |
+| 积分体系 | 首登 +10、阅读 +10、整章任务 +20、提交文件 **+30**（最多计 5 个）、提交应用 **+15**（最多计 3 个）、点赞双向 +2、毕业 +50、彩蛋 +5；幂等发放 + 计数上限 + 排行榜 |
 | 跨站体验 | 第1章实操任务跳转 NFTI（nfti.weaxi.cn）自动登录（HMAC ticket），完成人格测试自动核验 |
 
 ## 技术栈
@@ -91,7 +91,9 @@ npm run dev            # 或 npm start
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | MySQL 连接 | `127.0.0.1` / `3306` / `pat` / `pat` / — |
 | `TOKEN_SECRET` | 令牌签名密钥，**生产务必设强随机值** | —（无硬编码默认） |
 | `MAX_UPLOAD_MB` | 上传大小上限 | `200` |
-| `MAX_USER_STORAGE_MB` | 每用户存储配额 | `2048` |
+| `MAX_USER_STORAGE_MB` | 每用户文件总容量（超限提示联系频道主扩容） | `1024` |
+| `MAX_FILES_PER_USER` | 每人作品文件总数上限 | `20` |
+| `MAX_APPS_PER_USER` | 每人轻应用总数上限 | `20` |
 | `MAX_UPLOADS_PER_DAY` | 已登录用户每人每天上传次数上限 | `20` |
 | `GUEST_MAX_UPLOADS_PER_DAY` | 访客直传每人每天上传次数上限 | `5` |
 | `GUEST_DEFAULT_PASSWORD` | 访客删除安全密码默认值（未设置密码的用户用） | `nanfang1958` |
@@ -119,7 +121,7 @@ npm run dev            # 或 npm start
 | GET | `/api/guest/download/:id?token=` | 访客令牌 | 下载（仅本项目地址下的文件） |
 | GET | `/api/guest/preview/:id?token=` | 访客令牌 | HTML 预览（仅本项目地址下的文件，CSP sandbox） |
 | DELETE | `/api/guest/files/:id?token=&password=` | 访客令牌+密码 | 删除（仅本项目地址下的文件；密码错 403，限流防爆破；回扣提交积分） |
-| POST | `/api/files/upload` | Bearer | multipart 单文件（`file` 字段） |
+| POST | `/api/files/upload` | Bearer | multipart 单文件（`file` 字段；每人总数上限 20、总容量 1GB） |
 | GET | `/api/files` | Bearer | 本人文件列表 |
 | PATCH | `/api/files/:id` | Bearer | 更新作品信息（标题/简介/玩法，仅本人） |
 | GET | `/api/files/download/:id` | Bearer | 下载（本人 + 同班） |
@@ -128,7 +130,7 @@ npm run dev            # 或 npm start
 | GET | `/api/class/overview` | Bearer | 全校总览 |
 | POST | `/api/apps/auto-scan` | Bearer | 自动识别 QQ 频道帖子中的 AI 轻应用 |
 | POST | `/api/apps/manual-scan` | Bearer | 手动识别（BID / 分享链接） |
-| POST | `/api/apps` | Bearer | 提交轻应用（+25 ⭐） |
+| POST | `/api/apps` | Bearer | 提交轻应用（+15 ⭐，最多计 3 个；总数上限 20） |
 | GET | `/api/apps` | Bearer | 我的轻应用列表 |
 | DELETE | `/api/apps/:id` | Bearer | 删除轻应用（仅本人） |
 | GET | `/api/learn` | — | 学AI 章节列表 |
@@ -154,7 +156,7 @@ npm run dev            # 或 npm start
 | POST | `/api/admin/audit/:id/review` | 管理员 | 审核：通过/拒绝(+原因+回扣)/删除 |
 | POST | `/api/admin/audit/batch` | 管理员 | 批量审核（approve/delete，逐条容错） |
 | GET | `/api/admin/apps` | 管理员 | 轻应用列表/搜索 |
-| DELETE | `/api/admin/apps/:id` | 管理员 | 删除轻应用（回扣 +25） |
+| DELETE | `/api/admin/apps/:id` | 管理员 | 删除轻应用（回扣 +15） |
 | GET | `/api/admin/points/leaderboard` | 管理员 | 积分榜 TOP50 |
 | GET | `/api/admin/points/logs` | 管理员 | 积分流水检索（user_id/reason/limit） |
 | GET | `/api/admin/purchases` | 管理员 | 置顶/称号/精华记录 |

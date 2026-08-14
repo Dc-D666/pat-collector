@@ -38,7 +38,7 @@
 | 超 200MB 提示 | 413 及前端预检文案均附「请联系频道主或 QQ：3303188265」 | files.js / api.js / dashboard.js |
 | 扩展名白名单 | **代码/文本 15 种 + 压缩包 5 种**：html/htm/py/js/ts/c/cpp/java/css/json/ipynb/md/txt/csv/svg + zip/rar/7z/tar/gz；图片/视频/音频/Office/3D 已关闭 | config.js |
 | 上传限制 | 一次最多 **5 个文件**（更多提示打包压缩包）；每人每天最多 **20 次上传**（含删除，`upload_log` 表计数） | dashboard.js / files.js |
-| 大小限制 | 单文件默认 **200MB**（`MAX_UPLOAD_MB`）；每用户配额默认 **2GB**（`MAX_USER_STORAGE_MB`，超限回滚落盘） | config.js:84 / files.js:82 |
+| 大小限制 | 单文件默认 **200MB**（`MAX_UPLOAD_MB`）；每人总容量默认 **1GB**（`MAX_USER_STORAGE_MB`，超限提示联系频道主扩容）；每人作品文件总数上限 **20**（`MAX_FILES_PER_USER`）、轻应用总数上限 **20**（`MAX_APPS_PER_USER`，删除可释放名额） | config.js / utils/upload.js / apps.js |
 | 文件列表 | 仅列本人文件（含标题/简介/玩法） | files.js:123 |
 | 作品信息 | `PATCH /api/files/:id` 补标题/简介/玩法（标题必填） | files.js:136 |
 | 下载 | `GET /api/files/download/:id`：本人 + **同班同学**可下载；落盘缺失返回「文件已丢失」 | files.js:169 |
@@ -92,8 +92,8 @@
 | 首次登录（注册即发） | 10 ⭐ | `once` |
 | 阅读课程 ≥60s（每篇一次） | 10 ⭐ | `article:<id>` |
 | 完成整章所有任务（每章一次） | 20 ⭐ | `article:<id>`（task 维度） |
-| 提交 AI 轻应用（每个作品一次） | 25 ⭐ | `app:<id>` |
-| 提交作品文件（每个文件一次） | 50 ⭐ | `file:<id>` |
+| 提交 AI 轻应用（每个作品一次，**最多计 3 个**） | 15 ⭐ | `app:<id>` |
+| 提交作品文件（每个文件一次，**最多计 5 个**） | 30 ⭐ | `file:<id>` |
 | **主动点赞他人**（网页操作，每次 +2⭐） | 2 ⭐ | `like:<likes.id>`；**每日票数不限**，点赞者每日积分上限 10⭐，禁自赞 |
 | **作品被点赞**（站内直接发放） | 2 ⭐/赞 | 点赞时同步给作品作者发放；作者每日上限 30⭐ |
 | **课程毕业**（5 章读完全部任务完成，仅一次） | 50 ⭐ | `once` |

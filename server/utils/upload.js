@@ -94,6 +94,13 @@ async function runUploadPipeline(req, res, user, opts) {
   }
   await query('INSERT INTO upload_log (user_id) VALUES (?)', [user.id]);
 
+  // 每人作品文件总数上限（删除可释放名额）
+  const [fileCnt] = await query('SELECT COUNT(*) AS c FROM files WHERE user_id = ?', [user.id]);
+  if (Number(fileCnt.c) >= config.maxFilesPerUser) {
+    fs.promises.unlink(req.file.path).catch(() => {});
+    return res.status(400).json({ error: `作品总数已达上限（${config.maxFilesPerUser} 个），请删除部分后重试，或联系频道主扩容` });
+  }
+
   try {
     // 每用户存储配额检查
     const [used] = await query(
@@ -102,7 +109,8 @@ async function runUploadPipeline(req, res, user, opts) {
     );
     if (Number(used.total) + size > config.maxUserStorageBytes) {
       fs.promises.unlink(req.file.path).catch(() => {});
-      return res.status(413).json({ error: '超出个人存储配额，请删除部分文件后再试' });
+      const quotaMb = Math.round(config.maxUserStorageBytes / 1024 / 1024);
+      return res.status(413).json({ error: `超出个人存储配额（${quotaMb}MB），请删除部分文件后重试，或联系频道主扩容` });
     }
 
     const result = await query(

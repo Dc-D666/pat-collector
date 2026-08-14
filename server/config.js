@@ -91,7 +91,9 @@ const config = {
   },
   maxUploadBytes: (parseInt(process.env.MAX_UPLOAD_MB || '200', 10) || 200) * 1024 * 1024,
   maxUserStorageBytes:
-    (parseInt(process.env.MAX_USER_STORAGE_MB || '2048', 10) || 2048) * 1024 * 1024,
+    (parseInt(process.env.MAX_USER_STORAGE_MB || '1024', 10) || 1024) * 1024 * 1024, // 每人文件总容量（默认 1GB），超限提示联系频道主
+  maxFilesPerUser: parseInt(process.env.MAX_FILES_PER_USER || '20', 10) || 20, // 每人作品文件总数上限（删除可释放名额）
+  maxAppsPerUser: parseInt(process.env.MAX_APPS_PER_USER || '20', 10) || 20, // 每人轻应用总数上限（删除可释放名额）
   maxUploadsPerDay: parseInt(process.env.MAX_UPLOADS_PER_DAY || '20', 10) || 20, // 每人每天上传次数上限（含删除）
   // 访客（无 QQ 直传）专用：每天最多上传次数（默认 5），单次大小仍走 MAX_UPLOAD_MB（默认 200MB）
   guestMaxUploadsPerDay: parseInt(process.env.GUEST_MAX_UPLOADS_PER_DAY || '5', 10) || 5,

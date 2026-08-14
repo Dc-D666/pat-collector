@@ -4,12 +4,14 @@
 const { pool, query } = require('../db');
 
 // 积分规则（⭐）
+// 计数上限：reason 的历史发放次数达到上限后不再发放（删除/回扣不释放名额，防刷分）
+const REASON_CAPS = { file_submit: 5, app_submit: 3 };
 const RULES = {
   first_login: 10, // 首次登录（注册时发放，仅一次）
   read_article: 10, // 阅读课程 ≥1 分钟（每篇一次）
   task: 20, // 完成整章所有任务（每章一次，ref_id 用 article:<id>）
-  app_submit: 25, // 提交 AI 轻应用（QQ 频道，每个作品一次）
-  file_submit: 50, // 提交作品文件（每个文件一次）
+  app_submit: 15, // 提交 AI 轻应用（QQ 频道，每个作品一次；每人最多计 3 个）
+  file_submit: 30, // 提交作品文件（每个文件一次；每人最多计 5 个）
   liked: 0, // （已废弃：被赞积分改由 like_receive 通过 CLI 增量发放）
   like_give: 2, // 主动点赞他人（网页操作，每次 +2⭐，每日上限 10）
   like_receive: 2, // 帖子被点赞（CLI 增量统计，每个赞 +2⭐，作者每日上限 30）
@@ -27,6 +29,15 @@ async function grant(userId, reason, refId, extraAmount) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    // 计数上限：该 reason 历史发放达上限则跳过（file_submit ≤5 个 / app_submit ≤3 个）
+    const cap = REASON_CAPS[reason];
+    if (cap) {
+      const [cntRows] = await conn.execute('SELECT COUNT(*) AS c FROM points_log WHERE user_id = ? AND reason = ?', [userId, reason]);
+      if (Number(cntRows[0].c) >= cap) {
+        await conn.commit();
+        return null;
+      }
+    }
     // 防重：唯一索引 (user_id, reason, ref_id)，冲突则跳过
     const [ins] = await conn.execute(
       'INSERT IGNORE INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
@@ -67,7 +78,9 @@ async function getPoints(userId) {
     easter_egg: '彩蛋奖励',
     purchase: '积分商城兑换',
     admin_adjust: '管理员调整',
+    file_submit_restore: '审核通过补发',
     file_submit_revoke: '删除作品文件（回扣）',
+    app_submit_revoke: '删除轻应用（回扣）',
   };
   return {
     points: rows.length ? rows[0].points : 0,

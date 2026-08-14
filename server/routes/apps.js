@@ -9,7 +9,7 @@ const { rateLimit } = require('../utils/rateLimit');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { extractLinks, resolveShare } = require('../qq/feed-links');
-const { grant } = require('../utils/points');
+const { grant, revoke } = require('../utils/points');
 
 const router = express.Router();
 
@@ -148,6 +148,12 @@ router.post(
     const gameplay = String((req.body && req.body.gameplay) || '').trim().slice(0, 2000) || null;
     const source_feed_id = String((req.body && req.body.source_feed_id) || '').trim().slice(0, 128) || null;
 
+    // 每人轻应用总数上限（删除可释放名额）
+    const [appCnt] = await query('SELECT COUNT(*) AS c FROM apps WHERE user_id = ?', [req.user.id]);
+    if (Number(appCnt.c) >= config.maxAppsPerUser) {
+      return res.status(400).json({ error: `轻应用总数已达上限（${config.maxAppsPerUser} 个），请删除部分后重试，或联系频道主扩容` });
+    }
+
     const result = await query(
       'INSERT INTO apps (user_id, app_url, title, description, gameplay, source_feed_id) VALUES (?, ?, ?, ?, ?, ?)',
       [req.user.id, app_url, title, description, gameplay, source_feed_id]
@@ -185,7 +191,9 @@ router.delete(
     const rows = await query('SELECT id FROM apps WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     if (rows.length === 0) return res.status(404).json({ error: '应用不存在' });
     await query('DELETE FROM apps WHERE id = ?', [req.params.id]);
-    res.json({ ok: true });
+    // 删除轻应用回扣提交积分（与文件删除一致）
+    const revoked = await revoke(req.user.id, 'app_submit', 'app:' + req.params.id);
+    res.json({ ok: true, points_revoked: revoked });
   })
 );
 

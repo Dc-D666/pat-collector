@@ -69,7 +69,7 @@ Views.points = async () => {
     <div class="card" style="padding:16px 18px;margin-bottom:16px;">
       <h2 style="margin:0 0 8px;font-size:17px;">💡 怎么赚积分</h2>
       <div style="font-size:13px;color:var(--text-dim);line-height:2;">
-        ✍️ 提交作品文件 +50⭐ / 提交 AI 轻应用 +25⭐<br>
+        ✍️ 提交作品文件 +30⭐（最多计 5 个）/ 提交 AI 轻应用 +15⭐（最多计 3 个）<br>
         🧑‍🤝‍🧑 主动点赞他人 +2⭐/次（每天上限 10⭐，票数不限）<br>
         💬 你的作品被点赞 +2⭐/赞（每天上限 30⭐）<br>
         🎓 读完 5 章全部任务完成，毕业大奖 +50⭐<br>
