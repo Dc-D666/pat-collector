@@ -308,24 +308,41 @@ Views.files = () => {
         <button class="btn btn-primary" id="file-info-save">保存</button>
       </div>`);
     document.getElementById('file-info-skip').onclick = () => { closeModal(); if (onDone) onDone(); };
-    document.getElementById('file-info-save').onclick = async () => {
+    const saveBtn = document.getElementById('file-info-save');
+    const skipBtn = document.getElementById('file-info-skip');
+    saveBtn.onclick = async () => {
       const errEl = document.getElementById('file-info-error');
       errEl.classList.remove('show');
       const title = document.getElementById('file-info-title').value.trim();
       if (!title) { errEl.textContent = '请输入项目标题'; errEl.classList.add('show'); return; }
+      // 保存会触发服务端 AI 内容审核（1-3 秒）：按钮变浅禁用 + 「审核中.」点点滚动，避免看起来像卡死
+      const dots = ['审核中', '审核中.', '审核中..', '审核中...'];
+      let tick = 0;
+      saveBtn.disabled = true; // :disabled 自带 opacity .55 变浅 + not-allowed
+      saveBtn.textContent = dots[0];
+      skipBtn.disabled = true;
+      const dotTimer = setInterval(() => {
+        tick = (tick + 1) % dots.length;
+        saveBtn.textContent = dots[tick];
+      }, 400);
       try {
         await API.patch('/api/files/' + file.id, JSON.stringify({
           title,
           description: document.getElementById('file-info-desc').value.trim(),
           gameplay: document.getElementById('file-info-gameplay').value.trim(),
         }));
+        clearInterval(dotTimer);
         closeModal();
         toast('已保存');
         await loadFiles();
         if (onDone) onDone();
       } catch (err) {
+        clearInterval(dotTimer);
         errEl.textContent = err.message;
         errEl.classList.add('show');
+        saveBtn.disabled = false;
+        saveBtn.textContent = '保存';
+        skipBtn.disabled = false;
       }
     };
   }
@@ -552,7 +569,9 @@ Views.files = () => {
         <button class="btn btn-primary" id="app-save">提交</button>
       </div>`);
     document.getElementById('app-cancel').onclick = closeModal;
-    document.getElementById('app-save').onclick = async () => {
+    const appSaveBtn = document.getElementById('app-save');
+    const appCancelBtn = document.getElementById('app-cancel');
+    appSaveBtn.onclick = async () => {
       const errEl = document.getElementById('app-submit-error');
       errEl.classList.remove('show');
       const appTitle = document.getElementById('app-title').value.trim();
@@ -561,6 +580,16 @@ Views.files = () => {
         errEl.classList.add('show');
         return;
       }
+      // 提交会触发服务端 AI 内容审核（1-3 秒）：按钮变浅禁用 + 「审核中.」点点滚动，避免看起来像卡死
+      const dots = ['审核中', '审核中.', '审核中..', '审核中...'];
+      let tick = 0;
+      appSaveBtn.disabled = true; // :disabled 自带 opacity .55 变浅 + not-allowed
+      appSaveBtn.textContent = dots[0];
+      appCancelBtn.disabled = true;
+      const dotTimer = setInterval(() => {
+        tick = (tick + 1) % dots.length;
+        appSaveBtn.textContent = dots[tick];
+      }, 400);
       try {
         await API.post('/api/apps', JSON.stringify({
           app_url: document.getElementById('app-url').value,
@@ -569,6 +598,7 @@ Views.files = () => {
           gameplay: document.getElementById('app-gameplay').value.trim(),
           source_feed_id: feedId || '',
         }));
+        clearInterval(dotTimer);
         closeModal();
         toast('已提交');
         refreshPoints();
@@ -578,8 +608,12 @@ Views.files = () => {
         renderScanResults();
         await loadApps();
       } catch (err) {
+        clearInterval(dotTimer);
         errEl.textContent = err.message;
         errEl.classList.add('show');
+        appSaveBtn.disabled = false;
+        appSaveBtn.textContent = '提交';
+        appCancelBtn.disabled = false;
       }
     };
   }

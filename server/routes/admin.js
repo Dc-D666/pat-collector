@@ -577,6 +577,31 @@ async function applyJudgePoints(userId, delta, ref) {
 router.get('/judge', asyncHandler(async (req, res) => {
   const refType = String(req.query.ref_type || '');
   const refId = Number(req.query.ref_id || 0);
+  if (req.query.pending) {
+    // 待评审作品：近期未评审的文件/轻应用（仅 QQ 用户作品，排除违规下架）
+    const limit = Math.max(1, Math.min(Number(req.query.limit) || 30, 60));
+    const [files, apps] = await Promise.all([
+      query(
+        `SELECT f.id, f.title, f.original_name, u.real_name AS owner, u.class_name, f.uploaded_at
+         FROM files f JOIN users u ON u.id = f.user_id AND u.qq_tiny_id IS NOT NULL
+         WHERE f.audit_status <> 'flagged'
+           AND NOT EXISTS (SELECT 1 FROM judge_reviews j WHERE j.ref_type = 'file' AND j.ref_id = f.id)
+         ORDER BY f.id DESC LIMIT ${limit}`
+      ),
+      query(
+        `SELECT a.id, a.title, u.real_name AS owner, u.class_name, a.created_at AS uploaded_at
+         FROM apps a JOIN users u ON u.id = a.user_id AND u.qq_tiny_id IS NOT NULL
+         WHERE NOT EXISTS (SELECT 1 FROM judge_reviews j WHERE j.ref_type = 'app' AND j.ref_id = a.id)
+         ORDER BY a.id DESC LIMIT ${limit}`
+      ),
+    ]);
+    return res.json({
+      pending: [
+        ...files.map((f) => ({ ref_type: 'file', ref_id: f.id, title: f.title || f.original_name, owner: f.owner, class_name: f.class_name, time: f.uploaded_at })),
+        ...apps.map((a) => ({ ref_type: 'app', ref_id: a.id, title: a.title, owner: a.owner, class_name: a.class_name, time: a.uploaded_at })),
+      ].slice(0, limit),
+    });
+  }
   if (refType && ['file', 'app'].includes(refType) && refId > 0) {
     const rows = await query(
       'SELECT * FROM judge_reviews WHERE ref_type = ? AND ref_id = ?',

@@ -11,6 +11,14 @@ Views.admin = (page) => {
     location.hash = '#/files';
     return;
   }
+  // 评委评审维度与权重（P3）：必须放在 loaders 调用之前（否则 loadJudge 触发 TDZ ReferenceError）
+  const JUDGE_DIMS = [
+    { key: 'creativity', label: '创意与创新', weight: 0.30 },
+    { key: 'content', label: '内容质量', weight: 0.25 },
+    { key: 'completeness', label: '完成度与实现', weight: 0.25 },
+    { key: 'values', label: '价值观与合规', weight: 0.20 },
+  ];
+
   const current = page || 'overview';
   const TABS = [
     { key: 'overview', label: '总览', hash: '#/admin' },
@@ -20,6 +28,7 @@ Views.admin = (page) => {
     { key: 'apps', label: '轻应用', hash: '#/admin/apps' },
     { key: 'points', label: '积分', hash: '#/admin/points' },
     { key: 'ops', label: '运营', hash: '#/admin/ops' },
+    { key: 'judge', label: '评审', hash: '#/admin/judge' },
     { key: 'storage', label: '运维', hash: '#/admin/storage' },
     { key: 'articles', label: '教程', hash: '#/admin/articles' },
     { key: 'settings', label: '设置', hash: '#/admin/settings' },
@@ -53,7 +62,7 @@ Views.admin = (page) => {
   }
   const loaders = {
     overview: loadOverview, users: loadUsers, files: loadFiles, audit: loadAudit,
-    apps: loadApps, points: loadPoints, ops: loadOps, storage: loadStorage,
+    apps: loadApps, points: loadPoints, ops: loadOps, judge: loadJudge, storage: loadStorage,
     articles: loadArticles, settings: loadSettings, logs: loadLogs,
   };
   (loaders[current] || loadOverview)();
@@ -568,16 +577,11 @@ Views.admin = (page) => {
         <button class="btn btn-sm" id="ao-pin"> 手动置顶作品</button>
         <button class="btn btn-sm" id="ao-title"> 发放称号</button>
         <button class="btn btn-sm" id="ao-shop"> 商城开关</button>
-        <button class="btn btn-sm btn-primary" id="ao-judge">🧑‍⚖️ 评委评审</button>
         <span style="margin-left:auto;"></span>
         <select id="ao-status" style="padding:9px;border:1px solid var(--border);border-radius:10px;">
           <option value="active">生效中</option><option value="expired">已过期</option><option value="">全部</option>
         </select>
         <button class="btn btn-sm" id="ao-refresh">刷新</button>
-      </div>
-      <div class="card" style="padding:14px 16px;margin-bottom:14px;">
-        <div class="file-list-head"><span>🧑‍⚖️ 评委评审记录（创意30% / 内容25% / 完成25% / 价值观20%，满分 300⭐，综合 &lt;6 不兑现）</span></div>
-        <div id="ao-judge-list"><div class="spinner"></div></div>
       </div>
       <div id="ao-list"><div class="spinner"></div></div>`;
     const doSearch = () => fetchPurchases(document.getElementById('ao-status').value);
@@ -587,30 +591,9 @@ Views.admin = (page) => {
     document.getElementById('ao-pin').onclick = showPinModal;
     document.getElementById('ao-title').onclick = showTitleModal;
     document.getElementById('ao-shop').onclick = toggleShop;
-    document.getElementById('ao-judge').onclick = showJudgeModal;
-    fetchJudgeList();
     doSearch();
   }
 
-  async function fetchJudgeList() {
-    const list = document.getElementById('ao-judge-list');
-    if (!list) return;
-    let data;
-    try { data = await API.get('/api/admin/judge?limit=10'); }
-    catch (err) { list.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`; return; }
-    const reviews = data.reviews || [];
-    if (!reviews.length) { list.innerHTML = `<div class="empty" style="padding:6px 0;">暂无评审记录</div>`; return; }
-    list.innerHTML = reviews.map((r) => {
-      const title = r.ref_type === 'file' ? (r.file_title || '#file') : (r.app_title || '#app');
-      return `
-      <div class="file-row">
-        <div class="file-info">
-          <div class="file-name" style="font-size:13px;">${escapeHtml(title)} <span class="audit-tag">${escapeHtml(r.ref_type)}#${r.ref_id}</span> <span class="audit-tag">综合 ${r.total} 分</span></div>
-          <div class="file-meta">${escapeHtml(r.owner_name || '')}${r.class_name ? ' · ' + escapeHtml(r.class_name) + '班' : ''} · 评审积分 +${r.points}⭐ · ${formatTime(r.updated_at)}</div>
-        </div>
-      </div>`;
-    }).join('');
-  }
 
   async function fetchPurchases(status) {
     const list = document.getElementById('ao-list');
@@ -781,44 +764,43 @@ Views.admin = (page) => {
     };
   }
 
-  // ---- 评委评审（P3）：选项目 → 4 维度打分（0-10 整数）→ 自动折算发放 ----
-  const JUDGE_DIMS = [
-    { key: 'creativity', label: '创意与创新', weight: 0.30 },
-    { key: 'content', label: '内容质量', weight: 0.25 },
-    { key: 'completeness', label: '完成度与实现', weight: 0.25 },
-    { key: 'values', label: '价值观与合规', weight: 0.20 },
-  ];
-
-  function showJudgeModal() {
-    openModal(`
-      <h3 class="modal-title">🧑‍⚖️ 评委评审</h3>
-      <p style="font-size:12px;color:var(--text-dim);margin:0 0 10px;text-align:center;">创意30% · 内容25% · 完成25% · 价值观20%｜满分 300⭐｜综合 &lt;6 分不兑现</p>
-      <div class="form-error" id="aj-error"></div>
-      <div class="field"><label>类型</label>
-        <select id="aj-type"><option value="file">文件</option><option value="app">轻应用</option></select>
-      </div>
-      <div class="field">
-        <label>作品（输入标题 / 文件名 / 作者，动态匹配）</label>
-        <div style="position:relative;">
-          <input id="aj-search" type="text" autocomplete="off" placeholder="输入关键词搜索作品…" />
-          <input id="aj-ref-id" type="hidden" />
-          <div id="aj-dropdown" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;max-height:200px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);display:none;"></div>
+  // ---- 评委评审独立页（#/admin/judge）：选作品 → 4 维度打分 → 自动折算发放 ----
+  async function loadJudge() {
+    content.innerHTML = `
+      <div class="card" style="padding:16px 18px;margin-bottom:14px;">
+        <div class="file-list-head"><span>🧑‍⚖️ 评审打分（创意30% · 内容25% · 完成25% · 价值观20%｜满分 300⭐｜综合 &lt;6 不兑现）</span></div>
+        <div class="form-error" id="aj-error" style="margin-top:6px;"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
+          <select id="aj-type" style="padding:9px;border:1px solid var(--border);border-radius:10px;font-size:14px;">
+            <option value="file">文件</option><option value="app">轻应用</option>
+          </select>
+          <div style="position:relative;flex:1;min-width:200px;">
+            <input id="aj-search" type="text" autocomplete="off" placeholder="输入作品标题 / 文件名 / 作者搜索…" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;" />
+            <input id="aj-ref-id" type="hidden" />
+            <div id="aj-dropdown" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;max-height:220px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);display:none;"></div>
+          </div>
         </div>
-        <div id="aj-selected" style="font-size:12px;color:var(--text-dim);margin-top:6px;"></div>
+        <div id="aj-selected" style="font-size:13px;color:var(--text-dim);margin-bottom:10px;"></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px;">
+          ${JUDGE_DIMS.map((d) => `
+          <div style="display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:var(--bg);">
+            <span style="flex:1;font-size:12.5px;color:var(--text-dim);">${d.label}<br><span style="color:var(--text);font-weight:600;">${Math.round(d.weight * 100)}%</span></span>
+            <input id="aj-${d.key}" type="number" min="0" max="10" step="1" placeholder="0-10" style="width:64px;padding:7px 8px;border:1px solid var(--border);border-radius:10px;font-size:14px;text-align:center;" />
+          </div>`).join('')}
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="font-size:15px;font-weight:700;color:var(--primary);" id="aj-preview">请选择作品并输入分数</div>
+          <button class="btn btn-primary btn-sm" id="aj-save" style="margin-left:auto;">提交评审并发放</button>
+        </div>
       </div>
-      <div id="aj-scores">
-        ${JUDGE_DIMS.map((d) => `
-        <div class="field" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-          <label style="flex:1;margin:0;font-size:13px;">${d.label}（${Math.round(d.weight * 100)}%）</label>
-          <input id="aj-${d.key}" type="number" min="0" max="10" step="1" placeholder="0-10" style="width:80px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:14px;text-align:center;" />
-        </div>`).join('')}
+      <div class="card" style="padding:14px 16px;margin-bottom:14px;">
+        <div class="file-list-head"><span>📋 待评审作品（近期未评审）</span></div>
+        <div id="aj-pending"><div class="spinner"></div></div>
       </div>
-      <div class="field"><label>综合分 / 积分预览</label><div id="aj-preview" style="font-size:15px;font-weight:700;color:var(--primary);"></div></div>
-      <div class="modal-actions">
-        <button class="btn" id="aj-cancel">取消</button>
-        <button class="btn btn-primary" id="aj-save">提交评审并发放</button>
-      </div>`);
-    document.getElementById('aj-cancel').onclick = closeModal;
+      <div class="card" style="padding:14px 16px;">
+        <div class="file-list-head"><span>✅ 已评审记录（可重新评审，自动补/扣差额积分）</span></div>
+        <div id="aj-done"><div class="spinner"></div></div>
+      </div>`;
 
     const searchEl = document.getElementById('aj-search');
     const refIdEl = document.getElementById('aj-ref-id');
@@ -827,6 +809,7 @@ Views.admin = (page) => {
     const typeEl = document.getElementById('aj-type');
     const previewEl = document.getElementById('aj-preview');
     const errEl = document.getElementById('aj-error');
+    const saveBtn = document.getElementById('aj-save');
     let timer = null;
     let curRef = null;
 
@@ -888,7 +871,6 @@ Views.admin = (page) => {
       selEl.textContent = `已选择：#${item.id} ${item.name}（${item.meta}）`;
       searchEl.value = item.name;
       closeDd();
-      // 回填已有评审
       JUDGE_DIMS.forEach((d) => { document.getElementById('aj-' + d.key).value = ''; });
       try {
         const r = await API.get('/api/admin/judge?ref_type=' + curRef.ref_type + '&ref_id=' + curRef.ref_id);
@@ -908,7 +890,7 @@ Views.admin = (page) => {
     searchEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDd(); });
     searchEl.addEventListener('blur', () => setTimeout(closeDd, 150));
 
-    document.getElementById('aj-save').onclick = async () => {
+    saveBtn.onclick = async () => {
       errEl.classList.remove('show');
       if (!curRef || !parseInt(refIdEl.value, 10)) {
         errEl.textContent = '请先从搜索结果中选择作品';
@@ -925,16 +907,111 @@ Views.admin = (page) => {
       if (bad) { errEl.textContent = '每个维度请输入 0-10 的整数分数'; errEl.classList.add('show'); return; }
       const yes = await confirm(`确认对「${curRef.ref_type === 'file' ? '文件' : '轻应用'} #${curRef.ref_id}」提交评审？积分将自动发放/调整给作者`);
       if (!yes) return;
+      saveBtn.disabled = true;
+      saveBtn.textContent = '提交中…';
       try {
         const r = await API.post('/api/admin/judge', JSON.stringify({
           ref_type: curRef.ref_type, ref_id: curRef.ref_id, scores,
         }));
-        closeModal();
         toast(r.message || '已提交');
-        fetchJudgeList();
-        refreshOps && refreshOps();
-      } catch (e) { errEl.textContent = e.message; errEl.classList.add('show'); }
+        errEl.classList.remove('show');
+        loadJudge(); // 刷新待评审/已评审列表与表单
+      } catch (e) {
+        errEl.textContent = e.message;
+        errEl.classList.add('show');
+      }
+      saveBtn.disabled = false;
+      saveBtn.textContent = '提交评审并发放';
     };
+
+    // 待评审列表
+    (async () => {
+      const box = document.getElementById('aj-pending');
+      let data;
+      try { data = await API.get('/api/admin/judge?pending=1&limit=30'); }
+      catch (e) { box.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`; return; }
+      const list = data.pending || [];
+      if (!list.length) { box.innerHTML = '<div class="empty" style="padding:8px 0;">全部作品都已评审 🎉</div>'; return; }
+      box.innerHTML = list.map((p) => `
+        <div class="file-row">
+          <div class="file-info">
+            <div class="file-name" style="font-size:13px;">${escapeHtml(p.title)} <span class="audit-tag">${p.ref_type === 'file' ? '文件' : '轻应用'}#${p.ref_id}</span></div>
+            <div class="file-meta">${escapeHtml(p.owner || '')}${p.class_name ? ' · ' + escapeHtml(p.class_name) + '班' : ''} · ${formatTime(p.time)}</div>
+          </div>
+          <button class="btn btn-sm btn-primary" data-go="${p.ref_type}:${p.ref_id}">去评审</button>
+        </div>`).join('');
+      box.querySelectorAll('[data-go]').forEach((b) => {
+        b.onclick = () => {
+          const [t, id] = b.dataset.go.split(':');
+          typeEl.value = t;
+          searchEl.value = '#' + id;
+          refIdEl.value = id;
+          curRef = { ref_type: t, ref_id: Number(id) };
+          selEl.textContent = '已从待评审列表选择 #' + id + '，正在加载…';
+          closeDd();
+          // 直接按 id 拉详情回填（走搜索接口按 id 找标题）
+          (async () => {
+            const url = t === 'file' ? '/api/admin/files?q=' + encodeURIComponent('#' + id) : '/api/admin/apps?q=' + encodeURIComponent('#' + id);
+            let found = null;
+            try {
+              const data = await API.get(url);
+              const arr = t === 'file' ? data.files : data.apps || [];
+              found = arr.find((x) => String(x.id) === String(id));
+            } catch (_) { /* ignore */ }
+            const name = found ? (t === 'file' ? (found.title || found.original_name) : found.title) : ('作品 #' + id);
+            const meta = found ? `${found.class_name || ''}班 ${found.real_name || ''}` : '';
+            searchEl.value = name;
+            selEl.textContent = `已选择：#${id} ${name}（${meta}）`;
+            JUDGE_DIMS.forEach((d) => { document.getElementById('aj-' + d.key).value = ''; });
+            calc();
+          })();
+        };
+      });
+    })();
+
+    // 已评审列表
+    (async () => {
+      const box = document.getElementById('aj-done');
+      let data;
+      try { data = await API.get('/api/admin/judge?limit=20'); }
+      catch (e) { box.innerHTML = `<div class="empty">${escapeHtml(e.message)}</div>`; return; }
+      const list = data.reviews || [];
+      if (!list.length) { box.innerHTML = '<div class="empty" style="padding:8px 0;">暂无评审记录</div>'; return; }
+      box.innerHTML = list.map((r) => {
+        const title = r.ref_type === 'file' ? (r.file_title || '#file') : (r.app_title || '#app');
+        return `
+        <div class="file-row">
+          <div class="file-info">
+            <div class="file-name" style="font-size:13px;">${escapeHtml(title)} <span class="audit-tag">${r.ref_type === 'file' ? '文件' : '轻应用'}#${r.ref_id}</span> <span class="audit-tag">综合 ${r.total} 分</span></div>
+            <div class="file-meta">${escapeHtml(r.owner_name || '')}${r.class_name ? ' · ' + escapeHtml(r.class_name) + '班' : ''} · 评审积分 +${r.points}⭐ · ${formatTime(r.updated_at)}</div>
+          </div>
+          <button class="btn btn-sm btn-ghost" data-rejudge="${r.ref_type}:${r.ref_id}">重新评审</button>
+        </div>`;
+      }).join('');
+      box.querySelectorAll('[data-rejudge]').forEach((b) => {
+        b.onclick = () => {
+          const [t, id] = b.dataset.rejudge.split(':');
+          typeEl.value = t;
+          searchEl.value = '#' + id;
+          refIdEl.value = id;
+          curRef = { ref_type: t, ref_id: Number(id) };
+          closeDd();
+          (async () => {
+            const r = await API.get('/api/admin/judge?ref_type=' + t + '&ref_id=' + id).catch(() => null);
+            if (r && r.review) {
+              const sc = (() => { try { return JSON.parse(r.review.scores); } catch (_) { return {}; } })();
+              JUDGE_DIMS.forEach((d) => {
+                const el = document.getElementById('aj-' + d.key);
+                if (sc[d.key] != null) el.value = sc[d.key];
+              });
+            }
+            selEl.textContent = '已加载评审记录，可直接修改后重新提交（自动补/扣差额）';
+            calc();
+            document.getElementById('aj-error').scrollIntoView({ behavior: 'smooth', block: 'center' });
+          })();
+        };
+      });
+    })();
   }
 
   async function toggleShop() {
@@ -1239,11 +1316,12 @@ Views.admin = (page) => {
     catch (err) { list.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`; return; }
     const logs = data.logs || [];
     if (!logs.length) { list.innerHTML = `<div class="empty" style="padding:6px 0;">暂无审查拒绝记录</div>`; return; }
+    const kindLabel = { display_text: '作品信息审查', file_scan: '恶意扫描' };
     list.innerHTML = logs.map((l) => `
       <div class="file-row">
         <div class="file-info">
-          <div class="file-name" style="font-size:13px;">${escapeHtml(l.kind)} <span class="audit-tag">${escapeHtml(l.ref_type || '-')}${l.ref_id ? '#' + l.ref_id : ''}</span> ${l.user_id ? '<span class="audit-tag">uid=' + l.user_id + '</span>' : ''}</div>
-          <div class="file-meta">${formatTime(l.created_at)} · 拒绝原因：${escapeHtml(l.reason || '-')}</div>
+          <div class="file-name" style="font-size:13px;">${escapeHtml(kindLabel[l.kind] || l.kind)} <span class="audit-tag">${escapeHtml(l.ref_type || '-')}${l.ref_id ? '#' + l.ref_id : ''}</span> ${l.user_id ? '<span class="audit-tag">uid=' + l.user_id + '</span>' : ''} <span class="audit-tag" style="color:${l.result === 'rejected' ? 'var(--danger)' : 'var(--success)'};">${escapeHtml(l.result)}</span></div>
+          <div class="file-meta">${formatTime(l.created_at)} · ${escapeHtml(l.reason || '')}</div>
           <div class="file-meta" style="font-size:12px;color:var(--text-dim);">${escapeHtml(l.content || '')}</div>
         </div>
       </div>`).join('');
