@@ -330,7 +330,7 @@ Views.files = () => {
     };
   }
 
-  // ---- 展示设置：是否授权展示真实姓名 / 昵称 ----
+  // ---- 展示设置：是否授权展示真实姓名 / 昵称（昵称=姓名拼音首字母，选定后不可更改）----
   function showDisplaySettingsModal() {
     const u = API.getUser() || {};
     const notShowReal = u.show_real_name === false || u.show_real_name === 0;
@@ -346,17 +346,24 @@ Views.files = () => {
         </div>
       </div>
       <div class="field" id="ds-nickname-field" style="display:${notShowReal ? '' : 'none'};">
-        <label>展示昵称</label>
-        <input id="ds-nickname" type="text" maxlength="32" value="${escapeHtml(u.nickname || '')}" placeholder="作品墙上展示的昵称" />
+        <label>展示昵称（姓名拼音首字母）</label>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">由真实姓名自动生成；多音字可多选，<strong>选定后不可更改</strong></div>
+        <div id="ds-initials-options" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+        <input id="ds-nickname" type="hidden" value="${escapeHtml(u.nickname || '')}" />
       </div>
       <div class="modal-actions" style="justify-content:center;">
         <button class="btn" id="ds-cancel">取消</button>
         <button class="btn btn-primary" id="ds-save">保存</button>
       </div>`);
     const nicknameField = document.getElementById('ds-nickname-field');
+    const initialsOptions = document.getElementById('ds-initials-options');
+    const initialsInput = document.getElementById('ds-nickname');
+    // 初始渲染候选（含已有昵称高亮锁定）
+    Utils.initialsPicker(initialsOptions, initialsInput, (u.real_name || '').trim(), (u.nickname || '').trim());
     document.querySelectorAll('input[name="ds-show-real"]').forEach((radio) => {
       radio.addEventListener('change', () => {
         nicknameField.style.display = radio.value === '0' ? '' : 'none';
+        if (radio.value === '0') Utils.initialsPicker(initialsOptions, initialsInput, (u.real_name || '').trim(), (u.nickname || '').trim());
       });
     });
     document.getElementById('ds-cancel').onclick = closeModal;
@@ -364,9 +371,9 @@ Views.files = () => {
       const errEl = document.getElementById('display-settings-error');
       errEl.classList.remove('show');
       const showReal = (document.querySelector('input[name="ds-show-real"]:checked') || {}).value !== '0';
-      const nickname = document.getElementById('ds-nickname').value.trim();
+      const nickname = initialsInput.value.trim();
       if (!showReal && !nickname) {
-        errEl.textContent = '选择只展示昵称后，请填写昵称';
+        errEl.textContent = '请选择姓名拼音首字母作为昵称';
         errEl.classList.add('show');
         return;
       }

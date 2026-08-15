@@ -102,12 +102,14 @@ def main():
     if not cli:
         print("错误: 未找到 tencent-channel-cli")
         return
-    cmd = f'"{cli}" feed get-feed-detail --feed-id "{feed_id}"'
+    # 用 list 参数形式（无 shell），避免 feed_id/channel_id 拼接进 shell 命令造成命令注入
+    # （--feed-id=X 等号形式与 Node 侧 qq/proxy.js 的 CLI 调用约定一致）
+    cmd = [cli, "feed", "get-feed-detail", "--feed-id=" + feed_id]
     if channel_id:
-        cmd += f' --channel-id "{channel_id}"'
+        cmd.append("--channel-id=" + channel_id)
     env = dict(os.environ)
     env["QQ_AI_CONNECT_MCP_URL"] = f"http://127.0.0.1:{port}/mcp"
-    subprocess.run(cmd, env=env, shell=True, capture_output=True)
+    subprocess.run(cmd, env=env, capture_output=True)
     server.shutdown()
 
     seen = set()

@@ -25,6 +25,10 @@ startJobs();
 
 const app = express();
 app.disable('x-powered-by');
+// 经 nginx 反代（deploy/pat.weaxi.cn.conf 已设 X-Forwarded-For）：开启后 req.ip 才取真实客户端 IP，
+// 否则所有基于 IP 的速率限制退化为全局单桶（全部命中 127.0.0.1）。
+// 只信任一跳（本机 nginx），服务本身仅监听 127.0.0.1。
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 
 // API 路由

@@ -520,6 +520,140 @@ router.get('/logs', asyncHandler(async (req, res) => {
   res.json({ logs: rows });
 }));
 
+// 内容审查记录（O3）：AI 拒绝的展示文本（作品标题/简介/玩法），供管理后台追溯
+router.get('/audit-logs', asyncHandler(async (req, res) => {
+  const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 200));
+  const rows = await query(
+    `SELECT id, kind, content, result, reason, user_id, ref_type, ref_id, created_at
+     FROM audit_logs ORDER BY id DESC LIMIT ${limit}`
+  );
+  res.json({ logs: rows });
+}));
+
+// ==================== P3 评委评审（2026-08-16）====================
+// 维度与权重：创意与创新 30% / 内容质量 25% / 完成度与实现 25% / 价值观与合规 20%
+// 综合分 = Σ(维度分×权重)，0-10；积分 = round(综合分×30)，满分 300；综合分 <6 不兑现。
+// 每个项目一条评审（重新评审覆盖并自动补/扣差额积分）；points_log 记 reason='judge_review'，ref 带时间戳保证唯一。
+
+const JUDGE_DIMS = [
+  { key: 'creativity', label: '创意与创新', weight: 0.30 },
+  { key: 'content', label: '内容质量', weight: 0.25 },
+  { key: 'completeness', label: '完成度与实现', weight: 0.25 },
+  { key: 'values', label: '价值观与合规', weight: 0.20 },
+];
+
+function judgeTotal(scores) {
+  let t = 0;
+  for (const d of JUDGE_DIMS) {
+    const v = Number(scores[d.key]);
+    if (!Number.isInteger(v) || v < 0 || v > 10) return null; // 非法分数
+    t += v * d.weight;
+  }
+  return Math.round(t * 100) / 100;
+}
+
+// 发放/回补评审积分（delta 可为负）；事务 + 用户行锁
+async function applyJudgePoints(userId, delta, ref) {
+  if (!delta) return;
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [userId]);
+    await conn.execute(
+      'INSERT INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+      [userId, delta, 'judge_review', ref]
+    );
+    await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [delta, userId]);
+    await conn.commit();
+  } catch (e) {
+    try { await conn.rollback(); } catch (_) { /* ignore */ }
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+// 查询单个项目评审（预填用）或最近评审列表
+router.get('/judge', asyncHandler(async (req, res) => {
+  const refType = String(req.query.ref_type || '');
+  const refId = Number(req.query.ref_id || 0);
+  if (refType && ['file', 'app'].includes(refType) && refId > 0) {
+    const rows = await query(
+      'SELECT * FROM judge_reviews WHERE ref_type = ? AND ref_id = ?',
+      [refType, refId]
+    );
+    return res.json({ review: rows.length ? rows[0] : null });
+  }
+  const limit = Math.max(1, Math.min(Number(req.query.limit) || 20, 100));
+  const rows = await query(
+    `SELECT j.*, u.real_name AS owner_name, u.class_name,
+            COALESCE(f.title, f.original_name, '') AS file_title,
+            a.title AS app_title
+     FROM judge_reviews j
+     LEFT JOIN users u ON u.id = j.owner_user_id
+     LEFT JOIN files f ON f.id = j.ref_id AND j.ref_type = 'file'
+     LEFT JOIN apps a ON a.id = j.ref_id AND j.ref_type = 'app'
+     ORDER BY j.updated_at DESC LIMIT ${limit}`
+  );
+  res.json({ reviews: rows });
+}));
+
+// 提交/覆盖评审：打分 → 自动折算 → 发放/回补积分
+router.post('/judge', asyncHandler(async (req, res) => {
+  const refType = String((req.body && req.body.ref_type) || '');
+  const refId = parseInt(req.body && req.body.ref_id, 10);
+  const scores = (req.body && req.body.scores) || {};
+  if (!['file', 'app'].includes(refType) || !refId) {
+    return res.status(400).json({ error: '参数错误：请选择作品' });
+  }
+  const total = judgeTotal(scores);
+  if (total === null) {
+    return res.status(400).json({ error: '每个维度请输入 0-10 的整数分数' });
+  }
+  // 目标作品存在性 + 作者
+  const ownerRows = refType === 'file'
+    ? await query('SELECT user_id FROM files WHERE id = ?', [refId])
+    : await query('SELECT user_id FROM apps WHERE id = ?', [refId]);
+  if (!ownerRows.length) return res.status(404).json({ error: '作品不存在' });
+  const ownerId = ownerRows[0].user_id;
+
+  const points = total < 6 ? 0 : Math.round(Math.round(total * 100) * 30 / 100); // 整数化防浮点漂移
+  const existing = await query(
+    'SELECT id, points FROM judge_reviews WHERE ref_type = ? AND ref_id = ?',
+    [refType, refId]
+  );
+  const oldPoints = existing.length ? Number(existing[0].points) : 0;
+  const delta = points - oldPoints;
+
+  const scoresJson = JSON.stringify({
+    creativity: Number(scores.creativity), content: Number(scores.content),
+    completeness: Number(scores.completeness), values: Number(scores.values),
+  });
+  if (existing.length) {
+    await query(
+      'UPDATE judge_reviews SET scores = ?, total = ?, points = ?, judge_user_id = ? WHERE id = ?',
+      [scoresJson, total, points, req.user.id, existing[0].id]
+    );
+  } else {
+    const ins = await query(
+      'INSERT INTO judge_reviews (ref_type, ref_id, scores, total, points, judge_user_id, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [refType, refId, scoresJson, total, points, req.user.id, ownerId]
+    );
+    existing[0] = { id: ins.insertId };
+  }
+  // 差额发放（ref 带时间戳保证 points_log 唯一键不冲突）
+  if (delta !== 0) {
+    await applyJudgePoints(ownerId, delta, refType + ':' + refId + ':j' + Date.now());
+  }
+  await writeAdminLog(req.user.id, 'judge.review', refType, refId, {
+    scores: scoresJson, total, points, delta, reason: '评委评审',
+  });
+  res.json({
+    review: { ref_type: refType, ref_id: refId, scores: JSON.parse(scoresJson), total, points, delta },
+    message: points > 0 ? `已发放 ${points} ⭐ 评审积分` : (delta === 0 ? '已更新（无积分变动）' : '综合分低于 6 分，未兑现积分'),
+  });
+}));
+
 // ==================== P2 ====================
 
 // ---- 学AI 教程管理（在线编辑，库为准；seed-articles.js 仅作初始种子）----

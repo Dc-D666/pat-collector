@@ -848,6 +848,18 @@ span.brand-logo {
   .page-title { font-size: 20px; }
   .wall-grid { grid-template-columns: 1fr; }
   .file-meta { display: block; }
+  /* 页签（管理后台 11 个页签 / 我的项目双页签）：移动端改横向滚动胶囊条，
+     不再换行挤爆或溢出页面（flex 默认不换行，11 个按钮合计远超屏宽） */
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin: 0 -14px 16px;
+    padding: 0 14px 6px;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab-btn { padding: 8px 14px; font-size: 13px; white-space: nowrap; flex-shrink: 0; }
   /* 底部备案号：避开 fixed appbar（含安全区） */
   .site-footer { padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
 }

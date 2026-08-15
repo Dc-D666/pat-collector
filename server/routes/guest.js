@@ -130,6 +130,8 @@ router.get(
       [req.params.id, user.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: '文件不存在' });
+    // 访客路由本身就是"仅所有者"（token = 本人），flagged 不拦截——所有者需能取回自己的作品；
+    // 对外展示面（作品展/系统下载）已由 L5 过滤/拦截
     const absPath = path.join(config.storageDir, rows[0].stored_name);
     if (!fs.existsSync(absPath)) return res.status(404).json({ error: '文件已丢失' });
     res.download(absPath, sanitizeName(rows[0].original_name));
@@ -150,6 +152,7 @@ router.get(
     if (rows.length === 0) return res.status(404).json({ error: '文件不存在' });
     const ext = extOf(rows[0].original_name);
     if (ext !== 'html' && ext !== 'htm') return res.status(400).json({ error: '仅支持 HTML 文件预览' });
+    // 访客路由=仅所有者，flagged 不拦截（见下载注释）
     const absPath = path.join(config.storageDir, rows[0].stored_name);
     if (!fs.existsSync(absPath)) return res.status(404).json({ error: '文件已丢失' });
 
@@ -158,6 +161,8 @@ router.get(
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Disposition': "inline; filename=\"preview.html\"; filename*=UTF-8''" + encodeURIComponent(previewName),
       'Content-Security-Policy': 'sandbox allow-scripts',
+      // 防预览页把 ?token= 经 Referer 泄露给上传者（上传的 HTML 可用 meta referrer=unsafe-url 覆盖浏览器默认策略）
+      'Referrer-Policy': 'no-referrer',
       'X-Content-Type-Options': 'nosniff',
     });
     res.sendFile(absPath);
@@ -184,13 +189,15 @@ router.delete(
   rateLimit({
     windowMs: config.guestDeleteRateLimit.windowMs,
     max: config.guestDeleteRateLimit.max,
-    keyFn: (req) => (req.ip || 'unknown') + ':' + String(req.query.token || req.headers['x-guest-token'] || ''),
+    keyFn: (req) => (req.ip || 'unknown') + ':' + guestTokenOf(req),
   }),
   asyncHandler(async (req, res) => {
     const user = await loadActiveGuest(req, res);
     if (!user) return;
 
-    if (!verifyGuestPassword(user, req.query.password)) {
+    // 密码走 JSON body（前端已改）；query 兜底仅兼容旧客户端，nginx 日志已不再记录 query
+    const password = (req.body && req.body.password != null) ? req.body.password : req.query.password;
+    if (!verifyGuestPassword(user, password)) {
       return res.status(403).json({ error: '密码错误，无法删除' });
     }
 

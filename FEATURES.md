@@ -17,14 +17,14 @@
 | 功能 | 说明 | 位置 |
 | --- | --- | --- |
 | QQ 频道扫码登录（主） | `init` 拿二维码 → `poll` 轮询授权并反查 tiny_id → `bind` 绑定班级+姓名；已绑定直接登录；身份识别失败（未加入频道）时自动展示频道二维码引导加入（`public/img/qq-channel.jpg`） | auth-qq.js:73/164/244 / auth.js(前端) |
-| **访客直传（无 QQ）** | 登录页点「我没有QQ，或直接提交我的程序文件」→ 表单：**年级 → 班级 → 姓名 → 展示名授权 → 安全密码（选填）** → 上传程序文件 → 提交后签发**专属项目地址**（`#/p/<token>`），凭地址查看/下载/继续上传/删除；**不进入系统**（无系统令牌，其余功能全部不可用）。额度：单文件 ≤200MB（`MAX_UPLOAD_MB`），每天最多 5 次（`GUEST_MAX_UPLOADS_PER_DAY`） | auth.js(前端) / routes/auth.js:44 / routes/guest.js / public/js/project.js |
-| 访客项目地址 | `GET /api/guest/files?token=`（身份+文件列表+今日额度）、`POST /api/guest/upload`（multipart file+token）、`GET /api/guest/download/:id?token=`、`GET /api/guest/preview/:id?token=`（HTML，CSP sandbox）；令牌为 64 位 hex 长随机串、无过期、同一身份幂等返回同一地址 | routes/guest.js |
-| **访客删除（密码保护）** | `DELETE /api/guest/files/:id?token=&password=`：仅删本项目地址下的文件；密码 = 提交时自定义（scrypt 加盐哈希存 `users.guest_pwd_hash`）或未设置时的默认密码（`GUEST_DEFAULT_PASSWORD`）；错误 403、限流（10 次/10 分钟/令牌+IP）防爆破；删除回扣提交积分（与系统内删除一致），不返还当天上传次数 | routes/guest.js / utils/pwd.js / public/js/project.js |
+| **访客直传（无 QQ）** | 登录页点「我没有QQ，或直接提交我的程序文件」→ 表单：**年级 → 班级 → 姓名 → 展示名授权 → 安全密码（选填）** → 上传程序文件 → 提交后签发**专属项目地址**（`#/p/<token>`），凭地址查看/下载/继续上传/删除；**不进入系统**（无系统令牌，其余功能全部不可用）。额度：单文件 ≤200MB（`MAX_UPLOAD_MB`），每天最多 5 次（`GUEST_MAX_UPLOADS_PER_DAY`）；**全局新建登记限速（P2，`GUEST_REG_GLOBAL_HOUR` 默认 60/小时，幂等找回不耗额度）**。**防冒名（2026-08-15）**：该姓名+班级已被 QQ 账号绑定时拒绝访客登记（请用 QQ 登录），纯访客身份仍走幂等找回地址 | auth.js(前端) / routes/auth.js:44 / routes/guest.js / public/js/project.js |
+| 访客项目地址 | `GET /api/guest/files`（令牌走 `x-guest-token` 请求头，身份+文件列表+今日额度）、`POST /api/guest/upload`（multipart file+token）、`GET /api/guest/download/:id`（令牌走头）、`GET /api/guest/preview/:id?token=`（预览为顶层导航只能用 query，响应带 `Referrer-Policy: no-referrer` + CSP sandbox）；令牌为 64 位 hex 长随机串、无过期、同一身份幂等返回同一地址 | routes/guest.js |
+| **访客删除（密码保护）** | `DELETE /api/guest/files/:id`：令牌走 `x-guest-token` 头、密码走 **JSON body**（2026-08-15 起不再放 URL，防 nginx 访问日志记录）；仅删本项目地址下的文件；密码 = 提交时自定义（scrypt 加盐哈希存 `users.guest_pwd_hash`）或未设置时的默认密码（`GUEST_DEFAULT_PASSWORD`）；错误 403、限流（10 次/10 分钟/令牌+IP）防爆破；删除回扣提交积分（与系统内删除一致），不返还当天上传次数 | routes/guest.js / utils/pwd.js / public/js/project.js |
 | 上传磁盘自检 | **每次上传前**（登录与访客共用）检测服务器磁盘剩余空间，低于 `MIN_FREE_DISK_GB`（默认 2GB）返回 507「磁盘即将爆满，文件上传失败，请联系频道主扩容处理」，不落盘 | utils/upload.js:63（ensureDiskSpace）/ utils/disk.js |
 | Token | 系统：HMAC-SHA256 签名（`TOKEN_SECRET`），base64url，**24h 过期**，Bearer 头携带；访客：`guest_token` 列 | utils/token.js |
 | 当前用户 | `GET /api/auth/me`（附单文件上传上限供前端预检） | auth.js:85 |
 | 班级数据源 | `GET /api/auth/classes` 年级→班级二级菜单；前端有兜底常量 | auth.js:32 / auth.js(前端) |
-| 展示名授权 | `PATCH /api/auth/profile`：是否展示真实姓名；选否需填昵称（QQ 登录默认预填频道昵称） | auth.js:90 |
+| 展示名授权 | `PATCH /api/auth/profile`：是否展示真实姓名；选「否」则**昵称=姓名拼音首字母（方案二，2026-08-16）**——pypinyin 生成、多音字候选（单依纯→CYC/DYC/SYC）用户选择、**选定后不可更改**（服务端校验候选 + PATCH 锁定）；**响应返回完整用户字段（points/is_admin/status，2026-08-15 修复**——此前缺列会让前端缓存被覆盖为 points=0、管理员入口消失） | auth.js:90 / utils/pinyin.js / pinyin_initials.py |
 | 班级白名单 | 高一 2601–2624、高二 2501–2524、高三 2401–2425，另有「其他」：毕业生填自己班级（4 位数字），外校填 0（必填校验） | config.js:15 |
 | QQ 会话失效检测 | `GET /api/auth/qq/status` 调 CLI `login status`，失效清理会话；前端全站横幅检测（60s 节流） | auth-qq.js:36 / app.js |
 
@@ -37,11 +37,11 @@
 | **超长限制** | 文本/代码类单文件内容达**百万级字符**直接拒绝上传，提示联系频道主/QQ：3303188265（字节 >4MB 兜底不读文件） | files.js |
 | 超 200MB 提示 | 413 及前端预检文案均附「请联系频道主或 QQ：3303188265」 | files.js / api.js / dashboard.js |
 | 扩展名白名单 | **代码/文本 15 种 + 压缩包 5 种**：html/htm/py/js/ts/c/cpp/java/css/json/ipynb/md/txt/csv/svg + zip/rar/7z/tar/gz；图片/视频/音频/Office/3D 已关闭 | config.js |
-| 上传限制 | 一次最多 **5 个文件**（更多提示打包压缩包）；每人每天最多 **20 次上传**（含删除，`upload_log` 表计数） | dashboard.js / files.js |
+| 上传限制 | 一次最多 **5 个文件**（更多提示打包压缩包）；每人每天最多 **20 次上传**（含删除，`upload_log` 表计数）；**额度/配额原子化（2026-08-15）**：每日次数/作品数/存储配额检查与写入同事务 + 用户行锁，并发不会突破上限；**ClamAV 恶意程序扫描（R3，2026-08-16）**：落库前扫描，命中病毒删盘拒收（utils/clamav.js，clamd 127.0.0.1:3310，`MALWARE_SCAN` 开关，不可用降级放行） | dashboard.js / files.js / utils/upload.js |
 | 大小限制 | 单文件默认 **200MB**（`MAX_UPLOAD_MB`）；每人总容量默认 **1GB**（`MAX_USER_STORAGE_MB`，超限提示联系频道主扩容）；每人作品文件总数上限 **20**（`MAX_FILES_PER_USER`）、轻应用总数上限 **20**（`MAX_APPS_PER_USER`，删除可释放名额） | config.js / utils/upload.js / apps.js |
 | 文件列表 | 仅列本人文件（含标题/简介/玩法） | files.js:123 |
 | 作品信息 | `PATCH /api/files/:id` 补标题/简介/玩法（标题必填） | files.js:136 |
-| 下载 | `GET /api/files/download/:id`：本人 + **同班同学**可下载；落盘缺失返回「文件已丢失」 | files.js:169 |
+| 下载 | `GET /api/files/download/:id`：**全校公开**（登录即可下载任意作品，2026-08 起的产品决策）；落盘缺失返回「文件已丢失」 | files.js:169 |
 | 删除 | `DELETE /api/files/:id` 仅本人；删记录 + 落盘文件 | files.js:193 |
 | 同名冲突 | `(user_id, original_name)` 唯一约束 → 409 提示先删除或重命名 | schema.sql / files.js:114 |
 
@@ -57,9 +57,10 @@
 
 ## 四、全校作品展（server/routes/class.js:77 + public/js/class-wall.js）
 
-- 全校**文件 + 轻应用**项目平铺展示，按时间倒序混排，带班级 tag + 年级归属
+- 全校**文件 + 轻应用**项目平铺展示（**访客作品不参展，R1**：仅 QQ 用户作品入墙；访客 QQ 合并后自动转正），按时间倒序混排，带班级 tag + 年级归属
+- **违规下架（2026-08-15）**：`audit_status='flagged'` 的作品不进入作品展/总览，下载/预览/点赞一律 403「该作品因违规已被下架」
 - 展示名遵循授权（`show_real_name=0` 用昵称/频道名）；生效中的**专属称号**以小徽章展示
-- 每项标注 `is_mine` / `same_class`；文件可下载（本人/同班），应用可跳转
+- 每项标注 `is_mine` / `same_class`；文件可下载（登录即可，全校公开），应用可跳转
 - **点赞**：每日票数不限（🤍→❤️），主动点赞 +2⭐/次；重复点赞 409；置顶作品排最前 + 🔥 徽标
 - 实时搜索：按项目标题 / 作者 / 班级过滤（前端 oninput 即时渲染）
 - **排序切换**：🕐 最新发表（默认，从新到旧）/ ❤️ 点赞最多；置顶作品始终优先 | class-wall.js
@@ -78,7 +79,7 @@
 | 文章详情 | `GET /api/learn/:slug`（含任务数组；固定路径如 nfti-ticket 必须先于 `/:slug` 注册） | learn.js:223 |
 | Markdown 渲染 | 前端自研轻量渲染器：标题/列表/引用/代码块/表格/媒体行（B站 iframe、本地 mp4），先转义防 XSS | learn.js(前端) |
 | 章节任务 | 类型：`quiz`（单选即时判题）、`action`（实操打卡，可带 `nfti:true` 标记跳 NFTI 体验）；B站视频嵌入正文 | seed-articles.js |
-| 阅读计时 | 文章页 ≥60s 上报积分；路由切换时取消计时器（防切页刷分） | learn.js(前端) / app.js:25 |
+| 阅读计时 | 文章页 ≥60s 上报积分；路由切换时取消计时器（防切页刷分）；**服务端校验（2026-08-15）**：加载文章详情记录开始时间，`/api/points/read` 需已读 ≥60s 才发分（`utils/readTimer.js`） | learn.js(前端) / app.js:25 / routes/points.js / utils/readTimer.js |
 | 学习进度 | `GET /api/learn/progress`（每章是否完成；游客宽松返回空进度） | learn.js:74 |
 
 ## 七、积分体系（server/utils/points.js + routes/points.js + public/js/points.js）
@@ -90,19 +91,19 @@
 | 行为 | 积分 | 防重键 |
 | --- | --- | --- |
 | 首次登录（注册即发） | 10 ⭐ | `once` |
-| 阅读课程 ≥60s（每篇一次） | 10 ⭐ | `article:<id>` |
-| 完成整章所有任务（每章一次） | 20 ⭐ | `article:<id>`（task 维度） |
+| 阅读课程 ≥60s（每篇一次） | **8 ⭐** | `article:<id>`（P3） |
+| 完成整章所有任务（每章一次） | **15 ⭐** | `article:<id>`（task 维度，P3） |
 | 提交 AI 轻应用（每个作品一次，**最多计 3 个**） | 15 ⭐ | `app:<id>` |
-| 提交作品文件（每个文件一次，**最多计 5 个**） | 30 ⭐ | `file:<id>` |
+| 提交作品文件（每个文件一次，**最多计 5 个**） | **25 ⭐** | `file:<id>`（P3，2026-08-16） |
 | **主动点赞他人**（网页操作，每次 +2⭐） | 2 ⭐ | `like:<likes.id>`；**每日票数不限**，点赞者每日积分上限 10⭐，禁自赞 |
-| **作品被点赞**（站内直接发放） | 2 ⭐/赞 | 点赞时同步给作品作者发放；作者每日上限 30⭐ |
-| **课程毕业**（5 章读完全部任务完成，仅一次） | 50 ⭐ | `once` |
+| **作品被点赞**（站内直接发放） | **5 ⭐/赞** | 点赞时同步给作品作者发放；作者每日上限 **20⭐**（P3，2026-08-16） |
+| **课程毕业**（5 章读完全部任务完成，仅一次） | **40 ⭐** | `once`（**2026-08-15：状态查询与发放分离**——`GET /api/points/graduate` 只读展示资格（页面加载用），`POST` 才在点「领取」时发放，避免打开积分页即自动领取） |
 | **彩蛋**（连续点击顶栏积分徽章 5 次，仅一次） | 5 ⭐ | `once`（前端 app.js 事件委托连点计数） |
 
 - **幂等发放**：`points_log` 唯一键 `(user_id, reason, ref_id)` + 事务内插流水/更新 `users.points` | utils/points.js:19
 - **整章判定**：`POST /api/points/task` 记 `task_progress` → 该章任务全完成才发整章积分；`GET /api/points/task-progress` 回填完成状态 | points.js
 - **被赞积分（站内直发）**：`POST /api/points/like` 时，除点赞者本人 +2⭐（`like_give`，每日上限 10）外，同步给作品作者 +2⭐（`like_receive`，每日上限 30）；同一 `likes.id` 作 ref_id、reason 区分，均幂等。**不使用 CLI 查频道点赞**（原 CLI 增量方案及 `feed_like_snapshots` 表已废弃，表保留不删）
-- 排行榜：`GET /api/points/leaderboard` top20 降序 + 我的排名（0 分不占榜），展示名/称号遵循授权 | points.js
+- 排行榜：`GET /api/points/leaderboard` top20 降序 + 我的排名（0 分不占榜）；**访客（无 QQ）不参与（O1，2026-08-16）**；展示名遵循授权 + **同班才显真名（P1）**，非同班显示昵称（拼音缩写）、无昵称兜底「同学」 | points.js
 - 流水：`GET /api/points` 积分+最近 50 条记录（含中文原因文案，消费为负数） | utils/points.js
 
 ### 积分商城（已下架，前端无入口；后端接口与定时回收保留，待重新上架）

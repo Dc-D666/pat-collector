@@ -138,8 +138,7 @@ Views.activity = () => {
               </tr>
             </tbody>
           </table>
-          <p>🧮 计票：作品得分 = 评委老师评分 × 70% + 学生互动 × 30%</p>
-          <p style="color:var(--text-dim);font-size:12px;margin-top:6px;">活动全程免费。完整规则、计票细则与违规处理见上方「查看完整活动通知」。</p>
+          <p>🏆 评奖规则：个人积分排行榜名次，积分相同时优先达成者的排名靠前</p>
         </div>
       </div>
     </div>`;

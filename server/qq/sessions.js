@@ -44,7 +44,9 @@ function saveIndex() {
     };
   }
   try {
-    fs.writeFileSync(INDEX_FILE, JSON.stringify(toSave, null, 2));
+    // 0600：index.json 含 tiny_id/nickname/user_id 等 PII，不可世界可读
+    fs.writeFileSync(INDEX_FILE, JSON.stringify(toSave, null, 2), { mode: 0o600 });
+    try { fs.chmodSync(INDEX_FILE, 0o600); } catch (_) { /* 已有正确权限则忽略 */ }
   } catch (_) { /* 磁盘写失败不致命 */ }
 }
 

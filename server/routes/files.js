@@ -10,6 +10,7 @@ const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
 const { revoke } = require('../utils/points');
 const { runMulter, ensureDiskSpace, runUploadPipeline, sanitizeName, extOf } = require('../utils/upload');
+const { auditDisplayText } = require('../utils/audit');
 
 const router = express.Router();
 
@@ -66,6 +67,12 @@ router.patch(
     }
     const description = String(body.description || '').trim().slice(0, 2000) || null;
     const gameplay = String(body.gameplay || '').trim().slice(0, 2000) || null;
+    // R2（2026-08-15）：作品标题/简介/玩法公开展示，同步 AI 审查；违规拒绝，AI 不可用降级放行
+    const displayText = [title, description, gameplay].filter(Boolean).join('\n');
+    const d = await auditDisplayText(displayText, { userId: req.user.id, refType: 'file', refId: Number(req.params.id) });
+    if (!d.ok) {
+      return res.status(400).json({ error: '作品信息不合规（' + (d.reason || '请修改后重试') + '）' });
+    }
     await query('UPDATE files SET title = ?, description = ?, gameplay = ? WHERE id = ?', [
       title,
       description,
@@ -93,6 +100,10 @@ router.get(
       return res.status(404).json({ error: '文件不存在' });
     }
     const file = rows[0];
+    // 违规下架：flagged 文件全校不可下载（L5 修复）；但所有者本人仍可下载（需查看/修正自己的作品）
+    if (file.audit_status === 'flagged' && file.user_id !== req.user.id) {
+      return res.status(403).json({ error: '该作品因违规已被下架' });
+    }
     const absPath = path.join(config.storageDir, file.stored_name);
     if (!fs.existsSync(absPath)) {
       return res.status(404).json({ error: '文件已丢失' });
@@ -127,6 +138,10 @@ router.get(
     if (ext !== 'html' && ext !== 'htm') {
       return res.status(400).json({ error: '仅支持 HTML 文件预览' });
     }
+    // 违规下架：flagged 文件不可预览（L5 修复）；所有者本人除外
+    if (file.audit_status === 'flagged' && file.user_id !== req.user.id) {
+      return res.status(403).json({ error: '该作品因违规已被下架' });
+    }
     const absPath = path.join(config.storageDir, file.stored_name);
     if (!fs.existsSync(absPath)) {
       return res.status(404).json({ error: '文件已丢失' });
@@ -138,6 +153,8 @@ router.get(
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Disposition': "inline; filename=\"preview.html\"; filename*=UTF-8''" + encodeURIComponent(previewName),
       'Content-Security-Policy': 'sandbox allow-scripts',
+      // 防预览页把 ?token= 经 Referer 泄露给上传者（上传的 HTML 可用 meta referrer=unsafe-url 覆盖浏览器默认策略）
+      'Referrer-Policy': 'no-referrer',
       'X-Content-Type-Options': 'nosniff',
     });
     res.sendFile(absPath);

@@ -568,11 +568,16 @@ Views.admin = (page) => {
         <button class="btn btn-sm" id="ao-pin"> 手动置顶作品</button>
         <button class="btn btn-sm" id="ao-title"> 发放称号</button>
         <button class="btn btn-sm" id="ao-shop"> 商城开关</button>
+        <button class="btn btn-sm btn-primary" id="ao-judge">🧑‍⚖️ 评委评审</button>
         <span style="margin-left:auto;"></span>
         <select id="ao-status" style="padding:9px;border:1px solid var(--border);border-radius:10px;">
           <option value="active">生效中</option><option value="expired">已过期</option><option value="">全部</option>
         </select>
         <button class="btn btn-sm" id="ao-refresh">刷新</button>
+      </div>
+      <div class="card" style="padding:14px 16px;margin-bottom:14px;">
+        <div class="file-list-head"><span>🧑‍⚖️ 评委评审记录（创意30% / 内容25% / 完成25% / 价值观20%，满分 300⭐，综合 &lt;6 不兑现）</span></div>
+        <div id="ao-judge-list"><div class="spinner"></div></div>
       </div>
       <div id="ao-list"><div class="spinner"></div></div>`;
     const doSearch = () => fetchPurchases(document.getElementById('ao-status').value);
@@ -582,7 +587,29 @@ Views.admin = (page) => {
     document.getElementById('ao-pin').onclick = showPinModal;
     document.getElementById('ao-title').onclick = showTitleModal;
     document.getElementById('ao-shop').onclick = toggleShop;
+    document.getElementById('ao-judge').onclick = showJudgeModal;
+    fetchJudgeList();
     doSearch();
+  }
+
+  async function fetchJudgeList() {
+    const list = document.getElementById('ao-judge-list');
+    if (!list) return;
+    let data;
+    try { data = await API.get('/api/admin/judge?limit=10'); }
+    catch (err) { list.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`; return; }
+    const reviews = data.reviews || [];
+    if (!reviews.length) { list.innerHTML = `<div class="empty" style="padding:6px 0;">暂无评审记录</div>`; return; }
+    list.innerHTML = reviews.map((r) => {
+      const title = r.ref_type === 'file' ? (r.file_title || '#file') : (r.app_title || '#app');
+      return `
+      <div class="file-row">
+        <div class="file-info">
+          <div class="file-name" style="font-size:13px;">${escapeHtml(title)} <span class="audit-tag">${escapeHtml(r.ref_type)}#${r.ref_id}</span> <span class="audit-tag">综合 ${r.total} 分</span></div>
+          <div class="file-meta">${escapeHtml(r.owner_name || '')}${r.class_name ? ' · ' + escapeHtml(r.class_name) + '班' : ''} · 评审积分 +${r.points}⭐ · ${formatTime(r.updated_at)}</div>
+        </div>
+      </div>`;
+    }).join('');
   }
 
   async function fetchPurchases(status) {
@@ -629,20 +656,94 @@ Views.admin = (page) => {
       <div class="field"><label>类型</label>
         <select id="ao-pin-type"><option value="file">文件</option><option value="app">轻应用</option></select>
       </div>
-      <div class="field"><label>作品 id</label><input id="ao-pin-id" type="number" placeholder="文件/轻应用 id" /></div>
+      <div class="field">
+        <label>作品（输入标题 / 文件名 / 作者，动态匹配）</label>
+        <div style="position:relative;">
+          <input id="ao-pin-search" type="text" autocomplete="off" placeholder="输入关键词搜索作品…" />
+          <input id="ao-pin-id" type="hidden" />
+          <div id="ao-pin-dropdown" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;max-height:220px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);display:none;"></div>
+        </div>
+        <div id="ao-pin-selected" style="font-size:12px;color:var(--text-dim);margin-top:6px;"></div>
+      </div>
       <div class="field"><label>置顶时长（小时，默认 24，上限 168）</label><input id="ao-pin-hours" type="number" value="24" /></div>
       <div class="modal-actions">
         <button class="btn" id="ao-pin-cancel">取消</button>
         <button class="btn btn-primary" id="ao-pin-save">置顶</button>
       </div>`);
     document.getElementById('ao-pin-cancel').onclick = closeModal;
+
+    const searchEl = document.getElementById('ao-pin-search');
+    const idEl = document.getElementById('ao-pin-id');
+    const ddEl = document.getElementById('ao-pin-dropdown');
+    const selEl = document.getElementById('ao-pin-selected');
+    const typeEl = document.getElementById('ao-pin-type');
+    let timer = null;
+
+    const closeDd = () => { ddEl.style.display = 'none'; };
+    const selectItem = (item) => {
+      idEl.value = item.id;
+      selEl.textContent = `已选择：#${item.id} ${item.name}（${item.meta}）`;
+      searchEl.value = item.name;
+      closeDd();
+    };
+    const renderDd = (items) => {
+      if (!items.length) {
+        ddEl.innerHTML = '<div style="padding:10px 12px;color:var(--text-dim);font-size:13px;">无匹配结果</div>';
+        ddEl.style.display = 'block';
+        return;
+      }
+      ddEl.innerHTML = items.map((it) => `
+        <div data-id="${it.id}" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;" onmouseover="this.style.background='var(--primary-soft)'" onmouseout="this.style.background=''">
+          <div style="font-weight:600;">${escapeHtml(it.name)}</div>
+          <div style="color:var(--text-dim);font-size:12px;margin-top:1px;">${escapeHtml(it.meta)} · id=${it.id}</div>
+        </div>`).join('');
+      ddEl.style.display = 'block';
+      ddEl.querySelectorAll('[data-id]').forEach((el) => {
+        el.onclick = () => selectItem(items.find((x) => String(x.id) === el.dataset.id));
+      });
+    };
+    const doSearch = async () => {
+      const kw = searchEl.value.trim();
+      if (!kw) { closeDd(); return; }
+      const type = typeEl.value;
+      try {
+        const url = type === 'file'
+          ? '/api/admin/files?q=' + encodeURIComponent(kw)
+          : '/api/admin/apps?q=' + encodeURIComponent(kw);
+        const data = await API.get(url);
+        const items = (type === 'file' ? data.files : data.apps || []).map((x) => ({
+          id: x.id,
+          name: type === 'file' ? (x.title && x.title.trim() ? x.title : x.original_name) : x.title,
+          meta: `${x.class_name || ''}班 ${x.real_name || ''}${type === 'file' && x.original_name ? ' · ' + x.original_name : ''}`,
+        }));
+        renderDd(items);
+      } catch (_) { closeDd(); }
+    };
+    searchEl.addEventListener('input', () => {
+      idEl.value = ''; selEl.textContent = '';
+      clearTimeout(timer);
+      timer = setTimeout(doSearch, 250);
+    });
+    typeEl.addEventListener('change', () => {
+      idEl.value = ''; selEl.textContent = ''; searchEl.value = '';
+      closeDd();
+    });
+    searchEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDd(); });
+    searchEl.addEventListener('blur', () => setTimeout(closeDd, 150));
+
     document.getElementById('ao-pin-save').onclick = async () => {
       const errEl = document.getElementById('ao-pin-error');
       errEl.classList.remove('show');
+      const refId = parseInt(idEl.value, 10);
+      if (!refId) {
+        errEl.textContent = '请先从搜索结果中选择作品';
+        errEl.classList.add('show');
+        return;
+      }
       try {
         await API.post('/api/admin/pins', JSON.stringify({
-          ref_type: document.getElementById('ao-pin-type').value,
-          ref_id: parseInt(document.getElementById('ao-pin-id').value, 10),
+          ref_type: typeEl.value,
+          ref_id: refId,
           hours: parseInt(document.getElementById('ao-pin-hours').value, 10) || 24,
         }));
         closeModal();
@@ -677,6 +778,162 @@ Views.admin = (page) => {
         toast('已发放');
         fetchPurchases(document.getElementById('ao-status').value);
       } catch (err) { errEl.textContent = err.message; errEl.classList.add('show'); }
+    };
+  }
+
+  // ---- 评委评审（P3）：选项目 → 4 维度打分（0-10 整数）→ 自动折算发放 ----
+  const JUDGE_DIMS = [
+    { key: 'creativity', label: '创意与创新', weight: 0.30 },
+    { key: 'content', label: '内容质量', weight: 0.25 },
+    { key: 'completeness', label: '完成度与实现', weight: 0.25 },
+    { key: 'values', label: '价值观与合规', weight: 0.20 },
+  ];
+
+  function showJudgeModal() {
+    openModal(`
+      <h3 class="modal-title">🧑‍⚖️ 评委评审</h3>
+      <p style="font-size:12px;color:var(--text-dim);margin:0 0 10px;text-align:center;">创意30% · 内容25% · 完成25% · 价值观20%｜满分 300⭐｜综合 &lt;6 分不兑现</p>
+      <div class="form-error" id="aj-error"></div>
+      <div class="field"><label>类型</label>
+        <select id="aj-type"><option value="file">文件</option><option value="app">轻应用</option></select>
+      </div>
+      <div class="field">
+        <label>作品（输入标题 / 文件名 / 作者，动态匹配）</label>
+        <div style="position:relative;">
+          <input id="aj-search" type="text" autocomplete="off" placeholder="输入关键词搜索作品…" />
+          <input id="aj-ref-id" type="hidden" />
+          <div id="aj-dropdown" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;max-height:200px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);display:none;"></div>
+        </div>
+        <div id="aj-selected" style="font-size:12px;color:var(--text-dim);margin-top:6px;"></div>
+      </div>
+      <div id="aj-scores">
+        ${JUDGE_DIMS.map((d) => `
+        <div class="field" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <label style="flex:1;margin:0;font-size:13px;">${d.label}（${Math.round(d.weight * 100)}%）</label>
+          <input id="aj-${d.key}" type="number" min="0" max="10" step="1" placeholder="0-10" style="width:80px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:14px;text-align:center;" />
+        </div>`).join('')}
+      </div>
+      <div class="field"><label>综合分 / 积分预览</label><div id="aj-preview" style="font-size:15px;font-weight:700;color:var(--primary);"></div></div>
+      <div class="modal-actions">
+        <button class="btn" id="aj-cancel">取消</button>
+        <button class="btn btn-primary" id="aj-save">提交评审并发放</button>
+      </div>`);
+    document.getElementById('aj-cancel').onclick = closeModal;
+
+    const searchEl = document.getElementById('aj-search');
+    const refIdEl = document.getElementById('aj-ref-id');
+    const ddEl = document.getElementById('aj-dropdown');
+    const selEl = document.getElementById('aj-selected');
+    const typeEl = document.getElementById('aj-type');
+    const previewEl = document.getElementById('aj-preview');
+    const errEl = document.getElementById('aj-error');
+    let timer = null;
+    let curRef = null;
+
+    const closeDd = () => { ddEl.style.display = 'none'; };
+    const calc = () => {
+      let t = 0, valid = true;
+      for (const d of JUDGE_DIMS) {
+        const el = document.getElementById('aj-' + d.key);
+        const v = el ? parseInt(el.value, 10) : NaN;
+        if (Number.isNaN(v) || v < 0 || v > 10) { valid = false; break; }
+        t += v * d.weight;
+      }
+      if (!valid) { previewEl.textContent = '请完整输入 0-10 的整数分数'; return; }
+      t = Math.round(t * 100) / 100;
+      const pts = t < 6 ? 0 : Math.round(Math.round(t * 100) * 30 / 100);
+      previewEl.textContent = `综合 ${t.toFixed(2)} / 10 分 → 评审积分 ${pts} ⭐${t < 6 ? '（低于 6 分不兑现）' : ''}`;
+    };
+    JUDGE_DIMS.forEach((d) => {
+      const el = document.getElementById('aj-' + d.key);
+      el.addEventListener('input', calc);
+    });
+
+    const renderDd = (items) => {
+      if (!items.length) {
+        ddEl.innerHTML = '<div style="padding:10px 12px;color:var(--text-dim);font-size:13px;">无匹配结果</div>';
+        ddEl.style.display = 'block';
+        return;
+      }
+      ddEl.innerHTML = items.map((it) => `
+        <div data-id="${it.id}" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;" onmouseover="this.style.background='var(--primary-soft)'" onmouseout="this.style.background=''">
+          <div style="font-weight:600;">${escapeHtml(it.name)}</div>
+          <div style="color:var(--text-dim);font-size:12px;margin-top:1px;">${escapeHtml(it.meta)} · id=${it.id}</div>
+        </div>`).join('');
+      ddEl.style.display = 'block';
+      ddEl.querySelectorAll('[data-id]').forEach((el) => {
+        el.onclick = () => selectItem(items.find((x) => String(x.id) === el.dataset.id));
+      });
+    };
+    const doSearch = async () => {
+      const kw = searchEl.value.trim();
+      if (!kw) { closeDd(); return; }
+      const type = typeEl.value;
+      try {
+        const url = type === 'file'
+          ? '/api/admin/files?q=' + encodeURIComponent(kw)
+          : '/api/admin/apps?q=' + encodeURIComponent(kw);
+        const data = await API.get(url);
+        const items = (type === 'file' ? data.files : data.apps || []).map((x) => ({
+          id: x.id,
+          name: type === 'file' ? (x.title && x.title.trim() ? x.title : x.original_name) : x.title,
+          meta: `${x.class_name || ''}班 ${x.real_name || ''}${type === 'file' && x.original_name ? ' · ' + x.original_name : ''}`,
+        }));
+        renderDd(items);
+      } catch (_) { closeDd(); }
+    };
+    const selectItem = async (item) => {
+      curRef = { ref_type: typeEl.value, ref_id: item.id };
+      refIdEl.value = item.id;
+      selEl.textContent = `已选择：#${item.id} ${item.name}（${item.meta}）`;
+      searchEl.value = item.name;
+      closeDd();
+      // 回填已有评审
+      JUDGE_DIMS.forEach((d) => { document.getElementById('aj-' + d.key).value = ''; });
+      try {
+        const r = await API.get('/api/admin/judge?ref_type=' + curRef.ref_type + '&ref_id=' + curRef.ref_id);
+        if (r.review) {
+          const sc = (() => { try { return JSON.parse(r.review.scores); } catch (_) { return {}; } })();
+          JUDGE_DIMS.forEach((d) => {
+            const el = document.getElementById('aj-' + d.key);
+            if (sc[d.key] != null) el.value = sc[d.key];
+          });
+          selEl.textContent += `（已评审：综合 ${r.review.total} 分 / +${r.review.points}⭐，重新提交将覆盖并自动补/扣差额）`;
+        }
+      } catch (_) { /* ignore */ }
+      calc();
+    };
+    searchEl.addEventListener('input', () => { refIdEl.value = ''; selEl.textContent = ''; curRef = null; clearTimeout(timer); timer = setTimeout(doSearch, 250); });
+    typeEl.addEventListener('change', () => { refIdEl.value = ''; selEl.textContent = ''; curRef = null; closeDd(); });
+    searchEl.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDd(); });
+    searchEl.addEventListener('blur', () => setTimeout(closeDd, 150));
+
+    document.getElementById('aj-save').onclick = async () => {
+      errEl.classList.remove('show');
+      if (!curRef || !parseInt(refIdEl.value, 10)) {
+        errEl.textContent = '请先从搜索结果中选择作品';
+        errEl.classList.add('show');
+        return;
+      }
+      const scores = {};
+      let bad = false;
+      JUDGE_DIMS.forEach((d) => {
+        const v = parseInt(document.getElementById('aj-' + d.key).value, 10);
+        if (Number.isNaN(v) || v < 0 || v > 10) bad = true;
+        scores[d.key] = v;
+      });
+      if (bad) { errEl.textContent = '每个维度请输入 0-10 的整数分数'; errEl.classList.add('show'); return; }
+      const yes = await confirm(`确认对「${curRef.ref_type === 'file' ? '文件' : '轻应用'} #${curRef.ref_id}」提交评审？积分将自动发放/调整给作者`);
+      if (!yes) return;
+      try {
+        const r = await API.post('/api/admin/judge', JSON.stringify({
+          ref_type: curRef.ref_type, ref_id: curRef.ref_id, scores,
+        }));
+        closeModal();
+        toast(r.message || '已提交');
+        fetchJudgeList();
+        refreshOps && refreshOps();
+      } catch (e) { errEl.textContent = e.message; errEl.classList.add('show'); }
     };
   }
 
@@ -958,6 +1215,10 @@ Views.admin = (page) => {
   // ---------- 审计 ----------
   async function loadLogs() {
     content.innerHTML = `
+      <div class="card" style="padding:14px 16px;margin-bottom:14px;">
+        <div class="file-list-head"><span>📋 内容审查记录（AI 拒绝的展示文本，O3）</span></div>
+        <div id="al-audit-list"><div class="spinner"></div></div>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
         <input id="al-q" type="text" placeholder="搜索操作类型/详情" style="flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;" />
         <button class="btn btn-sm" id="al-search">搜索</button>
@@ -966,7 +1227,26 @@ Views.admin = (page) => {
     const doSearch = () => fetchLogs(document.getElementById('al-q').value.trim());
     document.getElementById('al-search').onclick = doSearch;
     document.getElementById('al-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+    fetchAuditLogs();
     doSearch();
+  }
+
+  async function fetchAuditLogs() {
+    const list = document.getElementById('al-audit-list');
+    if (!list) return;
+    let data;
+    try { data = await API.get('/api/admin/audit-logs?limit=20'); }
+    catch (err) { list.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`; return; }
+    const logs = data.logs || [];
+    if (!logs.length) { list.innerHTML = `<div class="empty" style="padding:6px 0;">暂无审查拒绝记录</div>`; return; }
+    list.innerHTML = logs.map((l) => `
+      <div class="file-row">
+        <div class="file-info">
+          <div class="file-name" style="font-size:13px;">${escapeHtml(l.kind)} <span class="audit-tag">${escapeHtml(l.ref_type || '-')}${l.ref_id ? '#' + l.ref_id : ''}</span> ${l.user_id ? '<span class="audit-tag">uid=' + l.user_id + '</span>' : ''}</div>
+          <div class="file-meta">${formatTime(l.created_at)} · 拒绝原因：${escapeHtml(l.reason || '-')}</div>
+          <div class="file-meta" style="font-size:12px;color:var(--text-dim);">${escapeHtml(l.content || '')}</div>
+        </div>
+      </div>`).join('');
   }
 
   async function fetchLogs(q) {

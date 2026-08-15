@@ -8,9 +8,11 @@ const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
 const config = require('../config');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { grant, revoke } = require('./points');
 const { reviewContent } = require('./audit');
+const { scanFile } = require('./clamav');
+const { scanWithVirusTotal } = require('./virustotal');
 const { freeDiskBytes } = require('./disk');
 const { getSetting } = require('./settings');
 
@@ -83,41 +85,90 @@ async function runUploadPipeline(req, res, user, opts) {
   const ext = extOf(originalName);
   const isText = config.textFormats.has(ext); // 文本/代码类：需 AI 审查 + 超长限制
 
-  // 每人每天上传次数限制（含上传后删除的）：先检查再记录
-  const [ulogCnt] = await query(
-    'SELECT COUNT(*) AS c FROM upload_log WHERE user_id = ? AND DATE(created_at) = CURDATE()',
-    [user.id]
-  );
-  if (Number(ulogCnt.c) >= maxUploadsPerDay) {
-    fs.promises.unlink(req.file.path).catch(() => {});
-    return res.status(400).json({ error: `今日上传次数已达上限（${maxUploadsPerDay} 次），请明天再试` });
+  // ---- R3 恶意程序扫描（2026-08-16）：在落库/发分前执行，命中病毒直接删盘拒收，
+  // 无任何 DB 记录与积分副作用。扫描不可用/超时/异常 → 降级放行（不阻断正常上传）。
+  if (config.malwareScan) {
+    try {
+      const scan = await scanFile(req.file.path);
+      if (scan.available && !scan.clean) {
+        fs.promises.unlink(req.file.path).catch(() => {});
+        return res.status(400).json({
+          error: '安全扫描发现恶意程序（' + (scan.virus || '未知') + '），文件已拒绝收录',
+        });
+      }
+      // 双扫描：ClamAV 通过后再跑 VirusTotal（哈希查询命中即判；429 额度耗尽自动降级只跑 ClamAV）
+      if (config.virustotal.enabled) {
+        const vt = await scanWithVirusTotal(req.file.path);
+        if (vt.status === 'infected') {
+          fs.promises.unlink(req.file.path).catch(() => {});
+          return res.status(400).json({
+            error: '安全扫描发现恶意程序（' + (vt.virus || '未知') + '），文件已拒绝收录',
+          });
+        }
+        // status: clean（明确安全）→ 继续；pass/skip → 放行由 ClamAV 兜底
+      }
+    } catch (_) { /* 扫描异常降级放行 */ }
   }
-  await query('INSERT INTO upload_log (user_id) VALUES (?)', [user.id]);
 
-  // 每人作品文件总数上限（删除可释放名额）
-  const [fileCnt] = await query('SELECT COUNT(*) AS c FROM files WHERE user_id = ?', [user.id]);
-  if (Number(fileCnt.c) >= config.maxFilesPerUser) {
-    fs.promises.unlink(req.file.path).catch(() => {});
-    return res.status(400).json({ error: `作品总数已达上限（${config.maxFilesPerUser} 个），请删除部分后重试，或联系频道主扩容` });
-  }
-
+  // ---- 额度与配额原子化（L4 修复）：每日次数 / 作品数 / 存储配额 的检查与写入放进同一事务，
+  // 并以「用户行 FOR UPDATE」串行化同用户的并发上传，杜绝"检查后写入"竞态突破上限。
+  // 语义变化：任一步失败整体回滚，失败的上传不再消耗当天上传次数。
+  const conn = await pool.getConnection();
+  let result;
   try {
+    await conn.beginTransaction();
+    await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [user.id]);
+
+    // 每人每天上传次数限制（含上传后删除的）：先检查再记录
+    const [ulogCnt] = await conn.execute(
+      'SELECT COUNT(*) AS c FROM upload_log WHERE user_id = ? AND DATE(created_at) = CURDATE()',
+      [user.id]
+    );
+    if (Number(ulogCnt[0].c) >= maxUploadsPerDay) {
+      await conn.rollback();
+      conn.release(); // 提前返回必须释放连接，否则池耗尽（上限拒绝路径）
+      fs.promises.unlink(req.file.path).catch(() => {});
+      return res.status(400).json({ error: `今日上传次数已达上限（${maxUploadsPerDay} 次），请明天再试` });
+    }
+    await conn.execute('INSERT INTO upload_log (user_id) VALUES (?)', [user.id]);
+
+    // 每人作品文件总数上限（删除可释放名额）
+    const [fileCnt] = await conn.execute('SELECT COUNT(*) AS c FROM files WHERE user_id = ?', [user.id]);
+    if (Number(fileCnt[0].c) >= config.maxFilesPerUser) {
+      await conn.rollback();
+      conn.release(); // 提前返回必须释放连接
+      fs.promises.unlink(req.file.path).catch(() => {});
+      return res.status(400).json({ error: `作品总数已达上限（${config.maxFilesPerUser} 个），请删除部分后重试，或联系频道主扩容` });
+    }
+
     // 每用户存储配额检查
-    const [used] = await query(
+    const [used] = await conn.execute(
       'SELECT COALESCE(SUM(size), 0) AS total FROM files WHERE user_id = ?',
       [user.id]
     );
-    if (Number(used.total) + size > config.maxUserStorageBytes) {
+    if (Number(used[0].total) + size > config.maxUserStorageBytes) {
+      await conn.rollback();
+      conn.release(); // 提前返回必须释放连接
       fs.promises.unlink(req.file.path).catch(() => {});
       const quotaMb = Math.round(config.maxUserStorageBytes / 1024 / 1024);
       return res.status(413).json({ error: `超出个人存储配额（${quotaMb}MB），请删除部分文件后重试，或联系频道主扩容` });
     }
 
-    const result = await query(
+    const ins = await conn.execute(
       `INSERT INTO files (user_id, stored_name, original_name, size, mime_type, audit_status)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [user.id, req.file.filename, originalName, size, mimeType, isText ? 'pending' : 'reviewed']
     );
+    result = { insertId: ins[0].insertId };
+    await conn.commit();
+  } catch (err) {
+    try { await conn.rollback(); } catch (_) { /* ignore */ }
+    conn.release();
+    throw err;
+  }
+  conn.release();
+
+  try {
     const inserted = await query('SELECT uploaded_at FROM files WHERE id = ?', [result.insertId]);
     // 提交作品文件奖励（每个文件一次）
     await grant(user.id, 'file_submit', 'file:' + result.insertId);

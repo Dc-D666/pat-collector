@@ -22,7 +22,8 @@ Views.project = (token) => {
 
   async function loadData() {
     try {
-      return await API.get('/api/guest/files?token=' + encodeURIComponent(tk));
+      // 令牌走请求头，避免出现在 URL（防 nginx 访问日志/浏览器历史记录泄露永久项目地址令牌）
+      return await API.get('/api/guest/files', { headers: { 'x-guest-token': tk } });
     } catch (err) {
       renderError(err.message || '项目地址无效或已失效');
       return null;
@@ -42,7 +43,7 @@ Views.project = (token) => {
     return new Promise((resolve, reject) => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 30000);
-      fetch('/api/guest/download/' + fileId + '?token=' + encodeURIComponent(tk), { signal: controller.signal })
+      fetch('/api/guest/download/' + fileId, { headers: { 'x-guest-token': tk }, signal: controller.signal })
         .then(async (res) => {
           clearTimeout(timer);
           if (!res.ok) {
@@ -79,6 +80,10 @@ Views.project = (token) => {
 
     root.innerHTML = `
       <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>我的项目</h1><p>${escapeHtml((u.class_name || '') + '班 ' + (u.display_name || ''))}</p></div>
+
+      <a href="#/login" style="display:block;margin:0 0 14px;padding:11px 12px;border:1px dashed var(--primary);border-radius:12px;background:var(--primary-soft);text-decoration:none;color:var(--primary);font-size:13px;line-height:1.6;">
+        <span style="font-weight:700;">💡 想享受完整平台体验？</span>用 QQ 扫码登录并绑定你的姓名班级，当前作品与积分将合并到 QQ 账号，可参与全校作品展、AI 小学堂与积分排行榜。
+      </a>
 
       <div class="guest-dropzone" id="p-dropzone">
         <div class="dz-icon">📤</div>
@@ -161,7 +166,11 @@ Views.project = (token) => {
       confirmBtn.disabled = true;
       confirmBtn.textContent = '删除中…';
       try {
-        await API.del('/api/guest/files/' + fileId + '?token=' + encodeURIComponent(tk) + '&password=' + encodeURIComponent(pwd));
+        // 令牌走 x-guest-token 头、密码走 JSON body：避免出现在 URL（防 nginx 访问日志/历史记录泄露）
+        await API.del('/api/guest/files/' + fileId, {
+          headers: { 'x-guest-token': tk },
+          body: JSON.stringify({ password: pwd }),
+        });
         closeModal();
         toast('已删除');
         const data = await loadData();

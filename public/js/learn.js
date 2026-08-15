@@ -34,14 +34,17 @@ function renderMarkdown(md) {
   const isVideoSrc = (src) => /\.(mp4|webm|ogv|ogg|mov|m4v)$/i.test(src) || src.includes('player.bilibili.com');
   const mediaHtml = (m) => {
     const alt = m[1], src = m[2];
+    // 注意：此路径的 alt/src 来自原始 Markdown 行（未先 esc），内插进 HTML 属性前必须转义，
+    // 否则 `![x" onerror="...](url)` 可注入事件处理器（与 inline() 先 esc 再替换的路径不同）
+    const escAlt = esc(alt), escSrc = esc(src);
     if (src.includes('player.bilibili.com')) {
-      return `<iframe class="learn-bili" src="${src}" scrolling="no" frameborder="no" allowfullscreen="true" title="${alt}" loading="lazy"></iframe>`
+      return `<iframe class="learn-bili" src="${escSrc}" scrolling="no" frameborder="no" allowfullscreen="true" title="${escAlt}" loading="lazy"></iframe>`
         + (alt ? `<figcaption>${esc(alt)}</figcaption>` : '');
     }
     if (/\.(mp4|webm|ogv|ogg|mov|m4v)$/i.test(src)) {
-      return `<video src="${src}" controls preload="metadata" title="${alt}"></video>`;
+      return `<video src="${escSrc}" controls preload="metadata" title="${escAlt}"></video>`;
     }
-    return `<img src="${src}" alt="${alt}" loading="lazy" />`
+    return `<img src="${escSrc}" alt="${escAlt}" loading="lazy" />`
       + (alt ? `<figcaption>${esc(alt)}</figcaption>` : '');
   };
   const flushMedia = () => {

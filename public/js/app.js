@@ -17,9 +17,9 @@ window.App = (() => {
   };
 
   function parseKey() {
-    const h = location.hash.replace(/^#\/?/, '') || 'files';
+    const h = location.hash.replace(/^#\/?/, '') || 'activity';
     const parts = h.split('/');
-    return { key: parts[0] || 'files', arg: parts[1] || '' };
+    return { key: parts[0] || 'activity', arg: parts[1] || '' };
   }
 
   function render() {
@@ -64,7 +64,7 @@ window.App = (() => {
       animateView();
       return;
     }
-    (routes[key] || routes.files)();
+    (routes[key] || routes.activity)();
     animateView();
   }
 
@@ -106,7 +106,7 @@ window.App = (() => {
   window.addEventListener('hashchange', render);
   document.addEventListener('DOMContentLoaded', () => {
     if (!location.hash) {
-      location.hash = API.getToken() ? '#/files' : '#/login';
+      location.hash = API.getToken() ? '#/activity' : '#/login';
     } else {
       render();
     }

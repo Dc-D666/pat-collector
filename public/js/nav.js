@@ -11,14 +11,15 @@ window.Nav = (() => {
   ];
 
   function currentKey() {
-    const h = location.hash || '#/files';
+    const h = location.hash || '#/activity';
     if (h.startsWith('#/activity')) return 'activity';
+    if (h.startsWith('#/files')) return 'files';
     if (h.startsWith('#/class-wall')) return 'class-wall';
     if (h.startsWith('#/overview')) return 'overview';
     if (h.startsWith('#/learn')) return 'learn';
     if (h.startsWith('#/points')) return 'points';
     if (h.startsWith('#/admin')) return 'admin';
-    return 'files';
+    return 'activity';
   }
 
   function render() {

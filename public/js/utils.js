@@ -121,5 +121,36 @@ window.Utils = (() => {
     return speed > 0 ? base + ' · ' + formatSize(speed) + '/s' : base;
   }
 
-  return { formatSize, formatTime, escapeHtml, extOf, getFileIcon, openModal, closeModal, confirm, toast, createSpeedTracker, formatProgress };
+  // 姓名拼音缩写候选选择器（昵称方案二）：输入姓名 → 后端返回多音字候选 → 渲染胶囊按钮。
+  // existing：已有昵称（若在候选中则默认选中锁定）。
+  async function initialsPicker(optionsEl, hiddenEl, name, existing) {
+    optionsEl.innerHTML = '';
+    hiddenEl.value = '';
+    if (!name) return;
+    let r;
+    try {
+      r = await API.get('/api/auth/pinyin-candidates?name=' + encodeURIComponent(name));
+    } catch (_) { return; }
+    const cands = (r && r.candidates) || [];
+    if (!cands.length) {
+      optionsEl.innerHTML = '<span style="font-size:12px;color:var(--text-dim);">无法生成姓名缩写，请选择展示真实姓名</span>';
+      return;
+    }
+    optionsEl.innerHTML = cands.map((c) =>
+      `<button type="button" class="btn btn-sm" data-initial="${c}" style="padding:6px 14px;font-weight:700;">${c}</button>`
+    ).join('');
+    const pick = (b, c) => {
+      hiddenEl.value = c;
+      optionsEl.querySelectorAll('[data-initial]').forEach((x) => x.classList.toggle('btn-primary', x === b));
+    };
+    optionsEl.querySelectorAll('[data-initial]').forEach((b) => {
+      b.onclick = () => pick(b, b.dataset.initial);
+    });
+    if (existing && cands.includes(existing)) {
+      const hit = optionsEl.querySelector('[data-initial="' + existing + '"]');
+      if (hit) pick(hit, existing);
+    }
+  }
+
+  return { formatSize, formatTime, escapeHtml, extOf, getFileIcon, openModal, closeModal, confirm, toast, createSpeedTracker, formatProgress, initialsPicker };
 })();

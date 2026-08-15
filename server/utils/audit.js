@@ -3,7 +3,10 @@
 // DeepSeek 内容审查：上传文本/代码类文件（HTML/PY/JS/TS 等）时调用，
 // 判断是否含色情/未成年不宜、违法违规、恶意脚本或恶意代码注入。
 // 二进制文件（图片/视频等）不适用文本审查；结果由调用方决定放行/拒绝。
+// 展示昵称审查（reviewNickname，2026-08-15）：昵称公开展示在作品展/排行榜等页面，
+// 写入前同步审核是否含辱骂/违规/广告引流/冒充官方等，违规拒绝并提示修改。
 const config = require('../config');
+const { getSetting } = require('./settings');
 
 const SYSTEM_PROMPT = `你是网站内容安全审查员。用户会上传网页源码或程序代码文件，请判断其内容是否包含以下违规类型：
 1. 色情/成人内容，尤其是涉及未成年人的内容（如色情图片、露骨文字、成人交友等）
@@ -17,16 +20,36 @@ const SYSTEM_PROMPT = `你是网站内容安全审查员。用户会上传网页
 
 只输出 JSON 对象：{"safe": true 或 false, "reason": "判断原因，safe 为 true 时填'正常内容'，false 时简要说明违规类型"}`;
 
+const NICK_SYSTEM_PROMPT = `你是校园平台的展示昵称安全审查员，要求从严审查。学生设置的昵称会公开展示在全校作品展、排行榜等页面，任何不当内容都会造成校园舆论与合规风险。
+
+以下昵称一律判为违规（safe=false）：
+1. 脏话、辱骂、人身攻击、歧视性言论，**包括谐音/变形/拼音缩写**（如"草泥马""TMD""SB""NMD""你妈""CNM""去死"等）
+2. 侮辱性或戏谑辈分的称呼（如"X爸爸""X爹""X爷爷""X儿子""我是你爹""爸爸""爷爷"等自称或自称长辈的昵称）
+3. 低俗、色情、擦边、性暗示内容（含谐音擦边）
+4. 违法违规内容（赌博、诈骗、攻击性政治言论等）
+5. 广告营销/引流（QQ 群、微信号、电话号码、网址链接、交易信息、"代做作业""刷分"等）
+6. 冒充官方或他人身份（如昵称包含"管理员""官方""老师"等冒充平台管理方，或冒用他人姓名）
+7. 暴力威胁、校园霸凌暗示、自我伤害或自残相关内容
+
+要求：
+- 从严：只要存在上述任一类型或其明显谐音/变形/缩写变体，即判违规；不确定时倾向判违规
+- 仅以下情况判安全：正常真实姓名、正常中性昵称（如"星辰大海""摸鱼小能手"）、纯字母缩写（如"ZS"）、纯数字
+- 切勿把"XX爸爸""XX爹"等辈分自称当作正常昵称放行
+
+只输出 JSON 对象：{"safe": true 或 false, "reason": "判断原因，safe 为 true 时填'正常昵称'，false 时简要说明违规类型"}`;
+
 /**
- * 审查文本/代码内容
- * @param {string} content 文件文本内容
+ * 调用 DeepSeek 审查（共享 HTTP 逻辑）
+ * @param {string} text 待审查文本
+ * @param {string} systemPrompt 审查规则
+ * @param {number} maxLen 送入模型的文本截断长度
  * @returns {Promise<{safe: boolean, reason: string}>}
  * @throws 审查接口不可用/超时/解析失败时抛错（调用方决定降级处理）
  */
-async function reviewContent(content) {
+async function _review(text, systemPrompt, maxLen) {
   const cfg = config.deepseek;
   if (!cfg.apiKey) throw new Error('未配置 DEEPSEEK_API_KEY');
-  const text = String(content || '').slice(0, cfg.maxChars);
+  const content = String(text || '').slice(0, maxLen || 64);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
@@ -40,11 +63,11 @@ async function reviewContent(content) {
       body: JSON.stringify({
         model: cfg.model,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: '以下是待审查的文件内容：\n\n' + text },
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: '以下是待审查的内容：\n\n' + content },
         ],
         temperature: 0.1,
-        max_tokens: 300,
+        max_tokens: 200,
       }),
       signal: controller.signal,
     });
@@ -65,4 +88,92 @@ async function reviewContent(content) {
   }
 }
 
-module.exports = { reviewContent, SYSTEM_PROMPT };
+/**
+ * 审查文本/代码内容（上传文件用）
+ */
+async function reviewContent(content) {
+  return _review(content, SYSTEM_PROMPT, config.deepseek.maxChars);
+}
+
+/**
+ * 审查展示昵称（公开展示前调用）
+ */
+async function reviewNickname(nickname) {
+  return _review(nickname, NICK_SYSTEM_PROMPT, 64);
+}
+
+const TEXT_SYSTEM_PROMPT = `你是校园作品展示平台的内容安全审查员，要求从严审查。学生的作品标题、简介、玩法说明会公开展示在全校作品展，请判断是否包含以下违规类型：
+1. 辱骂、人身攻击、歧视、低俗色情内容（含谐音/拼音缩写/变形）
+2. 违法违规内容（赌博、诈骗、攻击性政治言论等）
+3. 广告营销/引流（QQ 群、微信号、电话号码、网址链接、交易信息、"代做作业""刷分"等）
+4. 冒充官方或他人身份
+5. 暴力威胁、校园霸凌暗示、自我伤害或自残内容
+
+要求：
+- 从严：存在上述任一类型或其明显变体即判违规；不确定时倾向判违规
+- 正常作品介绍、技术描述、学习心得、游戏玩法说明、项目功能描述一律判为安全
+
+只输出 JSON 对象：{"safe": true 或 false, "reason": "判断原因，safe 为 true 时填'正常内容'，false 时简要说明违规类型"}`;
+
+/**
+ * 审查展示文本（作品标题/简介/玩法，公开展示前调用）
+ */
+async function reviewDisplayText(text) {
+  return _review(text, TEXT_SYSTEM_PROMPT, 2000);
+}
+
+/**
+ * 昵称合规审查统一入口（QQ 绑定 / 访客登记 / 修改资料共用）：
+ * 尊重 DEEPSEEK_AUDIT 与 settings.audit_enabled 运行时开关；
+ * AI 不可用/超时/未配置时降级放行（与文件审查一致），不阻断用户操作。
+ * @returns {Promise<{ok: boolean, reason?: string}>} ok=false 表示违规拒绝
+ */
+async function auditNickname(nickname) {
+  const nick = String(nickname || '').trim();
+  if (!nick) return { ok: true };
+  if (!config.deepseek.auditEnabled) return { ok: true };
+  try {
+    const auditRuntime = await getSetting('audit_enabled');
+    if (auditRuntime === '0') return { ok: true };
+  } catch (_) { /* 设置读取失败按开启处理 */ }
+  try {
+    const r = await reviewNickname(nick);
+    return r.safe ? { ok: true } : { ok: false, reason: r.reason || '昵称不合规' };
+  } catch (_) {
+    return { ok: true }; // AI 不可用降级放行
+  }
+}
+
+/**
+ * 展示文本合规审查统一入口（作品标题/简介/玩法，R2）：
+ * 尊重开关、AI 不可用降级放行；违规时同时写入内容审查记录（O3）。
+ * @returns {Promise<{ok: boolean, reason?: string}>}
+ */
+async function auditDisplayText(text, meta) {
+  const t = String(text || '').trim();
+  if (!t) return { ok: true };
+  if (!config.deepseek.auditEnabled) return { ok: true };
+  let auditOn = true;
+  try {
+    const auditRuntime = await getSetting('audit_enabled');
+    if (auditRuntime === '0') auditOn = false;
+  } catch (_) { /* 设置读取失败按开启处理 */ }
+  if (!auditOn) return { ok: true };
+  try {
+    const r = await reviewDisplayText(t);
+    if (r.safe) return { ok: true };
+    // O3：违规内容落库可追溯
+    try {
+      const { query } = require('../db');
+      await query(
+        'INSERT INTO audit_logs (kind, content, result, reason, user_id, ref_type, ref_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ['display_text', t.slice(0, 500), 'rejected', r.reason || '', (meta && meta.userId) || null, (meta && meta.refType) || null, (meta && meta.refId) || null]
+      );
+    } catch (_) { /* 记录失败不影响主流程 */ }
+    return { ok: false, reason: r.reason || '内容不合规' };
+  } catch (_) {
+    return { ok: true }; // AI 不可用降级放行
+  }
+}
+
+module.exports = { reviewContent, reviewNickname, reviewDisplayText, auditNickname, auditDisplayText, SYSTEM_PROMPT, NICK_SYSTEM_PROMPT, TEXT_SYSTEM_PROMPT };

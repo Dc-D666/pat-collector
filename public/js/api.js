@@ -58,10 +58,10 @@ window.API = (() => {
     return data;
   }
 
-  const get = (path) => request(path);
+  const get = (path, opts = {}) => request(path, opts);
   const post = (path, body) => request(path, { method: 'POST', body });
   const patch = (path, body) => request(path, { method: 'PATCH', body });
-  const del = (path) => request(path, { method: 'DELETE' });
+  const del = (path, opts = {}) => request(path, { method: 'DELETE', ...opts });
 
   // 下载：fetch → blob → 触发浏览器保存；统一走 Authorization 头
   async function download(fileId, filename) {

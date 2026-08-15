@@ -89,6 +89,13 @@ const config = {
     maxFileChars: 1000000, // 单文件内容达百万级字符 → 直接拒绝上传
     maxFileBytesBeforeRead: 4 * 1024 * 1024, // 字节超此值必超百万字符（UTF-8 中文 3B/字），不读直接拒
   },
+  malwareScan: process.env.MALWARE_SCAN !== '0', // R3：ClamAV 恶意程序扫描（上传时），0 关闭
+  virustotal: {
+    // R3 双扫描：ClamAV 必扫 + VirusTotal 辅助（需 VIRUSTOTAL_API_KEY；429 自动熔断 12h 降级为只跑 ClamAV）
+    apiKey: process.env.VIRUSTOTAL_API_KEY || '',
+    enabled: process.env.VIRUSTOTAL_ENABLED !== '0',
+  },
+  guestRegGlobalPerHour: parseInt(process.env.GUEST_REG_GLOBAL_HOUR || '60', 10) || 60, // P2：全局访客新建登记限速（个/小时），防批量脚本刷屏
   maxUploadBytes: (parseInt(process.env.MAX_UPLOAD_MB || '200', 10) || 200) * 1024 * 1024,
   maxUserStorageBytes:
     (parseInt(process.env.MAX_USER_STORAGE_MB || '1024', 10) || 1024) * 1024 * 1024, // 每人文件总容量（默认 1GB），超限提示联系频道主

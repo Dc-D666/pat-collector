@@ -3,6 +3,8 @@
 // 我的积分页：被赞刷新 + 毕业奖励 + 排行榜 + 积分流水 + 赚积分小贴士
 // （积分商城已下架，前端无兑换入口；后端 /shop /purchase /my-purchases 保留待重新上架）
 window.Views = window.Views || {};
+// 排行榜范围：in_school（默认，仅高一/高二/高三）/ all（含毕业生/外校）；跨视图重渲染保持
+let lbScope = 'in_school';
 Views.points = async () => {
   const { escapeHtml, formatTime, toast } = Utils;
   const view = document.getElementById('view');
@@ -19,9 +21,10 @@ Views.points = async () => {
   let data, mine, graduate;
   try {
     [data, mine, graduate] = await Promise.all([
-      API.get('/api/points/leaderboard'),
+      API.get('/api/points/leaderboard?scope=' + lbScope),
       API.get('/api/points'),
-      API.post('/api/points/graduate', '{}'),
+      // 只读查询毕业资格（GET）：页面加载不自动发放，点击「领取」按钮才 POST 发放
+      API.get('/api/points/graduate'),
     ]);
   } catch (err) {
     document.getElementById('points-content').innerHTML =
@@ -49,7 +52,7 @@ Views.points = async () => {
   content.innerHTML = `
     <div class="stat-grid" style="margin-bottom:18px;">
       <div class="card stat-card"><div class="stat-label">我的积分</div><div class="stat-value" id="my-points-val">⭐ ${myPoints}</div></div>
-      <div class="card stat-card"><div class="stat-label">我的排名</div><div class="stat-value">#${myRank}</div></div>
+      <div class="card stat-card"><div class="stat-label">我的排名</div><div class="stat-value" id="my-rank-val">#${myRank}</div></div>
     </div>
 
     <div class="card" style="padding:16px 18px;margin-bottom:16px;">
@@ -69,17 +72,23 @@ Views.points = async () => {
     <div class="card" style="padding:16px 18px;margin-bottom:16px;">
       <h2 style="margin:0 0 8px;font-size:17px;">💡 怎么赚积分</h2>
       <div style="font-size:13px;color:var(--text-dim);line-height:2;">
-        ✍️ 提交作品文件 +30⭐（最多计 5 个）/ 提交 AI 轻应用 +15⭐（最多计 3 个）<br>
-        🧑‍🤝‍🧑 主动点赞他人 +2⭐/次（每天上限 10⭐，票数不限）<br>
-        💬 你的作品被点赞 +2⭐/赞（每天上限 30⭐）<br>
-        🎓 读完 5 章全部任务完成，毕业大奖 +50⭐<br>
-        🥚 连续点击顶栏的积分徽章 5 次，有惊喜
+        1. 提交作品文件 +25⭐（最多计 5 个）/ 提交 AI 轻应用 +15⭐（最多计 3 个）<br>
+        2. 主动点赞他人 +2⭐/次（每天上限 10⭐，票数不限）<br>
+        3. 你的作品被点赞 +5⭐/赞（每天上限 20⭐）<br>
+        4. 读完 5 章全部任务完成，毕业大奖 +40⭐<br>
+        5. 连续点击顶栏的积分徽章 5 次，有惊喜
       </div>
     </div>
 
     <div class="card" style="padding:16px 18px;margin-bottom:16px;">
-      <h2 style="margin:0 0 12px;font-size:17px;">🏆 全校排行榜</h2>
-      <div class="lb-list">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+        <h2 style="margin:0;font-size:17px;">🏆 全校排行榜</h2>
+        <div style="display:flex;border:1px solid var(--border);border-radius:9999px;overflow:hidden;">
+          <button type="button" class="lb-scope-btn ${lbScope === 'in_school' ? 'active' : ''}" data-scope="in_school" style="border:none;background:${lbScope === 'in_school' ? 'var(--primary)' : 'transparent'};color:${lbScope === 'in_school' ? '#fff' : 'var(--text-dim)'};padding:5px 14px;font-size:13px;font-weight:600;cursor:pointer;">在校</button>
+          <button type="button" class="lb-scope-btn ${lbScope === 'all' ? 'active' : ''}" data-scope="all" style="border:none;background:${lbScope === 'all' ? 'var(--primary)' : 'transparent'};color:${lbScope === 'all' ? '#fff' : 'var(--text-dim)'};padding:5px 14px;font-size:13px;font-weight:600;cursor:pointer;">全部</button>
+        </div>
+      </div>
+      <div id="lb-list" class="lb-list">
         ${data.list.length ? data.list.map((u, i) => `
           <div class="lb-row ${u.user_id === me.user_id ? 'lb-mine' : ''}">
             <span class="lb-rank">${i < 3 ? medal[i] : '#' + (i + 1)}</span>
@@ -105,6 +114,40 @@ Views.points = async () => {
           </div>`).join('')}
       </div>` : `<div class="empty" style="padding:20px;">还没有积分记录</div>`}
     </div>`;
+
+  // 排行榜「在校/全部」切换：局部刷新列表与我的排名（默认在校）
+  document.querySelectorAll('.lb-scope-btn').forEach((btn) => {
+    btn.onclick = async () => {
+      if (btn.dataset.scope === lbScope) return;
+      lbScope = btn.dataset.scope;
+      btn.disabled = true;
+      try {
+        const d = await API.get('/api/points/leaderboard?scope=' + lbScope);
+        const listEl = document.getElementById('lb-list');
+        if (listEl) {
+          listEl.innerHTML = d.list.length ? d.list.map((u, i) => `
+            <div class="lb-row ${u.user_id === d.me.user_id ? 'lb-mine' : ''}">
+              <span class="lb-rank">${i < 3 ? medal[i] : '#' + (i + 1)}</span>
+              <span class="lb-name">${escapeHtml(u.display_name)}${u.title_tag ? `<span class="title-tag" style="margin-left:6px;">${escapeHtml(u.title_tag)}</span>` : ''}</span>
+              <span class="lb-class">${escapeHtml(u.class_name)}班</span>
+              <span class="lb-points">⭐ ${u.points}</span>
+            </div>`).join('')
+          : `<div class="empty" style="padding:20px;">还没有人获得积分，快来抢第一！</div>`;
+        }
+        const rankVal = document.getElementById('my-rank-val');
+        if (rankVal) rankVal.textContent = '#' + (d.me && d.me.rank || '-');
+      } catch (err) {
+        toast(err.message);
+      }
+      document.querySelectorAll('.lb-scope-btn').forEach((x) => {
+        const on = x.dataset.scope === lbScope;
+        x.style.background = on ? 'var(--primary)' : 'transparent';
+        x.style.color = on ? '#fff' : 'var(--text-dim)';
+        x.classList.toggle('active', on);
+      });
+      btn.disabled = false;
+    };
+  });
 
   // 毕业奖励
   const gradBtn = document.getElementById('grad-btn');

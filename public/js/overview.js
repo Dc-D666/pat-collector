@@ -24,7 +24,6 @@ Views.overview = async () => {
     return;
   }
 
-  const myClass = (API.getUser() || {}).class_name;
   const { stats, classes } = data;
 
   const statCards = [
@@ -56,8 +55,8 @@ Views.overview = async () => {
             ${c.students.map((s, si) => `
               <div class="student-row" id="stu-row-${ci}-${si}">
                 <button class="student-head" data-toggle="stu-${ci}-${si}">
-                  <span class="avatar" style="width:30px;height:30px;font-size:13px;">${escapeHtml((s.display_name || s.real_name).trim().charAt(0))}</span>
-                  <span class="stu-name">${escapeHtml(s.display_name || s.real_name)}</span>
+                  <span class="avatar" style="width:30px;height:30px;font-size:13px;">${escapeHtml((s.display_name || '?').trim().charAt(0))}</span>
+                  <span class="stu-name">${escapeHtml(s.display_name || '')}</span>
                   <span class="stu-stats">${s.file_count} 文件${s.app_count ? ' · ' + s.app_count + ' 轻应用' : ''} · ${formatSize(s.total_size)} · ${formatTime(s.last_submit)}</span>
                   <span class="chevron">▾</span>
                 </button>
@@ -75,7 +74,7 @@ Views.overview = async () => {
                     </div>`).join('')}
                   ${s.files.map((f) => {
                     const icon = getFileIcon(f.original_name);
-                    const canDl = c.class_name === myClass;
+                    // 全校公开：登录即可下载（与作品展/服务端行为一致）
                     return `
                       <div class="file-row">
                         <div class="file-icon" style="width:32px;height:32px;font-size:16px;background:${icon.color};">${icon.emoji}</div>
@@ -83,7 +82,7 @@ Views.overview = async () => {
                           <div class="file-name">${escapeHtml(f.title && f.title.trim() ? f.title : f.original_name)}</div>
                           <div class="file-meta">${escapeHtml(f.title && f.title.trim() ? f.original_name + ' · ' : '')}${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>
                         </div>
-                        ${canDl ? `<div class="file-actions"><button class="btn btn-sm btn-ghost" data-dl="${f.id}" data-name="${escapeHtml(f.original_name)}">下载</button></div>` : ''}
+                        <div class="file-actions"><button class="btn btn-sm btn-ghost" data-dl="${f.id}" data-name="${escapeHtml(f.original_name)}">下载</button></div>
                       </div>`;
                   }).join('')}
                 </div>

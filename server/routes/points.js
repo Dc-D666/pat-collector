@@ -6,15 +6,16 @@ const { query } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../utils/rateLimit');
-const { grant, getPoints, spend } = require('../utils/points');
+const { grant, grantCapped, getPoints, spend } = require('../utils/points');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
+const { checkElapsed } = require('../utils/readTimer');
 
 const router = express.Router();
 
 // ---- 点赞规则 ----
 const LIKE_GIVE_DAILY = 10; // 主动点赞者每日积分上限（每次 +2⭐）
-const LIKE_RECEIVE_DAILY = 30; // 帖子被赞作者每日积分上限（CLI 增量，每个赞 +2⭐）
+const LIKE_RECEIVE_DAILY = 20; // 作品被赞作者每日积分上限（P3：每个赞 +5⭐，日上限 20）
 
 // ---- 积分商城（价格/说明集中在此，前端从 /api/points/shop 拉取）----
 const SHOP = [
@@ -70,11 +71,20 @@ router.get(
   '/leaderboard',
   requireAuth,
   asyncHandler(async (req, res) => {
+    // O1（2026-08-16）：访客（无 QQ 绑定）不参与排行榜；
+    // scope=in_school（默认，仅高一/高二/高三标准班）或 all（含毕业生/外校）。前端滑块默认「在校」。
+    const scope = String(req.query.scope || 'in_school') === 'all' ? 'all' : 'in_school';
+    const myClass = req.user.class_name || '';
+    const scopeSql = scope === 'all'
+      ? 'AND qq_tiny_id IS NOT NULL'
+      : 'AND qq_tiny_id IS NOT NULL AND class_name IN (' + config.classes.map(() => '?').join(',') + ')';
+    const scopeParams = scope === 'all' ? [] : config.classes;
     const rows = await query(
       `SELECT id, class_name, real_name, show_real_name, nickname, points
-       FROM users WHERE points > 0
+       FROM users WHERE points > 0 ${scopeSql}
        ORDER BY points DESC, id ASC
-       LIMIT 20`
+       LIMIT 20`,
+      scopeParams
     );
     const titles = await query(
       "SELECT user_id, title FROM purchases WHERE item = 'title' AND status = 'active' AND expires_at > NOW()"
@@ -84,20 +94,22 @@ router.get(
       user_id: u.id,
       class_name: u.class_name,
       grade: require('../config').gradeOf(u.class_name),
-      display_name: u.show_real_name !== 0 ? u.real_name : (u.nickname || u.real_name),
+      // P1：真实姓名仅对同班同学展示；非同班显示昵称（拼音缩写）
+      display_name: (u.show_real_name !== 0 && u.class_name === myClass) ? u.real_name : (u.nickname || '同学'),
       title_tag: titleMap.get(u.id) || '',
       points: u.points,
     }));
-    // 我的排名（0 分未上榜 → null，前端显示 -）
+    // 我的排名（0 分未上榜 → null，前端显示 -；与 scope 同口径）
     let myRank = null;
     if ((req.user.points || 0) > 0) {
       const rankRows = await query(
-        'SELECT COUNT(*) + 1 AS rank FROM users WHERE points > ?',
-        [req.user.points || 0]
+        `SELECT COUNT(*) + 1 AS rank FROM users WHERE points > ? ${scopeSql}`,
+        [req.user.points || 0].concat(scopeParams)
       );
       myRank = rankRows.length ? Number(rankRows[0].rank) : null;
     }
     res.json({
+      scope,
       list,
       me: {
         user_id: req.user.id,
@@ -118,6 +130,11 @@ router.post(
     if (!articleId) return res.status(400).json({ error: '缺少文章ID' });
     const rows = await query('SELECT id FROM articles WHERE id = ?', [articleId]);
     if (rows.length === 0) return res.status(404).json({ error: '文章不存在' });
+    // 服务端阅读时长校验（L7 修复）：需先加载过文章详情（记录开始时间）且已读 ≥60 秒，
+    // 防止直接 POST 刷 +10⭐；前端计时器到达 60s 后正常打卡不受影响
+    if (!checkElapsed(req.user.id, articleId, 60 * 1000)) {
+      return res.status(400).json({ error: '阅读时间不足，请至少阅读 60 秒后再打卡' });
+    }
     const granted = await grant(req.user.id, 'read_article', 'article:' + articleId);
     const points = await getPoints(req.user.id);
     res.json({ granted, points: points.points });
@@ -205,7 +222,7 @@ router.get(
 );
 
 // ---- 作品点赞：每日票数不限；点赞者本人 +2⭐/次（每日上限 LIKE_GIVE_DAILY），
-// 被赞作者 +2⭐/赞（站内直接发放，每日上限 LIKE_RECEIVE_DAILY）----
+// 被赞作者 +5⭐/赞（站内直接发放，每日上限 LIKE_RECEIVE_DAILY；P3）----
 router.post(
   '/like',
   requireAuth,
@@ -216,11 +233,12 @@ router.post(
       return res.status(400).json({ error: '参数错误' });
     }
 
-    // 目标作品存在性 + 禁止自赞（防止自赞刷分）
+    // 目标作品存在性 + 禁止自赞（防止自赞刷分）；违规下架作品不可点赞（L5 修复）
     let owner = 0;
     if (targetType === 'file') {
-      const rows = await query('SELECT user_id FROM files WHERE id = ?', [targetId]);
+      const rows = await query('SELECT user_id, audit_status FROM files WHERE id = ?', [targetId]);
       if (rows.length === 0) return res.status(404).json({ error: '作品不存在' });
+      if (rows[0].audit_status === 'flagged') return res.status(403).json({ error: '该作品因违规已被下架' });
       owner = rows[0].user_id;
     } else {
       const rows = await query('SELECT user_id FROM apps WHERE id = ?', [targetId]);
@@ -247,25 +265,12 @@ router.post(
     }
 
     // 双向发分（同一 likes.id 作 ref_id；reason 不同互不冲突，均幂等）
+    // 每日上限检查与发放在同一事务（用户行锁）内完成，并发下不会突破上限（L4 修复）
     let gained = 0;        // 点赞者 +2
     let authorGained = 0;  // 作者 +2
     if (inserted && likeId) {
-      // 点赞者（每日上限 LIKE_GIVE_DAILY；到上限本次点赞仍记录，但不发分）
-      const [giveEarned] = await query(
-        "SELECT COALESCE(SUM(amount), 0) AS total FROM points_log WHERE user_id = ? AND reason = 'like_give' AND DATE(created_at) = CURDATE()",
-        [req.user.id]
-      );
-      if (Number(giveEarned.total) < LIKE_GIVE_DAILY) {
-        gained = (await grant(req.user.id, 'like_give', 'like:' + likeId, 2)) || 0;
-      }
-      // 作者（站内直接发放，每日上限 LIKE_RECEIVE_DAILY）
-      const [recvEarned] = await query(
-        "SELECT COALESCE(SUM(amount), 0) AS total FROM points_log WHERE user_id = ? AND reason = 'like_receive' AND DATE(created_at) = CURDATE()",
-        [owner]
-      );
-      if (Number(recvEarned.total) < LIKE_RECEIVE_DAILY) {
-        authorGained = (await grant(owner, 'like_receive', 'like:' + likeId, 2)) || 0;
-      }
+      gained = await grantCapped(req.user.id, 'like_give', 'like:' + likeId, 2, LIKE_GIVE_DAILY);
+      authorGained = await grantCapped(owner, 'like_receive', 'like:' + likeId, 5, LIKE_RECEIVE_DAILY);
     }
 
     res.json({
@@ -282,45 +287,53 @@ router.post(
 );
 
 // ---- 课程毕业奖：全部文章读完 + 全部章节任务完成 → 一次性 +50⭐ ----
+// 状态查询与发放分离：GET 只读（页面加载用，避免"打开积分页即自动领取"），POST 才发放
+async function getGraduateStatus(userId) {
+  const [rows] = await query(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(CASE WHEN EXISTS(
+         SELECT 1 FROM points_log pl WHERE pl.user_id = ? AND pl.reason = 'task' AND pl.ref_id = CONCAT('article:', a.id)
+       ) THEN 1 ELSE 0 END) AS tasks_done,
+       SUM(CASE WHEN EXISTS(
+         SELECT 1 FROM points_log pl WHERE pl.user_id = ? AND pl.reason = 'read_article' AND pl.ref_id = CONCAT('article:', a.id)
+       ) THEN 1 ELSE 0 END) AS read_done
+     FROM articles a`,
+    [userId, userId]
+  );
+  const total = Number(rows.total);
+  const tasksDone = Number(rows.tasks_done || 0);
+  const readDone = Number(rows.read_done || 0);
+  const eligible = total > 0 && tasksDone === total && readDone === total;
+  // 是否已领取过（grant 幂等返回 null 无法区分"已发过"和"未发"，故单独查流水）
+  const claimedRows = await query(
+    "SELECT 1 FROM points_log WHERE user_id = ? AND reason = 'graduate' AND ref_id = 'all'",
+    [userId]
+  );
+  const hasClaimed = claimedRows.length > 0;
+  return { total, tasks_done: tasksDone, read_done: readDone, eligible, has_claimed: hasClaimed };
+}
+
+// 毕业资格查询（只读，不发放）：积分页加载时调用
+router.get(
+  '/graduate',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const status = await getGraduateStatus(req.user.id);
+    const points = await getPoints(req.user.id);
+    res.json({ ...status, granted: null, points: points.points });
+  })
+);
+
+// 毕业奖励领取（仅按钮点击触发）
 router.post(
   '/graduate',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const [rows] = await query(
-      `SELECT
-         COUNT(*) AS total,
-         SUM(CASE WHEN EXISTS(
-           SELECT 1 FROM points_log pl WHERE pl.user_id = ? AND pl.reason = 'task' AND pl.ref_id = CONCAT('article:', a.id)
-         ) THEN 1 ELSE 0 END) AS tasks_done,
-         SUM(CASE WHEN EXISTS(
-           SELECT 1 FROM points_log pl WHERE pl.user_id = ? AND pl.reason = 'read_article' AND pl.ref_id = CONCAT('article:', a.id)
-         ) THEN 1 ELSE 0 END) AS read_done
-       FROM articles a`,
-      [req.user.id, req.user.id]
-    );
-    const total = Number(rows.total);
-    const tasksDone = Number(rows.tasks_done || 0);
-    const readDone = Number(rows.read_done || 0);
-    const eligible = total > 0 && tasksDone === total && readDone === total;
-
-    // 是否已领取过（grant 幂等返回 null 无法区分"已发过"和"未发"，故单独查流水）
-    const claimedRows = await query(
-      "SELECT 1 FROM points_log WHERE user_id = ? AND reason = 'graduate' AND ref_id = 'all'",
-      [req.user.id]
-    );
-    const hasClaimed = claimedRows.length > 0;
-
-    const granted = eligible && !hasClaimed ? await grant(req.user.id, 'graduate', 'all') : null;
+    const status = await getGraduateStatus(req.user.id);
+    const granted = status.eligible && !status.has_claimed ? await grant(req.user.id, 'graduate', 'all') : null;
     const points = await getPoints(req.user.id);
-    res.json({
-      eligible,
-      has_claimed: hasClaimed,
-      granted,
-      total,
-      tasks_done: tasksDone,
-      read_done: readDone,
-      points: points.points,
-    });
+    res.json({ ...status, granted, points: points.points });
   })
 );
 

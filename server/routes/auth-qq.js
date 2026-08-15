@@ -7,11 +7,12 @@ const config = require('../config');
 const { query } = require('../db');
 const { issue } = require('../utils/token');
 const { asyncHandler } = require('../utils/async');
-const { runCli } = require('../qq/proxy');
+const { runCli, runCliCaptureRaw, extractOwnTinyId } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { rateLimit } = require('../utils/rateLimit');
 const { requireAuth } = require('../middleware/auth');
 const { grant } = require('../utils/points');
+const { pinyinCandidates } = require('../utils/pinyin');
 
 const router = express.Router();
 
@@ -114,9 +115,13 @@ router.post(
 // 注意：get-user-info（全局/频道）都不返回 tiny_id，只能靠 guild-member-search 拿（字段 tinyid）
 // 关键坑：频道 get-user-info 的 nickname 是"频道内显示名"（可能带前缀/与全局昵称不同），
 // 用它搜索可能搜不到人；必须把频道昵称、全局昵称、member_name 等全部作为关键词依次尝试。
+// 关键修复（2026-08-15）：频道内有大量同名成员（实测 "." 昵称几十个，搜索返回 20+ 全匹配），
+// 绝不能盲取 members[0]（会绑定到错误的 tiny_id，可能绑到管理员/他人 → 身份错乱）。
+// 流程：精确同名过滤 → 唯一则采用；多个同名则逐个 get-user-info --tiny-id 全字段比对核实。
 async function resolveTinyId(s, env) {
   let nickname = '';
   let tinyId = '';
+  let reason = ''; // ''=成功 / 'ambiguous'=多个同名成员无法区分 / 'not_found'=未找到匹配成员
   try {
     const globalInfo = await runCli(['manage', 'get-user-info'], 10000, env);
     const gd = (globalInfo && globalInfo.data) || {};
@@ -130,7 +135,36 @@ async function resolveTinyId(s, env) {
       // 频道昵称优先用于展示；搜索关键词集合则同时包含频道/全局昵称
       if (guildNick) nickname = guildNick;
 
-      // 搜索关键词去重集合：频道昵称、member_name、全局昵称、各自截断前缀
+      // ── 首选：直接身份（原始 MCP 响应含本人 tiny_id）──
+      // CLI 展示层丢弃 msgUserInfo.uint64MemberTinyid，但原始响应里有（本地代理捕获）。
+      // 直接从会话读出本人 tiny_id → 无需成员搜索 → 彻底规避同名歧义（如几十个 "." 昵称）。
+      try {
+        const raw = await runCliCaptureRaw(['manage', 'get-user-info', '--guild-id=' + config.guildId], 10000, env);
+        const directTinyId = extractOwnTinyId(raw.captured);
+        if (directTinyId) {
+          tinyId = directTinyId;
+          // 顺带用原始响应里的昵称字段校正展示名（base64 bytesNickName）
+          for (const text of raw.captured) {
+            try {
+              const data = JSON.parse(text);
+              const sc = data && data.result && data.result.structuredContent;
+              if (sc && sc.msgUserInfo) {
+                const nick = sc.msgUserInfo.bytesNickName || sc.msgUserInfo.bytesMemberName;
+                if (nick) {
+                  const decoded = Buffer.from(nick, 'base64').toString('utf8').trim();
+                  if (decoded) nickname = decoded;
+                }
+                break;
+              }
+            } catch (_) { /* 跳过非 JSON */ }
+          }
+        }
+      } catch (_) { /* 代理失败走搜索兜底 */ }
+
+      // ── 兜底：成员搜索 + 精确同名/全字段核实（直取失败时）──
+      if (!tinyId) {
+
+      // 搜索关键词去重集合：频道昵称、member_name、全局昵称、去装饰前缀版本、拆词兜底版本
       const kwSet = new Set();
       const add = (v) => {
         const str = String(v || '').trim();
@@ -146,26 +180,84 @@ async function resolveTinyId(s, env) {
         const cleaned = kw.replace(/^[【\[\(（][^】\]\)）]+[】\]\)）]\s*/, '').trim();
         if (cleaned && cleaned !== kw) add(cleaned);
       }
+      // 拆词兜底：QQ 频道成员搜索对含空格/括号等特殊字符的长昵称匹配不佳
+      // （实测 "Screen Rain(Imgreenhand)" 搜 0 结果，但拆词 "Screen" / "Imgreenhand" 能搜到）
+      for (const kw of [...kwSet]) {
+        for (const frag of String(kw).split(/[^\w\u4e00-\u9fa5]+/)) {
+          if (frag && frag.length >= 2) add(frag);
+        }
+      }
 
+      // 收集候选：按关键词依次搜索，取首个有结果的搜索的全部成员（第一页，够用）
+      let members = [];
       for (const kw of kwSet) {
-        if (tinyId) break;
         const searchR = await runCli(
           ['manage', 'guild-member-search', '--guild-id=' + config.guildId, '--keyword=' + kw],
           10000,
           env
         );
-        const members = (searchR && searchR.data && searchR.data.members) || [];
-        if (members.length > 0) {
-          tinyId = String(members[0].tinyid || members[0].tiny_id || '');
-        }
+        const ms = (searchR && searchR.data && searchR.data.members) || [];
+        if (ms.length > 0) { members = ms; break; }
       }
+
+      if (members.length > 0) {
+        // ① 先按「频道昵称精确等于本人」过滤候选（排除 "。。"/"。。。" 等相似但不同的昵称）
+        const selfNicks = [gi.nickname, gi.member_name].map((v) => String(v || '').trim()).filter(Boolean);
+        const candidates = members.filter((m) => selfNicks.includes(String(m.nickname || '').trim()));
+        if (candidates.length === 1) {
+          tinyId = String(candidates[0].tinyid || candidates[0].tiny_id || '');
+        } else if (candidates.length > 1) {
+          // ② 多个同名候选：逐个 get-user-info --tiny-id 与本人全字段比对
+          //    （全局昵称/性别等通常各不相同，可区分本人；上限 8 个，命中第 2 个即判歧义提前终止）
+          const fields = ['nickname', 'member_name', 'global_nickname', 'gender'];
+          let verified = null;
+          let ambiguous = false;
+          for (const c of candidates.slice(0, 8)) {
+            const r = await runCli(
+              ['manage', 'get-user-info', '--guild-id=' + config.guildId, '--tiny-id=' + (c.tinyid || c.tiny_id)],
+              10000,
+              env
+            );
+            const info = (r && r.data) || {};
+            const allMatch = fields.every((f) => {
+              const a = String(info[f] || '').trim();
+              const b = String(gi[f] || '').trim();
+              return !a || !b || a === b; // 任一侧缺失该字段则跳过，不当作反证
+            });
+            if (allMatch) {
+              if (verified) { ambiguous = true; break; }
+              verified = c;
+            }
+          }
+          if (verified && !ambiguous) {
+            tinyId = String(verified.tinyid || verified.tiny_id || '');
+          } else if (ambiguous) {
+            reason = 'ambiguous';
+          } else {
+            reason = 'not_found'; // 全部候选都不匹配（本人可能已退频道/改了昵称）
+          }
+        } else {
+          reason = 'not_found'; // 搜索有结果但无精确同名者
+        }
+      } else {
+        reason = 'not_found';
+      }
+      } // 直取失败才搜索兜底
     }
   } catch (_) { /* 反查失败返回空，调用方处理 */ }
 
   // 更新 session 并标记（供 bind 复用）
   if (nickname) s.nickname = nickname;
   if (tinyId) s.tiny_id = tinyId;
-  return { nickname, tinyId };
+  return { nickname, tinyId, reason };
+}
+
+// 身份反查失败提示：区分「未找到」（引导加入频道/确认昵称）与「同名歧义」（引导改昵称）
+function identityFailMsg(reason) {
+  if (reason === 'ambiguous') {
+    return '频道内有多个与你昵称相同的成员，无法自动识别身份。请在频道内修改一个可区分的昵称后重新扫码授权';
+  }
+  return '已授权但无法识别你的 QQ 身份（频道成员搜索失败），请确认已加入「南方中学校友频道」后重新扫码，或稍后重试';
 }
 
 // 2. 轮询授权状态（扫码期间高频调用，不设限流）
@@ -181,12 +273,13 @@ router.post(
       // 否则前端拿到 authorized 但 bind 仍失败 → 用户看到的"弹表单又报扫码"循环
       if (!s.tiny_id) {
         const envRetry = qqSessions.sessionEnv(s);
-        const { tinyId: retryTinyId } = await resolveTinyId(s, envRetry);
+        const { tinyId: retryTinyId, reason: retryReason } = await resolveTinyId(s, envRetry);
         if (!retryTinyId) {
           return res.json({
             session: sessionId,
             status: 'pending_authorization',
-            error: '已授权但无法识别你的 QQ 身份（频道成员搜索失败），请稍后重试或检查是否已加入频道',
+            error: identityFailMsg(retryReason),
+            join_hint: retryReason !== 'ambiguous',
           });
         }
       }
@@ -220,7 +313,7 @@ router.post(
 
     // 已授权：取昵称 + tiny_id
     s.token_obtained = true;
-    const { tinyId } = await resolveTinyId(s, env);
+    const { tinyId, reason } = await resolveTinyId(s, env);
 
     // tiny_id 反查失败：不进入 bind（否则填完班级姓名 bind 才报"请先扫码授权"）。
     // 返回 pending_authorization + 明确错误，前端重试；bind 侧也有兜底重查。
@@ -228,7 +321,8 @@ router.post(
       return res.json({
         session: sessionId,
         status: 'pending_authorization',
-        error: '已授权但无法识别你的 QQ 身份（频道成员搜索失败），请稍后重试或检查是否已加入频道',
+        error: identityFailMsg(reason),
+        join_hint: reason !== 'ambiguous',
       });
     }
 
@@ -262,22 +356,29 @@ router.post(
     // 兜底：tiny_id 缺失时（poll 阶段反查失败/超时），用会话真实 token 再查一次
     if (!s.tiny_id) {
       const env = qqSessions.sessionEnv(s);
-      const { tinyId } = await resolveTinyId(s, env);
+      const { tinyId, reason } = await resolveTinyId(s, env);
       if (!tinyId) {
-        return res.status(401).json({
-          error: '无法识别你的 QQ 身份，请确认已加入频道后重新扫码，或稍后重试',
-        });
+        return res.status(401).json({ error: identityFailMsg(reason) });
       }
     }
 
     let class_name = String((req.body && req.body.class_name) || '').trim();
     let real_name = String((req.body && req.body.real_name) || '').trim();
 
-    // 展示名授权：默认展示真实姓名；选「否」时昵称默认取频道昵称，仍为空则报错
+    // 展示名授权：默认展示真实姓名；选「否」时昵称 = 姓名拼音首字母（方案二，选定后不可更改）
     const showReal = req.body && req.body.show_real_name !== false && req.body.show_real_name !== 0 && req.body.show_real_name !== '0';
-    let nickname = String((req.body && req.body.nickname) || '').trim().slice(0, 32) || s.nickname || null;
-    if (!showReal && !nickname) {
-      return res.status(400).json({ error: '选择只展示昵称后，请填写昵称' });
+    let nickname = String((req.body && req.body.nickname) || '').trim().slice(0, 32) || null;
+    if (!showReal) {
+      if (!real_name) {
+        return res.status(400).json({ error: '选择只展示昵称后，请填写姓名以生成昵称缩写' });
+      }
+      const pc = await pinyinCandidates(real_name);
+      if (!pc.candidates.length) {
+        return res.status(400).json({ error: '无法生成姓名缩写昵称，请选择展示真实姓名' });
+      }
+      if (!nickname || !pc.candidates.includes(nickname)) {
+        return res.status(400).json({ error: '昵称须为姓名拼音首字母，请从候选中选择' });
+      }
     }
 
     // 该 tiny_id 已绑定 → 直接登录（无需再填班级姓名）
@@ -320,7 +421,9 @@ router.post(
       if (u.qq_tiny_id && u.qq_tiny_id !== s.tiny_id) {
         return res.status(409).json({ error: '该姓名已绑定其他 QQ，请勿冒用' });
       }
-      await query('UPDATE users SET qq_tiny_id = ? WHERE id = ?', [s.tiny_id, u.id]);
+      // 接管访客身份：清除遗留的 guest 凭据——QQ 绑定后该身份不再允许访客登记（L2），
+      // 旧 guest_token 若曾被分享/冒名获取，继续有效等于遗留后门，一并作废（该用户此后用 QQ 登录）
+      await query('UPDATE users SET qq_tiny_id = ?, guest_token = NULL, guest_pwd_hash = NULL WHERE id = ?', [s.tiny_id, u.id]);
       u.qq_tiny_id = s.tiny_id;
       await maybeGrantAdmin(u.id, s.tiny_id);
       await linkSession(sessionId, u.id);

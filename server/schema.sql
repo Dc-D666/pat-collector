@@ -164,6 +164,37 @@ CREATE TABLE IF NOT EXISTS admin_log (
   KEY idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 评委评审（P3，2026-08-16）：人工评委团为作品打分（10 分制整数，4 维度加权），
+-- 自动折算计分（round(综合分×30)，满分 300；综合分 <6 不兑现）。每个项目一条（重新评审覆盖）。
+CREATE TABLE IF NOT EXISTS judge_reviews (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  ref_type VARCHAR(8) NOT NULL COMMENT 'file / app',
+  ref_id INT NOT NULL,
+  scores VARCHAR(200) NOT NULL DEFAULT '{}' COMMENT 'JSON：{creativity,content,completeness,values}',
+  total DECIMAL(4,2) NOT NULL DEFAULT 0 COMMENT '加权综合分 0-10',
+  points INT NOT NULL DEFAULT 0 COMMENT '本次兑现积分',
+  judge_user_id INT NULL COMMENT '评审人（管理员）',
+  owner_user_id INT NULL COMMENT '作品作者 user_id',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_judge (ref_type, ref_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 内容审查记录（O3，2026-08-15）：AI 审查拒绝的展示文本（作品标题/简介/玩法）落库可追溯
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  kind VARCHAR(32) NOT NULL DEFAULT 'display_text' COMMENT '审查类型',
+  content VARCHAR(500) NOT NULL DEFAULT '' COMMENT '被拒内容摘要',
+  result VARCHAR(16) NOT NULL DEFAULT 'rejected' COMMENT 'rejected / approved',
+  reason VARCHAR(200) NOT NULL DEFAULT '' COMMENT '拒绝原因',
+  user_id INT NULL COMMENT '提交者（可空）',
+  ref_type VARCHAR(16) NOT NULL DEFAULT '' COMMENT 'file / app',
+  ref_id INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_created (created_at),
+  KEY idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 运行时设置（管理后台：商城开关 shop_enabled 等，不重启生效）
 CREATE TABLE IF NOT EXISTS settings (
   skey VARCHAR(64) PRIMARY KEY,

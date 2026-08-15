@@ -108,11 +108,12 @@ Views.login = () => {
     clearPendingOAuth();
     API.setToken(data.token);
     API.setUser(data.user);
-    location.hash = '#/files';
+    // 默认落地页 = 活动简介（与 app.js 空 hash 默认一致）
+    location.hash = '#/activity';
   }
 
   // 渲染「年级 → 班级」二级菜单 + 姓名字段 + 展示名授权；返回取值函数
-  // nickname：QQ 场景传入频道昵称，作为「只展示昵称」的默认值
+  // nickname：旧昵称（仅用于预填；方案二后昵称=姓名拼音缩写，不再自由填写）
   function renderIdentity(container, nickname) {
     container.innerHTML = `
       <div class="field">
@@ -135,19 +136,31 @@ Views.login = () => {
         </div>
       </div>
       <div class="field" id="id-nickname-field" style="display:none;">
-        <label>展示昵称</label>
-        <input id="id-nickname" type="text" maxlength="32" value="${escapeHtml(nickname || '')}" placeholder="作品墙上展示的昵称" />
+        <label>展示昵称（姓名拼音首字母）</label>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">输入姓名后自动生成；多音字请选择对应读音，<strong>选定后不可更改</strong></div>
+        <div id="id-initials-options" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+        <input id="id-nickname" type="hidden" value="" />
       </div>`;
 
     const gradeSel = container.querySelector('#id-grade');
     const classField = container.querySelector('#id-class-field');
     const nameField = container.querySelector('#id-name-field');
     const nicknameField = container.querySelector('#id-nickname-field');
+    const initialsOptions = container.querySelector('#id-initials-options');
+    const initialsInput = container.querySelector('#id-nickname');
+    let initialsTimer = null;
 
-    // 选「否，只展示昵称」→ 显示昵称输入框
+    const refreshInitials = () => {
+      const nameEl = container.querySelector('#id-name');
+      const name = nameEl ? nameEl.value.trim() : '';
+      Utils.initialsPicker(initialsOptions, initialsInput, name, '');
+    };
+
+    // 选「否，只展示昵称」→ 显示缩写候选区；输入姓名后自动生成候选
     container.querySelectorAll('input[name="id-show-real"]').forEach((radio) => {
       radio.addEventListener('change', () => {
         nicknameField.style.display = radio.value === '0' ? '' : 'none';
+        if (radio.value === '0') refreshInitials();
       });
     });
 
@@ -168,6 +181,15 @@ Views.login = () => {
         classField.innerHTML = '';
         nameField.innerHTML = '';
       }
+      const nameEl = container.querySelector('#id-name');
+      if (nameEl) {
+        nameEl.addEventListener('input', () => {
+          clearTimeout(initialsTimer);
+          initialsTimer = setTimeout(() => {
+            if ((container.querySelector('input[name="id-show-real"]:checked') || {}).value === '0') refreshInitials();
+          }, 300);
+        });
+      }
     }
     gradeSel.addEventListener('change', update);
     update();
@@ -177,7 +199,7 @@ Views.login = () => {
       class_name: (container.querySelector('#id-class') ? container.querySelector('#id-class').value : '').trim(),
       real_name: (container.querySelector('#id-name') ? container.querySelector('#id-name').value : '').trim(),
       show_real_name: (container.querySelector('input[name="id-show-real"]:checked') || {}).value !== '0',
-      nickname: (container.querySelector('#id-nickname') ? container.querySelector('#id-nickname').value : '').trim(),
+      nickname: initialsInput ? initialsInput.value.trim() : '',
     });
   }
 
@@ -187,17 +209,22 @@ Views.login = () => {
     clearPendingOAuth();
     view.innerHTML = `
       <div class="auth-wrap">
-        <div class="auth-card card">
-          <div class="auth-brand auth-brand-row">
-            <img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" />
-            <div class="auth-brand-text">
-              <h1>南中科创局</h1>
-              <p>高中 AI 社团 · 作品收集与展示平台</p>
+        <div style="width:100%;max-width:420px;">
+          <div class="auth-card card">
+            <div class="auth-brand auth-brand-row">
+              <img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" />
+              <div class="auth-brand-text">
+                <h1>南中科创局</h1>
+                <p>信息素养体验活动平台</p>
+              </div>
             </div>
+            <button class="btn btn-primary" id="qq-login-btn" style="width:100%;justify-content:center;padding:13px;font-size:15px;">🐧 QQ 频道登录</button>
+            <div style="text-align:center;margin:14px 0;color:var(--text-dim);font-size:13px;">— 或 —</div>
+            <button class="btn" id="guest-btn" style="width:100%;justify-content:center;">我没有QQ，或直接提交我的程序文件</button>
           </div>
-          <button class="btn btn-primary" id="qq-login-btn" style="width:100%;justify-content:center;padding:13px;font-size:15px;">🐧 QQ 频道登录</button>
-          <div style="text-align:center;margin:14px 0;color:var(--text-dim);font-size:13px;">— 或 —</div>
-          <button class="btn" id="guest-btn" style="width:100%;justify-content:center;">我没有QQ，或直接提交我的程序文件</button>
+          <a href="https://365.kdocs.cn/l/cvXvUaSc6iNY" target="_blank" rel="noopener" style="display:block;width:fit-content;margin:10px auto 0;padding:11px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);text-decoration:none;color:var(--text);font-size:13px;line-height:1.6;text-align:center;">
+            <span style="font-weight:700;">📢 点此查看完整活动通知</span>
+          </a>
         </div>
       </div>`;
     document.getElementById('qq-login-btn').onclick = () => startQqLogin();
@@ -245,7 +272,7 @@ Views.login = () => {
           <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin:12px 0;">等待授权…</div>
           <div id="channel-join" style="display:none;margin-top:6px;padding:14px 12px;border:1px solid var(--border);border-radius:16px;background:var(--bg);">
             <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤔 没找到你的频道身份？</div>
-            <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:150px;border-radius:12px;border:1px solid var(--border);" />
+            <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:auto;border-radius:12px;border:1px solid var(--border);" />
             <div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7;">可能是还没加入频道。扫一扫加入「南方中学校友频道」后，重新扫码授权即可。</div>
           </div>
           <button class="btn" id="qr-back" style="width:100%;justify-content:center;">返回</button>
@@ -291,9 +318,10 @@ Views.login = () => {
         statusEl.textContent = (r.status === 'pending_authorization' && r.error) ? r.error : '等待授权…';
       }
       if (r.status === 'pending_authorization' && r.error) {
-        // 身份反查失败/未加入频道：显示频道二维码引导加入（仅首次出现时展示，避免每次重绘闪烁）
+        // 身份反查失败/未加入频道：显示频道二维码引导加入（仅首次出现时展示，避免每次重绘闪烁）；
+        // 同名歧义（join_hint:false）时不展示「可能没加入频道」的二维码（此时引导是修改昵称）
         const qrBox = document.getElementById('channel-join');
-        if (qrBox && qrBox.style.display === 'none') qrBox.style.display = '';
+        if (qrBox && qrBox.style.display === 'none' && r.join_hint !== false) qrBox.style.display = '';
         // 身份反查类错误：重试有上限
         pollRetries++;
         if (pollRetries >= MAX_POLL_RETRIES) {
@@ -324,7 +352,7 @@ Views.login = () => {
           <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin:16px 0;">等待授权…</div>
           <div id="channel-join" style="display:none;margin-top:6px;padding:14px 12px;border:1px solid var(--border);border-radius:16px;background:var(--bg);">
             <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤔 没找到你的频道身份？</div>
-            <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:150px;border-radius:12px;border:1px solid var(--border);" />
+            <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:auto;border-radius:12px;border:1px solid var(--border);" />
             <div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7;">可能是还没加入频道。扫一扫加入「南方中学校友频道」后，重新扫码授权即可。</div>
           </div>
           <button class="btn" id="qr-back" style="width:100%;justify-content:center;">重新扫码</button>
@@ -349,7 +377,7 @@ Views.login = () => {
           <div class="form-error" id="auth-error"></div>
           <div id="channel-join" style="display:none;margin-bottom:14px;padding:14px 12px;border:1px solid var(--border);border-radius:16px;background:var(--bg);text-align:center;">
             <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤔 没找到你的频道身份？</div>
-            <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:150px;border-radius:12px;border:1px solid var(--border);" />
+            <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:auto;border-radius:12px;border:1px solid var(--border);" />
             <div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7;">可能是还没加入频道。扫一扫加入「南方中学校友频道」后，重新扫码授权即可。</div>
           </div>
           <div id="id-container"></div>
@@ -390,9 +418,10 @@ Views.login = () => {
     clearPendingOAuth();
     view.innerHTML = `
       <div class="auth-wrap">
-        <div class="auth-card card">
-          <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>直接提交作品</h1><p>没有 QQ？填好班级姓名，上传你的程序文件即可</p></div>
-          <div class="form-error" id="auth-error"></div>
+        <div style="width:100%;max-width:420px;">
+          <div class="auth-card card">
+            <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>直接提交作品</h1><p>没有 QQ？填好班级姓名，上传你的程序文件即可</p></div>
+            <div class="form-error" id="auth-error"></div>
           <div id="id-container"></div>
           <div class="field" style="margin-top:10px;">
             <label>安全密码（选填）</label>
@@ -410,8 +439,12 @@ Views.login = () => {
             <div id="guest-file-list" style="margin-top:8px;display:none;"></div>
             <div id="guest-upload-status" style="margin-top:8px;display:none;"></div>
           </div>
-          <button class="btn btn-primary" id="guest-submit" style="width:100%;justify-content:center;margin-top:14px;">提交作品</button>
-          <button class="btn btn-ghost" id="guest-back" style="width:100%;justify-content:center;margin-top:6px;">返回</button>
+            <button class="btn btn-primary" id="guest-submit" style="width:100%;justify-content:center;margin-top:14px;">提交作品</button>
+            <button class="btn btn-ghost" id="guest-back" style="width:100%;justify-content:center;margin-top:6px;">返回</button>
+          </div>
+          <a href="https://365.kdocs.cn/l/cvXvUaSc6iNY" target="_blank" rel="noopener" style="display:block;width:fit-content;margin:10px auto 0;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg);text-decoration:none;color:var(--text);font-size:13px;line-height:1.6;text-align:center;">
+            <span style="font-weight:700;">📢 点此查看完整活动通知</span>
+          </a>
         </div>
       </div>`;
     document.getElementById('guest-back').onclick = renderHome;

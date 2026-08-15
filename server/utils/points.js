@@ -8,14 +8,14 @@ const { pool, query } = require('../db');
 const REASON_CAPS = { file_submit: 5, app_submit: 3 };
 const RULES = {
   first_login: 10, // 首次登录（注册时发放，仅一次）
-  read_article: 10, // 阅读课程 ≥1 分钟（每篇一次）
-  task: 20, // 完成整章所有任务（每章一次，ref_id 用 article:<id>）
+  read_article: 8, // 阅读课程 ≥1 分钟（每篇一次；P3 微降 10→8）
+  task: 15, // 完成整章所有任务（每章一次；P3 微降 20→15）
   app_submit: 15, // 提交 AI 轻应用（QQ 频道，每个作品一次；每人最多计 3 个）
-  file_submit: 30, // 提交作品文件（每个文件一次；每人最多计 5 个）
+  file_submit: 25, // 提交作品文件（每个文件一次；每人最多计 5 个；P3 30→25）
   liked: 0, // （已废弃：被赞积分改由 like_receive 通过 CLI 增量发放）
   like_give: 2, // 主动点赞他人（网页操作，每次 +2⭐，每日上限 10）
   like_receive: 2, // 帖子被点赞（CLI 增量统计，每个赞 +2⭐，作者每日上限 30）
-  graduate: 50, // 全课程毕业（5 章全部学完+任务全完成，仅一次）
+  graduate: 40, // 全课程毕业（P3 50→40）
   easter_egg: 5, // 彩蛋（连续点击顶栏积分徽章 5 次触发，仅一次）
 };
 
@@ -29,6 +29,8 @@ async function grant(userId, reason, refId, extraAmount) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    // 用户行锁：串行化同一用户的并发发放，保证 REASON_CAPS 计数上限与幂等防重在并发下依然成立
+    await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [userId]);
     // 计数上限：该 reason 历史发放达上限则跳过（file_submit ≤5 个 / app_submit ≤3 个）
     const cap = REASON_CAPS[reason];
     if (cap) {
@@ -166,4 +168,41 @@ async function revoke(userId, reason, refId) {
   }
 }
 
-module.exports = { RULES, grant, getPoints, spend, revoke };
+/**
+ * 带每日上限的积分发放（点赞双向发分用）：用户行锁 + 事务内「SUM 每日已发 → 防重插入 → 更新余额」，
+ * 并发下也不会突破 dailyCap（L4 修复：替代原"先查 SUM 再 grant"的非原子检查）。
+ * @returns {number} 实际发放积分数（到上限或已发过返回 0）
+ */
+async function grantCapped(userId, reason, refId, amount, dailyCap) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [userId]);
+    const [earned] = await conn.execute(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM points_log WHERE user_id = ? AND reason = ? AND DATE(created_at) = CURDATE()',
+      [userId, reason]
+    );
+    if (Number(earned[0].total) >= dailyCap) {
+      await conn.commit();
+      return 0;
+    }
+    const [ins] = await conn.execute(
+      'INSERT IGNORE INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+      [userId, amount, reason, String(refId || '')]
+    );
+    if (ins.affectedRows === 0) {
+      await conn.commit();
+      return 0;
+    }
+    await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [amount, userId]);
+    await conn.commit();
+    return amount;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+module.exports = { RULES, grant, grantCapped, getPoints, spend, revoke };

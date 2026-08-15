@@ -2,7 +2,7 @@
 
 const express = require('express');
 const config = require('../config');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../utils/rateLimit');
@@ -10,6 +10,7 @@ const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { extractLinks, resolveShare } = require('../qq/feed-links');
 const { grant, revoke } = require('../utils/points');
+const { auditDisplayText } = require('../utils/audit');
 
 const router = express.Router();
 
@@ -148,16 +149,37 @@ router.post(
     const gameplay = String((req.body && req.body.gameplay) || '').trim().slice(0, 2000) || null;
     const source_feed_id = String((req.body && req.body.source_feed_id) || '').trim().slice(0, 128) || null;
 
-    // 每人轻应用总数上限（删除可释放名额）
-    const [appCnt] = await query('SELECT COUNT(*) AS c FROM apps WHERE user_id = ?', [req.user.id]);
-    if (Number(appCnt.c) >= config.maxAppsPerUser) {
-      return res.status(400).json({ error: `轻应用总数已达上限（${config.maxAppsPerUser} 个），请删除部分后重试，或联系频道主扩容` });
+    // R2（2026-08-15）：轻应用标题/简介/玩法公开展示，同步 AI 审查；违规拒绝，AI 不可用降级放行
+    const displayText = [title, description, gameplay].filter(Boolean).join('\n');
+    const d = await auditDisplayText(displayText, { userId: req.user.id, refType: 'app', refId: 0 });
+    if (!d.ok) {
+      return res.status(400).json({ error: '应用信息不合规（' + (d.reason || '请修改后重试') + '）' });
     }
 
-    const result = await query(
-      'INSERT INTO apps (user_id, app_url, title, description, gameplay, source_feed_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [req.user.id, app_url, title, description, gameplay, source_feed_id]
-    );
+    // 每人轻应用总数上限（删除可释放名额）：检查与插入同事务 + 用户行锁，防并发突破上限（L4 修复）
+    const conn = await pool.getConnection();
+    let result;
+    try {
+      await conn.beginTransaction();
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [req.user.id]);
+      const [appCnt] = await conn.execute('SELECT COUNT(*) AS c FROM apps WHERE user_id = ?', [req.user.id]);
+      if (Number(appCnt[0].c) >= config.maxAppsPerUser) {
+        await conn.rollback();
+        conn.release(); // 提前返回必须释放连接，否则池耗尽
+        return res.status(400).json({ error: `轻应用总数已达上限（${config.maxAppsPerUser} 个），请删除部分后重试，或联系频道主扩容` });
+      }
+      const ins = await conn.execute(
+        'INSERT INTO apps (user_id, app_url, title, description, gameplay, source_feed_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [req.user.id, app_url, title, description, gameplay, source_feed_id]
+      );
+      result = { insertId: ins[0].insertId };
+      await conn.commit();
+    } catch (err) {
+      try { await conn.rollback(); } catch (_) { /* ignore */ }
+      conn.release();
+      throw err;
+    }
+    conn.release();
     const inserted = await query('SELECT created_at FROM apps WHERE id = ?', [result.insertId]);
     // 提交 AI 轻应用奖励（每个作品一次）
     await grant(req.user.id, 'app_submit', 'app:' + result.insertId);

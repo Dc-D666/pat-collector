@@ -8,19 +8,22 @@ const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-function displayNameOf(row) {
+function displayNameOf(row, viewerClass) {
   // 未授权展示真实姓名 → 用昵称（无昵称兜底真实姓名）
-  return row.show_real_name !== 0 ? row.real_name : (row.nickname || row.real_name);
+  // P1（2026-08-15）：真实姓名仅对同班同学展示；非同班/非本校一律显示昵称（拼音缩写）
+  const isSameClass = viewerClass && row.class_name === viewerClass;
+  // 非同班兜底「同学」：无昵称也不泄露真实姓名（P1）
+  return (row.show_real_name !== 0 && isSameClass) ? row.real_name : (row.nickname || '同学');
 }
 
-function groupByStudent(fileRows, appRows, titleMap) {
+function groupByStudent(fileRows, appRows, titleMap, viewerClass) {
   const map = new Map();
   for (const r of fileRows) {
     if (!map.has(r.user_id)) {
       map.set(r.user_id, {
         user_id: r.user_id,
         real_name: r.real_name,
-        display_name: displayNameOf(r),
+        display_name: displayNameOf(r, viewerClass),
         title_tag: (titleMap && titleMap.get(r.user_id)) || '',
         files: [],
         apps: [],
@@ -39,7 +42,7 @@ function groupByStudent(fileRows, appRows, titleMap) {
       map.set(r.user_id, {
         user_id: r.user_id,
         real_name: r.real_name,
-        display_name: displayNameOf(r),
+        display_name: displayNameOf(r, viewerClass),
         title_tag: (titleMap && titleMap.get(r.user_id)) || '',
         files: [],
         apps: [],
@@ -64,7 +67,6 @@ function groupByStudent(fileRows, appRows, titleMap) {
     }
     return {
       user_id: s.user_id,
-      real_name: s.real_name,
       display_name: s.display_name,
       title_tag: s.title_tag,
       file_count: s.files.length,
@@ -86,13 +88,13 @@ router.get(
         `SELECT u.id AS user_id, u.class_name, u.real_name, u.show_real_name, u.nickname,
                 f.id AS file_id, f.original_name, f.title, f.description, f.gameplay, f.size, f.uploaded_at
          FROM users u
-         JOIN files f ON f.user_id = u.id`
+         JOIN files f ON f.user_id = u.id AND f.audit_status <> 'flagged' AND u.qq_tiny_id IS NOT NULL`
       ),
       query(
         `SELECT u.id AS user_id, u.class_name, u.real_name, u.show_real_name, u.nickname,
                 a.id AS app_id, a.app_url, a.title, a.description, a.gameplay, a.created_at
          FROM users u
-         JOIN apps a ON a.user_id = u.id`
+         JOIN apps a ON a.user_id = u.id AND u.qq_tiny_id IS NOT NULL`
       ),
     ]);
 
@@ -121,7 +123,7 @@ router.get(
         user_id: r.user_id,
         class_name: r.class_name,
         grade: config.gradeOf(r.class_name),
-        display_name: displayNameOf(r),
+        display_name: displayNameOf(r, req.user.class_name),
         title_tag: titleMap.get(r.user_id) || '',
         title: r.title || r.original_name,
         original_name: r.original_name,
@@ -143,7 +145,7 @@ router.get(
         user_id: r.user_id,
         class_name: r.class_name,
         grade: config.gradeOf(r.class_name),
-        display_name: displayNameOf(r),
+        display_name: displayNameOf(r, req.user.class_name),
         title_tag: titleMap.get(r.user_id) || '',
         title: r.title || 'AI 轻应用',
         app_url: r.app_url,
@@ -177,14 +179,14 @@ router.get(
         `SELECT u.class_name, u.id AS user_id, u.real_name, u.show_real_name, u.nickname,
                 f.id AS file_id, f.original_name, f.title, f.size, f.uploaded_at
          FROM users u
-         JOIN files f ON f.user_id = u.id
+         JOIN files f ON f.user_id = u.id AND f.audit_status <> 'flagged' AND u.qq_tiny_id IS NOT NULL
          ORDER BY u.class_name ASC, u.real_name ASC, f.uploaded_at DESC, f.id DESC`
       ),
       query(
         `SELECT u.class_name, u.id AS user_id, u.real_name, u.show_real_name, u.nickname,
                 a.id AS app_id, a.app_url, a.title, a.description, a.gameplay, a.created_at
          FROM users u
-         JOIN apps a ON a.user_id = u.id
+         JOIN apps a ON a.user_id = u.id AND u.qq_tiny_id IS NOT NULL
          ORDER BY u.class_name ASC, u.real_name ASC, a.created_at DESC, a.id DESC`
       ),
     ]);
@@ -216,7 +218,7 @@ router.get(
     const titleMap = new Map(titles.map((t) => [t.user_id, t.title]));
 
     const classes = [...classMap.values()].map((c) => {
-      const students = groupByStudent(c.fileRows, c.appRows, titleMap);
+      const students = groupByStudent(c.fileRows, c.appRows, titleMap, req.user.class_name);
       const fileCount = students.reduce((n, s) => n + s.file_count, 0);
       const appCount = students.reduce((n, s) => n + s.app_count, 0);
       const size = students.reduce(
@@ -237,7 +239,7 @@ router.get(
         last_submit: last,
         students: students.map((s) => ({
           user_id: s.user_id,
-          real_name: s.real_name,
+          // 只返回展示名（尊重展示名授权），不泄露真实姓名
           display_name: s.display_name,
           title_tag: s.title_tag,
           file_count: s.file_count,

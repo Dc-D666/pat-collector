@@ -10,6 +10,7 @@ const { requireAuth } = require('../middleware/auth');
 const { verify } = require('../utils/token');
 const qqSessions = require('../qq/sessions');
 const { runCli } = require('../qq/proxy');
+const readTimer = require('../utils/readTimer');
 
 const router = express.Router();
 
@@ -253,6 +254,13 @@ router.get(
         updated_at: a.updated_at,
       },
     });
+    // 记录阅读开始时间（供 /api/points/read 的 60s 服务端校验；需登录，L7 修复）
+    const authHeader = req.headers.authorization || '';
+    const tok = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (tok) {
+      const p = verify(tok);
+      if (p && p.uid) readTimer.markStart(p.uid, a.id);
+    }
   })
 );
 

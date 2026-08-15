@@ -8,3 +8,11 @@ storage/
 __pycache__/
 *.pyc
 npm-debug.log*
+# 本地素材/测试/备份文件，勿提交
+C096610B2D7545CD1BE10EF75A3592B4.jpg
+QQ.jpg
+ScreenShot_2026-08-13_205947_047.png
+backup-articles-before-rewrite.sql
+d6ac13b9-0e56-4d1d-9a7d-76d5ed51b15e.png
+f1db2a4c3ba34ddeef550221e80a5a15.mp4
+img1.png
