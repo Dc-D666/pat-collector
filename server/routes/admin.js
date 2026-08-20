@@ -12,12 +12,18 @@ const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAdmin } = require('../middleware/admin');
 const { writeAdminLog } = require('../utils/adminLog');
-const { grant, revoke, bonusAmount } = require('../utils/points');
+const { grant, revoke, bonusAmount, revokeInTx, restoreFileSubmitInTx } = require('../utils/points');
 const { freeDiskBytes } = require('../utils/disk');
 const qqSessions = require('../qq/sessions');
 
 const router = express.Router();
 router.use(requireAdmin);
+
+// R2-1（2026-08-21）：最高管理员账号保护——按 (class_name, real_name) 识别（config.superAdmin）。
+// 停用/删除/重置密码/调分/权限变更等高风险操作一律禁止作用于最高管理员，防普通管理员篡权。
+function isSuperAdminRow(row) {
+  return !!(row && row.class_name === config.superAdmin.class_name && row.real_name === config.superAdmin.real_name);
+}
 
 // 当前时间 + 偏移毫秒 → 'YYYY-MM-DD HH:mm:ss'（本地时区，与 MySQL 墙钟一致）
 function mysqlNow(offsetMs) {
@@ -96,8 +102,10 @@ router.post('/users/:id/points', asyncHandler(async (req, res) => {
   const reason = String((req.body && req.body.reason) || '').trim().slice(0, 50);
   if (!Number.isInteger(amount) || amount === 0) return res.status(400).json({ error: '积分变动需为不为 0 的整数' });
   if (Math.abs(amount) > 10000) return res.status(400).json({ error: '单次调整过大（上限 10000）' });
-  const [row] = await query('SELECT id FROM users WHERE id = ?', [uid]);
+  const [row] = await query('SELECT id, class_name, real_name FROM users WHERE id = ?', [uid]);
   if (!row) return res.status(404).json({ error: '用户不存在' });
+  // R2-1：最高管理员账号受保护，任何管理员（含其他最高管理员）不可调整其积分
+  if (isSuperAdminRow(row)) return res.status(403).json({ error: '不能调整最高管理员的积分' });
 
   const ref = 'admin:' + Date.now() + ':' + crypto.randomBytes(4).toString('hex');
   if (amount > 0) {
@@ -134,8 +142,10 @@ router.post('/users/:id/admin', asyncHandler(async (req, res) => {
   }
   const uid = Number(req.params.id);
   const enabled = !!(req.body && req.body.enabled);
-  const [row] = await query('SELECT qq_tiny_id FROM users WHERE id = ?', [uid]);
+  const [row] = await query('SELECT id, class_name, real_name, qq_tiny_id FROM users WHERE id = ?', [uid]);
   if (!row) return res.status(404).json({ error: '用户不存在' });
+  // R2-1：不可取消最高管理员自身的权限
+  if (isSuperAdminRow(row)) return res.status(403).json({ error: '不能修改最高管理员自身的权限' });
   if (enabled && !row.qq_tiny_id) return res.status(400).json({ error: '仅 QQ 登录用户可设为管理员' });
   await query('UPDATE users SET is_admin = ? WHERE id = ?', [enabled ? 1 : 0, uid]);
   await writeAdminLog(req.user.id, 'user.admin.set', 'user', uid, { enabled }, req);
@@ -148,14 +158,29 @@ router.post('/users/:id/status', asyncHandler(async (req, res) => {
   const status = String((req.body && req.body.status) || '');
   if (status !== 'active' && status !== 'disabled') return res.status(400).json({ error: '状态仅支持 active / disabled' });
   if (uid === req.user.id) return res.status(400).json({ error: '不能停用自己' });
+  const [row] = await query('SELECT id, class_name, real_name, qq_session_id FROM users WHERE id = ?', [uid]);
+  if (!row) return res.status(404).json({ error: '用户不存在' });
+  // R2-1：最高管理员账号不可被其他管理员停用
+  if (isSuperAdminRow(row)) return res.status(403).json({ error: '不能停用最高管理员账号' });
   await query('UPDATE users SET status = ? WHERE id = ?', [status, uid]);
-  await writeAdminLog(req.user.id, 'user.status.set', 'user', uid, { status }, req);
+  // R2-14：停用时立即撤销并清理其 QQ 会话（token 残留于 storage/qq-sessions）
+  if (status === 'disabled' && row.qq_session_id) {
+    try {
+      qqSessions.cleanupSession(row.qq_session_id);
+      await query('UPDATE users SET qq_session_id = NULL WHERE id = ?', [uid]);
+    } catch (_) { /* 清理失败不阻断 */ }
+  }
+  await writeAdminLog(req.user.id, 'user.status.set', 'user', uid, { status, session_cleaned: status === 'disabled' }, req);
   res.json({ ok: true, status });
 }));
 
 // 重置访客删除密码（置回默认）
 router.post('/users/:id/guest-pwd-reset', asyncHandler(async (req, res) => {
   const uid = Number(req.params.id);
+  const [row] = await query('SELECT id, class_name, real_name FROM users WHERE id = ?', [uid]);
+  if (!row) return res.status(404).json({ error: '用户不存在' });
+  // R2-1：最高管理员账号受保护
+  if (isSuperAdminRow(row)) return res.status(403).json({ error: '不能重置最高管理员的密码' });
   await query('UPDATE users SET guest_pwd_hash = NULL WHERE id = ?', [uid]);
   await writeAdminLog(req.user.id, 'user.guest_pwd_reset', 'user', uid, {}, req);
   res.json({ ok: true, message: '已重置为默认密码' });
@@ -165,9 +190,17 @@ router.post('/users/:id/guest-pwd-reset', asyncHandler(async (req, res) => {
 router.delete('/users/:id', asyncHandler(async (req, res) => {
   const uid = Number(req.params.id);
   if (uid === req.user.id) return res.status(400).json({ error: '不能删除自己' });
-  const [row] = await query('SELECT id FROM users WHERE id = ?', [uid]);
+  const [row] = await query('SELECT id, class_name, real_name, qq_session_id FROM users WHERE id = ?', [uid]);
   if (!row) return res.status(404).json({ error: '用户不存在' });
+  // R2-1：最高管理员账号不可被删除
+  if (isSuperAdminRow(row)) return res.status(403).json({ error: '不能删除最高管理员账号' });
   const files = await query('SELECT stored_name FROM files WHERE user_id = ?', [uid]);
+  // R2-14：删除用户时立即撤销并清理其 QQ 会话（CLI token 残留于 storage/qq-sessions）
+  if (row.qq_session_id) {
+    try {
+      qqSessions.cleanupSession(row.qq_session_id);
+    } catch (_) { /* 清理失败不阻断 */ }
+  }
   await query('DELETE FROM users WHERE id = ?', [uid]); // ON DELETE CASCADE 清 files/apps/流水等
   for (const f of files) {
     fs.promises.unlink(path.join(config.storageDir, f.stored_name)).catch(() => {});
@@ -206,6 +239,7 @@ router.get('/files', asyncHandler(async (req, res) => {
 }));
 
 // 改作品信息 / 审核状态（管理视角）
+// R2-2/R2-3（2026-08-21）：状态变更（违规→通过）与积分补发同事务，按原流水金额恢复
 router.patch('/files/:id', asyncHandler(async (req, res) => {
   const fid = Number(req.params.id);
   const [row] = await query('SELECT id, user_id, audit_status FROM files WHERE id = ?', [fid]);
@@ -224,14 +258,29 @@ router.patch('/files/:id', asyncHandler(async (req, res) => {
     if (body.audit_reason !== undefined) { sets.push('audit_reason = ?'); params.push(String(body.audit_reason).slice(0, 500) || ''); }
   }
   if (!sets.length) return res.status(400).json({ error: '没有要修改的字段' });
-  // 从违规改回已通过：补发被回扣的提交积分（与审核"通过"行为一致）
+  // 从违规改回已通过：补发被回扣的提交积分（与审核"通过"行为一致）——同事务、按原流水金额
   let restored = 0;
   const targetStatus = body.audit_status !== undefined ? String(body.audit_status) : null;
-  if (targetStatus === 'reviewed' && row.audit_status === 'flagged') {
-    restored = await restoreFilePoints(row.user_id, fid);
+  const needRestore = targetStatus === 'reviewed' && row.audit_status === 'flagged';
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute('SELECT id FROM files WHERE id = ? FOR UPDATE', [fid]);
+    if (needRestore) {
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [row.user_id]);
+      restored = await restoreFileSubmitInTx(conn, row.user_id, fid);
+    }
+    params.push(fid);
+    await conn.execute(`UPDATE files SET ${sets.join(', ')} WHERE id = ?`, params);
+    await conn.commit();
+  } catch (err) {
+    try { await conn.rollback(); } catch (_) { /* ignore */ }
+    conn.release();
+    throw err;
   }
-  params.push(fid);
-  await query(`UPDATE files SET ${sets.join(', ')} WHERE id = ?`, params);
+  conn.release();
+
   await writeAdminLog(req.user.id, 'file.update', 'file', fid, { body, points_restored: restored }, req);
   res.json({ ok: true, points_restored: restored });
 }));
@@ -266,47 +315,63 @@ router.get('/audit', asyncHandler(async (req, res) => {
 }));
 
 // 审核操作：approve（通过）/ reject（拒绝+原因+回扣）/ delete（删除+回扣）
+// R2-3（2026-08-21）：状态变更与积分回扣/恢复放进同一事务（锁文件行+用户行），
+// 任一步失败整体回滚，不再出现"状态已变但积分未变"或反之的不一致。
 router.post('/audit/:id/review', asyncHandler(async (req, res) => {
   const fid = Number(req.params.id);
   const action = String((req.body && req.body.action) || '');
   const rows = await query('SELECT user_id, stored_name, audit_status FROM files WHERE id = ?', [fid]);
   if (!rows.length) return res.status(404).json({ error: '文件不存在' });
   const f = rows[0];
+  const reason = String((req.body && req.body.reason) || '').trim().slice(0, 500);
 
-  if (action === 'approve') {
-    const restored = await restoreFilePoints(f.user_id, fid);
-    await query("UPDATE files SET audit_status = 'reviewed', audit_reason = '' WHERE id = ?", [fid]);
-    await writeAdminLog(req.user.id, 'audit.approve', 'file', fid, { prev: f.audit_status, points_restored: restored }, req);
-    return res.json({ ok: true, points_restored: restored });
+  const conn = await pool.getConnection();
+  let restored = 0;
+  let revoked = 0;
+  try {
+    await conn.beginTransaction();
+    await conn.execute('SELECT id FROM files WHERE id = ? FOR UPDATE', [fid]); // 防并发审核同一文件
+    if (action === 'approve') {
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [f.user_id]);
+      // R2-2：按原发放流水金额原样恢复（不再硬编码 30 / 重复乘活动倍率）
+      restored = await restoreFileSubmitInTx(conn, f.user_id, fid);
+      await conn.execute("UPDATE files SET audit_status = 'reviewed', audit_reason = '' WHERE id = ?", [fid]);
+    } else if (action === 'reject') {
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [f.user_id]);
+      revoked = (await revokeInTx(conn, f.user_id, 'file_submit', 'file:' + fid)) || 0;
+      await conn.execute("UPDATE files SET audit_status = 'flagged', audit_reason = ? WHERE id = ?", [reason, fid]);
+    } else if (action === 'delete') {
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [f.user_id]);
+      revoked = (await revokeInTx(conn, f.user_id, 'file_submit', 'file:' + fid)) || 0;
+      await conn.execute('DELETE FROM files WHERE id = ?', [fid]);
+    } else {
+      await conn.rollback();
+      conn.release();
+      return res.status(400).json({ error: '操作无效' });
+    }
+    await conn.commit();
+  } catch (err) {
+    try { await conn.rollback(); } catch (_) { /* ignore */ }
+    conn.release();
+    throw err;
   }
-  if (action === 'reject') {
-    const reason = String((req.body && req.body.reason) || '').trim().slice(0, 500);
-    await query("UPDATE files SET audit_status = 'flagged', audit_reason = ? WHERE id = ?", [reason, fid]);
-    const revoked = await revoke(f.user_id, 'file_submit', 'file:' + fid);
-    await writeAdminLog(req.user.id, 'audit.reject', 'file', fid, { reason, revoked }, req);
-    return res.json({ ok: true, points_revoked: revoked });
-  }
+  conn.release();
+
   if (action === 'delete') {
-    await query('DELETE FROM files WHERE id = ?', [fid]);
-    const revoked = await revoke(f.user_id, 'file_submit', 'file:' + fid);
+    // 事务提交后再物理删盘（DB 已无记录，删盘失败仅留孤儿文件，不影响一致性）
     fs.promises.unlink(path.join(config.storageDir, f.stored_name)).catch(() => {});
     await writeAdminLog(req.user.id, 'audit.delete', 'file', fid, { revoked }, req);
     return res.json({ ok: true, points_revoked: revoked });
   }
-  return res.status(400).json({ error: '操作无效' });
+  if (action === 'approve') {
+    await writeAdminLog(req.user.id, 'audit.approve', 'file', fid, { prev: f.audit_status, points_restored: restored }, req);
+    return res.json({ ok: true, points_restored: restored });
+  }
+  await writeAdminLog(req.user.id, 'audit.reject', 'file', fid, { reason, revoked }, req);
+  return res.json({ ok: true, points_revoked: revoked });
 }));
 
 // ==================== P1 ====================
-
-// 曾被拒绝回扣过的文件，重新通过时补发 +30（reason 用 file_submit_restore，不占 file_submit 的 5 个名额）
-async function restoreFilePoints(userId, fileId) {
-  const rv = await query(
-    "SELECT id FROM points_log WHERE user_id = ? AND reason = 'file_submit_revoke' AND ref_id = ?",
-    [userId, 'file:' + fileId]
-  );
-  if (!rv.length) return 0;
-  return (await grant(userId, 'file_submit_restore', 'file:' + fileId + ':restore', 30)) || 0;
-}
 
 // ---- 积分管理 ----
 const REASON_TEXT = {
@@ -810,6 +875,7 @@ router.delete('/articles/:id', asyncHandler(async (req, res) => {
 }));
 
 // ---- 审核批量操作（approve / delete）----
+// R2-3：逐文件事务（状态变更与积分回扣/恢复原子化），单条失败不影响其余
 router.post('/audit/batch', asyncHandler(async (req, res) => {
   const action = String((req.body && req.body.action) || '');
   const ids = Array.isArray(req.body && req.body.ids)
@@ -821,22 +887,37 @@ router.post('/audit/batch', asyncHandler(async (req, res) => {
   let ok = 0;
   let pointsRestored = 0;
   for (const fid of ids) {
+    const conn = await pool.getConnection();
     try {
+      await conn.beginTransaction();
+      const [rows] = await conn.execute(
+        'SELECT user_id, stored_name, audit_status FROM files WHERE id = ? FOR UPDATE',
+        [fid]
+      );
+      if (rows.length === 0) {
+        await conn.rollback();
+        conn.release();
+        continue;
+      }
+      const f = rows[0];
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [f.user_id]);
       if (action === 'delete') {
-        const rows = await query('SELECT user_id, stored_name FROM files WHERE id = ?', [fid]);
-        if (!rows.length) continue;
-        await query('DELETE FROM files WHERE id = ?', [fid]);
-        await revoke(rows[0].user_id, 'file_submit', 'file:' + fid);
-        fs.promises.unlink(path.join(config.storageDir, rows[0].stored_name)).catch(() => {});
+        await revokeInTx(conn, f.user_id, 'file_submit', 'file:' + fid);
+        await conn.execute('DELETE FROM files WHERE id = ?', [fid]);
       } else {
-        const rows = await query('SELECT user_id FROM files WHERE id = ?', [fid]);
-        if (!rows.length) continue;
-        const restored = await restoreFilePoints(rows[0].user_id, fid);
+        const restored = await restoreFileSubmitInTx(conn, f.user_id, fid);
         pointsRestored += restored;
-        await query("UPDATE files SET audit_status = 'reviewed', audit_reason = '' WHERE id = ?", [fid]);
+        await conn.execute("UPDATE files SET audit_status = 'reviewed', audit_reason = '' WHERE id = ?", [fid]);
+      }
+      await conn.commit();
+      conn.release();
+      if (action === 'delete') {
+        fs.promises.unlink(path.join(config.storageDir, f.stored_name)).catch(() => {});
       }
       ok++;
     } catch (err) {
+      try { await conn.rollback(); } catch (_) { /* ignore */ }
+      conn.release();
       console.warn('[admin] 批量操作单条失败 id=' + fid + ':', err.message);
     }
   }

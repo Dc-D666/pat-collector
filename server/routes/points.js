@@ -11,6 +11,7 @@ const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { checkElapsed } = require('../utils/readTimer');
 const { verifyTaskCompletion } = require('../utils/taskVerify');
+const { getSetting } = require('../utils/settings');
 
 const router = express.Router();
 
@@ -338,8 +339,10 @@ router.post(
       if (rows.length === 0) return res.status(404).json({ error: '作品不存在' });
       owner = rows[0].user_id;
     } else {
-      const rows = await query('SELECT user_id FROM links WHERE id = ?', [targetId]);
-      if (rows.length === 0) return res.status(404).json({ error: '作品不存在' });
+      // R2-7：仅已验证（verified=1）的 GitHub 链接可点赞——未验证链接不进作品墙，
+      // 但不能通过枚举 ID 点赞刷双方积分
+      const rows = await query('SELECT user_id FROM links WHERE id = ? AND verified = 1', [targetId]);
+      if (rows.length === 0) return res.status(404).json({ error: '作品不存在或未通过验证' });
       owner = rows[0].user_id;
     }
     if (owner === req.user.id) return res.status(400).json({ error: '不能给自己点赞' });
@@ -498,6 +501,12 @@ router.post(
   '/purchase',
   requireAuth,
   asyncHandler(async (req, res) => {
+    // R2-8（2026-08-21）：商城开关后端强制——settings.shop_enabled = '0' 时直接拒绝，
+    // 不再只依赖前端隐藏入口（此前可直接调用 /api/points/purchase 绕过）
+    const shopOn = await getSetting('shop_enabled');
+    if (shopOn === '0') {
+      return res.status(403).json({ error: '积分商城已关闭' });
+    }
     const item = String((req.body && req.body.item) || '').trim();
     const def = SHOP.find((s) => s.item === item);
     if (!def) return res.status(400).json({ error: '未知商品' });

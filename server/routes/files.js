@@ -100,9 +100,11 @@ router.get(
       return res.status(404).json({ error: '文件不存在' });
     }
     const file = rows[0];
-    // 违规下架：flagged 文件全校不可下载（L5 修复）；但所有者本人仍可下载（需查看/修正自己的作品）
-    if (file.audit_status === 'flagged' && file.user_id !== req.user.id) {
-      return res.status(403).json({ error: '该作品因违规已被下架' });
+    // R2-5：非 reviewed（pending 待审 / flagged 违规）文件全校不可下载；所有者本人仍可下载
+    if (file.audit_status !== 'reviewed' && file.user_id !== req.user.id) {
+      return res.status(403).json({
+        error: file.audit_status === 'flagged' ? '该作品因违规已被下架' : '该作品正在审核中，暂未公开',
+      });
     }
     const absPath = path.join(config.storageDir, file.stored_name);
     if (!fs.existsSync(absPath)) {
@@ -116,15 +118,12 @@ router.get(
 // 鉴权：仅 Bearer 请求头（2026-08-20 修复：禁止 ?token= query——预览 URL 会暴露令牌，
 // 上传的 HTML 可读取自身 location.href 外传令牌，导致任意登录用户账号被窃取。
 // 前端改用 /preview.html 预览壳，经 fetch+请求头取内容、sandbox iframe 渲染）。
+// R2-13（2026-08-21）：挂 requireAuth——停用/删除用户在旧 token 过期前也无法预览。
 // 安全：响应带 CSP sandbox allow-scripts；预览壳再套一层 sandbox iframe（unique origin）。
 router.get(
   '/preview/:id',
+  requireAuth,
   asyncHandler(async (req, res) => {
-    const { verify } = require('../utils/token');
-    const header = req.headers.authorization || '';
-    const payload = header.startsWith('Bearer ') ? verify(header.slice(7)) : null;
-    if (!payload) return res.status(401).json({ error: '未登录' });
-
     const rows = await query(
       'SELECT f.* FROM files f WHERE f.id = ?',
       [req.params.id]
@@ -137,10 +136,11 @@ router.get(
     if (ext !== 'html' && ext !== 'htm') {
       return res.status(400).json({ error: '仅支持 HTML 文件预览' });
     }
-    // 违规下架：flagged 文件不可预览（L5 修复）；所有者本人除外。
-    // 注意：本路由未挂 requireAuth（自行解析 Bearer 到 payload），所有者判断用 payload.uid
-    if (file.audit_status === 'flagged' && file.user_id !== payload.uid) {
-      return res.status(403).json({ error: '该作品因违规已被下架' });
+    // R2-5：非 reviewed 文件仅所有者本人可预览
+    if (file.audit_status !== 'reviewed' && file.user_id !== req.user.id) {
+      return res.status(403).json({
+        error: file.audit_status === 'flagged' ? '该作品因违规已被下架' : '该作品正在审核中，暂未公开',
+      });
     }
     const absPath = path.join(config.storageDir, file.stored_name);
     if (!fs.existsSync(absPath)) {

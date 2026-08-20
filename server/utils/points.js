@@ -47,44 +47,12 @@ const RULES = {
  * @returns {number|null} 实际发放的积分数；已发过返回 null
  */
 async function grant(userId, reason, refId, extraAmount) {
-  let amount = bonusAmount(extraAmount != null ? extraAmount : RULES[reason]);
-  if (!amount || amount <= 0) return null;
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     // 用户行锁：串行化同一用户的并发发放，保证 REASON_CAPS 计数上限与幂等防重在并发下依然成立
     await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [userId]);
-    // 计数上限：该 reason（或共同上限组）历史发放达上限则跳过
-    // （file_submit+link_submit 合计 ≤5 个 / app_submit ≤3 个）
-    const cap = REASON_CAPS[reason];
-    if (cap) {
-      const group = CAP_GROUPS[reason] || [reason];
-      const ph = group.map(() => '?').join(',');
-      const [cntRows] = await conn.execute(
-        `SELECT COUNT(*) AS c FROM points_log WHERE user_id = ? AND reason IN (${ph})`,
-        [userId, ...group]
-      );
-      if (Number(cntRows[0].c) >= cap) {
-        // 超限：不发放积分，但写一条 +0 流水（INSERT IGNORE 按 (user,reason,ref) 幂等，同一作品只记一次），
-        // 供「我的积分记录」展示 ⓘ「超出计分规则」提示；0 行不计入发放，revoke 也不会扣回
-        await conn.execute(
-          'INSERT IGNORE INTO points_log (user_id, amount, reason, ref_id) VALUES (?, 0, ?, ?)',
-          [userId, reason, String(refId || '')]
-        );
-        await conn.commit();
-        return null;
-      }
-    }
-    // 防重：唯一索引 (user_id, reason, ref_id)，冲突则跳过
-    const [ins] = await conn.execute(
-      'INSERT IGNORE INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
-      [userId, amount, reason, String(refId || '')]
-    );
-    if (ins.affectedRows === 0) {
-      await conn.commit();
-      return null; // 已发过
-    }
-    await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [amount, userId]);
+    const amount = await grantInTx(conn, userId, reason, refId, extraAmount);
     await conn.commit();
     return amount;
   } catch (err) {
@@ -93,6 +61,40 @@ async function grant(userId, reason, refId, extraAmount) {
   } finally {
     conn.release();
   }
+}
+
+// 事务内发放积分（R2-10，2026-08-21）：与 grant 同语义（幂等 + 计数上限 + 行锁由调用方负责），
+// 供"业务记录与积分发放必须原子化"的调用方（如提交应用/注册/绑定时）在既有事务内使用。
+// 注意：调用方必须已对用户行加锁（SELECT ... FOR UPDATE）并开启事务。
+async function grantInTx(conn, userId, reason, refId, extraAmount) {
+  let amount = bonusAmount(extraAmount != null ? extraAmount : RULES[reason]);
+  if (!amount || amount <= 0) return null;
+  // 计数上限：该 reason（或共同上限组）历史发放达上限则跳过
+  const cap = REASON_CAPS[reason];
+  if (cap) {
+    const group = CAP_GROUPS[reason] || [reason];
+    const ph = group.map(() => '?').join(',');
+    const [cntRows] = await conn.execute(
+      `SELECT COUNT(*) AS c FROM points_log WHERE user_id = ? AND reason IN (${ph})`,
+      [userId, ...group]
+    );
+    if (Number(cntRows[0].c) >= cap) {
+      // 超限：写一条 +0 流水（幂等），供「我的积分记录」展示 ⓘ「超出计分规则」提示
+      await conn.execute(
+        'INSERT IGNORE INTO points_log (user_id, amount, reason, ref_id) VALUES (?, 0, ?, ?)',
+        [userId, reason, String(refId || '')]
+      );
+      return null;
+    }
+  }
+  // 防重：唯一索引 (user_id, reason, ref_id)，冲突则跳过
+  const [ins] = await conn.execute(
+    'INSERT IGNORE INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+    [userId, amount, reason, String(refId || '')]
+  );
+  if (ins.affectedRows === 0) return null; // 已发过
+  await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [amount, userId]);
+  return amount;
 }
 
 // 查询用户积分与流水
@@ -254,24 +256,7 @@ async function revoke(userId, reason, refId) {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const [logs] = await conn.execute(
-      'SELECT amount FROM points_log WHERE user_id = ? AND reason = ? AND ref_id = ?',
-      [userId, reason, refId]
-    );
-    if (logs.length === 0) {
-      await conn.commit();
-      return null;
-    }
-    const amount = Number(logs[0].amount);
-    if (amount <= 0) {
-      await conn.commit();
-      return null;
-    }
-    await conn.execute('UPDATE users SET points = points - ? WHERE id = ?', [amount, userId]);
-    await conn.execute(
-      'INSERT INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
-      [userId, -amount, reason + '_revoke', refId]
-    );
+    const amount = await revokeInTx(conn, userId, reason, refId);
     await conn.commit();
     return amount;
   } catch (err) {
@@ -280,6 +265,52 @@ async function revoke(userId, reason, refId) {
   } finally {
     conn.release();
   }
+}
+
+// 事务内撤销（供需与其他写操作原子化的调用方；conn 必须已开启事务）
+// R2-3（2026-08-21）：审核拒绝/删除等路径与状态变更放同一事务。
+async function revokeInTx(conn, userId, reason, refId) {
+  const [logs] = await conn.execute(
+    'SELECT amount FROM points_log WHERE user_id = ? AND reason = ? AND ref_id = ?',
+    [userId, reason, refId]
+  );
+  if (logs.length === 0) return null;
+  const amount = Number(logs[0].amount);
+  if (amount <= 0) return null;
+  await conn.execute('UPDATE users SET points = points - ? WHERE id = ?', [amount, userId]);
+  await conn.execute(
+    'INSERT INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+    [userId, -amount, reason + '_revoke', refId]
+  );
+  return amount;
+}
+
+// 事务内"审核通过补发"（R2-2/R2-3，2026-08-21）：
+//  1. 按原发放流水金额原样恢复——grant 时已含当时活动倍率（如 25 或 30），
+//     补发直接加回该金额，绝不再次乘当前倍率（原实现硬编码 30 且经 grant 再乘倍率：
+//     非活动期多补 5，活动期 30×1.2=36 净多得 6）；
+//  2. 幂等：同 ref 只补发一次（points_log 唯一键 + INSERT IGNORE）；
+//  3. 仅曾被回扣（存在 file_submit_revoke 流水）的文件才补发。
+async function restoreFileSubmitInTx(conn, userId, fileId) {
+  const ref = 'file:' + fileId;
+  const [rv] = await conn.execute(
+    "SELECT 1 FROM points_log WHERE user_id = ? AND reason = 'file_submit_revoke' AND ref_id = ?",
+    [userId, ref]
+  );
+  if (!rv.length) return 0;
+  const [orig] = await conn.execute(
+    "SELECT amount FROM points_log WHERE user_id = ? AND reason = 'file_submit' AND ref_id = ? ORDER BY id DESC LIMIT 1",
+    [userId, ref]
+  );
+  const amount = orig.length ? Number(orig[0].amount) : 25;
+  if (amount <= 0) return 0;
+  const [ins] = await conn.execute(
+    'INSERT IGNORE INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+    [userId, amount, 'file_submit_restore', ref + ':restore']
+  );
+  if (ins.affectedRows === 0) return 0; // 已补发过
+  await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [amount, userId]);
+  return amount;
 }
 
 /**
@@ -320,4 +351,4 @@ async function grantCapped(userId, reason, refId, amount, dailyCap) {
   }
 }
 
-module.exports = { RULES, grant, grantCapped, getPoints, spend, spendPending, settlePurchase, revoke, bonusAmount };
+module.exports = { RULES, grant, grantInTx, grantCapped, getPoints, spend, spendPending, settlePurchase, revoke, revokeInTx, restoreFileSubmitInTx, bonusAmount };

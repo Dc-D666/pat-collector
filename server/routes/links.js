@@ -31,17 +31,21 @@ function parseGitHubUrl(raw) {
   return { owner: m[1], repo };
 }
 
-// 读取仓库根目录 nanfang-pat.txt 内容。
+// 读取仓库根目录 nanfang-pat.txt 内容并与预期 token 比对。
 // 注意：本服务器在境内，raw.githubusercontent.com 不稳定（实测间歇超时），
 // 故以 jsDelivr CDN（cdn.jsdelivr.net/gh/...@HEAD 解析默认分支，境内可达）为主源，raw 兜底。
-async function fetchRepoToken(owner, repo) {
+// R2-11（2026-08-21）：按内容匹配决定是否继续尝试下一源——CDN 缓存旧内容时不直接返回，
+// 只要与预期 token 不匹配就继续尝试 raw 源（否则 CDN 缓存会导致验证持续失败）。
+async function fetchRepoToken(owner, repo, expected) {
   const sources = [
     'https://cdn.jsdelivr.net/gh/' + owner + '/' + repo + '@HEAD/nanfang-pat.txt',
     'https://raw.githubusercontent.com/' + owner + '/' + repo + '/HEAD/nanfang-pat.txt',
   ];
   for (const url of sources) {
     const txt = await fetchText(url);
-    if (txt != null) return txt; // 命中即返回（内容是否匹配由调用方比对）
+    if (txt == null) continue; // 404/网络失败：尝试下一源
+    if (txt === expected) return txt; // 内容匹配 → 验证通过
+    // 内容存在但不匹配（如 CDN 缓存旧 token）：继续尝试下一源
   }
   return null;
 }
@@ -175,7 +179,7 @@ router.post(
     const [row] = await query('SELECT * FROM links WHERE id = ? AND user_id = ?', [id, req.user.id]);
     if (!row) return res.status(404).json({ error: '链接不存在' });
     if (!row.verified) {
-      const token = await fetchRepoToken(row.owner, row.repo);
+      const token = await fetchRepoToken(row.owner, row.repo, row.verify_token);
       if (!token || token !== row.verify_token) {
         return res.status(400).json({
           error: '未找到匹配的验证文件。请在仓库根目录新建 nanfang-pat.txt，内容写入：' + row.verify_token
@@ -185,14 +189,18 @@ router.post(
       // Token 匹配（所有权 = 能 push）通过后，再查是否为 Fork：
       // Fork 的仓库任何登录用户都能 push 自己的 token，不能证明项目是本人原创，直接拒绝。
       const meta = await getRepoMeta(row.owner, row.repo);
-      if (meta && meta.fork) {
+      if (!meta) {
+        // R2-12（2026-08-21）：GitHub API 超时/限流/异常时无法确认仓库状态 → 暂缓验证（fail-closed），
+        // 避免 Fork 仓库在 API 故障或额度耗尽期间绕过"禁止 Fork"约束
+        return res.status(503).json({ error: '暂时无法确认仓库状态（GitHub API 不可达或繁忙），请稍后重试' });
+      }
+      if (meta.fork) {
         const parent = meta.parent ? '（原仓库：' + meta.parent + '）' : '';
         return res.status(400).json({
           error: '检测到该仓库是 Fork 的副本' + parent + '，无法通过验证。'
             + '请提交你自己创建的项目仓库：在 GitHub 新建仓库（不要点 Fork）后上传你自己的项目代码。',
         });
       }
-      // meta 为 null = GitHub API 暂不可达/限流 → 放行（fail-open），避免 API 故障时误伤正常验证
       await query('UPDATE links SET verified = 1, verified_at = NOW() WHERE id = ?', [id]);
     }
     // 发分（幂等：link_submit +25，最多 5 个；已认证也走 grant 补发——

@@ -94,22 +94,24 @@ router.get(
   asyncHandler(async (req, res) => {
     const [fileRows, appRows, linkRows] = await Promise.all([
       query(
+        // R2-5：仅展示已过审（reviewed）文件——pending 待审/flagged 违规均不公开；
+        // R2-6：排除停用用户（u.status = 'active'）
         `SELECT u.id AS user_id, u.class_name, u.real_name, u.show_real_name, u.nickname,
                 f.id AS file_id, f.original_name, f.title, f.description, f.gameplay, f.size, f.uploaded_at
          FROM users u
-         JOIN files f ON f.user_id = u.id AND f.audit_status <> 'flagged' AND u.qq_tiny_id IS NOT NULL`
+         JOIN files f ON f.user_id = u.id AND f.audit_status = 'reviewed' AND u.qq_tiny_id IS NOT NULL AND u.status = 'active'`
       ),
       query(
         `SELECT u.id AS user_id, u.class_name, u.real_name, u.show_real_name, u.nickname,
                 a.id AS app_id, a.app_url, a.title, a.description, a.gameplay, a.created_at
          FROM users u
-         JOIN apps a ON a.user_id = u.id AND u.qq_tiny_id IS NOT NULL`
+         JOIN apps a ON a.user_id = u.id AND u.qq_tiny_id IS NOT NULL AND u.status = 'active'`
       ),
       query(
         `SELECT u.id AS user_id, u.class_name, u.real_name, u.show_real_name, u.nickname,
                 l.id AS link_id, l.url, l.title, l.description, l.owner, l.repo, l.verified, l.created_at
          FROM users u
-         JOIN links l ON l.user_id = u.id AND l.verified = 1 AND u.qq_tiny_id IS NOT NULL`
+         JOIN links l ON l.user_id = u.id AND l.verified = 1 AND u.qq_tiny_id IS NOT NULL AND u.status = 'active'`
       ),
     ]);
 
@@ -213,24 +215,25 @@ router.get(
   asyncHandler(async (req, res) => {
     const [fileRows, appRows, linkRows] = await Promise.all([
       query(
+        // R2-5/R2-6：仅已过审文件 + 仅活跃用户
         `SELECT u.class_name, u.id AS user_id, u.real_name, u.show_real_name, u.nickname,
                 f.id AS file_id, f.original_name, f.title, f.size, f.uploaded_at
          FROM users u
-         JOIN files f ON f.user_id = u.id AND f.audit_status <> 'flagged' AND u.qq_tiny_id IS NOT NULL
+         JOIN files f ON f.user_id = u.id AND f.audit_status = 'reviewed' AND u.qq_tiny_id IS NOT NULL AND u.status = 'active'
          ORDER BY u.class_name ASC, u.real_name ASC, f.uploaded_at DESC, f.id DESC`
       ),
       query(
         `SELECT u.class_name, u.id AS user_id, u.real_name, u.show_real_name, u.nickname,
                 a.id AS app_id, a.app_url, a.title, a.description, a.gameplay, a.created_at
          FROM users u
-         JOIN apps a ON a.user_id = u.id AND u.qq_tiny_id IS NOT NULL
+         JOIN apps a ON a.user_id = u.id AND u.qq_tiny_id IS NOT NULL AND u.status = 'active'
          ORDER BY u.class_name ASC, u.real_name ASC, a.created_at DESC, a.id DESC`
       ),
       query(
         `SELECT u.class_name, u.id AS user_id, u.real_name, u.show_real_name, u.nickname,
                 l.id AS link_id, l.url, l.title, l.description, l.verified, l.created_at
          FROM users u
-         JOIN links l ON l.user_id = u.id AND l.verified = 1 AND u.qq_tiny_id IS NOT NULL
+         JOIN links l ON l.user_id = u.id AND l.verified = 1 AND u.qq_tiny_id IS NOT NULL AND u.status = 'active'
          ORDER BY u.class_name ASC, u.real_name ASC, l.created_at DESC, l.id DESC`
       ),
     ]);

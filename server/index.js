@@ -32,6 +32,18 @@ startJobs();
 
 const app = express();
 app.disable('x-powered-by');
+// R2-15（2026-08-21）：全站基础安全响应头——点击劫持（X-Frame-Options）、
+// MIME 嗅探（nosniff）、Referer 泄露（no-referrer）、浏览器能力滥用（Permissions-Policy）、HSTS。
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
+  });
+  next();
+});
 // 经 nginx 反代（deploy/pat.weaxi.cn.conf 已设 X-Forwarded-For）：开启后 req.ip 才取真实客户端 IP，
 // 否则所有基于 IP 的速率限制退化为全局单桶（全部命中 127.0.0.1）。
 // 只信任一跳（本机 nginx），服务本身仅监听 127.0.0.1。

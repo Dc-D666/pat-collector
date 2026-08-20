@@ -5,14 +5,14 @@ const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
 const config = require('../config');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { issue } = require('../utils/token');
 const { asyncHandler } = require('../utils/async');
 const { runCli, runCliCaptureRaw, extractOwnTinyId } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { rateLimit } = require('../utils/rateLimit');
 const { requireAuth } = require('../middleware/auth');
-const { grant } = require('../utils/points');
+const { grantInTx } = require('../utils/points');
 const { pinyinCandidates } = require('../utils/pinyin');
 
 const router = express.Router();
@@ -441,43 +441,71 @@ router.post(
       return res.status(400).json({ error: '姓名需为 2-4 个汉字，且不能包含英文字符、数字或符号' });
     }
 
-    const byName = await query(
-      'SELECT * FROM users WHERE class_name = ? AND real_name = ?',
-      [class_name, real_name]
-    );
-    if (byName.length > 0) {
-      const u = byName[0];
-      // 停用用户：拒绝绑定登录
-      if (u.status !== 'active') {
-        return res.status(403).json({ error: '账号已停用' });
+    // R2-9/R2-10（2026-08-21）：接管访客身份 / 新建用户与首次登录奖励放同一事务，
+    // 行锁 + 条件更新防两个 QQ 会话并发绑定同一身份；发分不再与建号分离（防永久漏发）。
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [byName] = await conn.execute(
+        'SELECT * FROM users WHERE class_name = ? AND real_name = ? FOR UPDATE',
+        [class_name, real_name]
+      );
+      if (byName.length > 0) {
+        const u = byName[0];
+        // 停用用户：拒绝绑定登录
+        if (u.status !== 'active') {
+          await conn.rollback(); conn.release();
+          return res.status(403).json({ error: '账号已停用' });
+        }
+        if (u.qq_tiny_id && u.qq_tiny_id !== s.tiny_id) {
+          await conn.rollback(); conn.release();
+          return res.status(409).json({ error: '该姓名已绑定其他 QQ，请勿冒用' });
+        }
+        // 接管访客身份：清除遗留的 guest 凭据（L2），并作废旧 guest_token（防遗留后门）。
+        // 条件更新：仅当 qq_tiny_id 仍为空才接管——并发第二个会话 affectedRows=0 → 409
+        const [upd] = await conn.execute(
+          'UPDATE users SET qq_tiny_id = ?, guest_token = NULL, guest_pwd_hash = NULL WHERE id = ? AND qq_tiny_id IS NULL',
+          [s.tiny_id, u.id]
+        );
+        if (upd.affectedRows === 0) {
+          await conn.rollback(); conn.release();
+          return res.status(409).json({ error: '该姓名刚刚已被其他 QQ 绑定，请刷新后重试' });
+        }
+        await conn.commit();
+        conn.release();
+        u.qq_tiny_id = s.tiny_id;
+        await maybeGrantAdmin(u.id, s.tiny_id);
+        await linkSession(sessionId, u.id);
+        const fresh = await query('SELECT * FROM users WHERE id = ?', [u.id]);
+        return res.json({ token: issue(u.id), user: publicUser(fresh[0]) });
       }
-      if (u.qq_tiny_id && u.qq_tiny_id !== s.tiny_id) {
-        return res.status(409).json({ error: '该姓名已绑定其他 QQ，请勿冒用' });
-      }
-      // 接管访客身份：清除遗留的 guest 凭据——QQ 绑定后该身份不再允许访客登记（L2），
-      // 旧 guest_token 若曾被分享/冒名获取，继续有效等于遗留后门，一并作废（该用户此后用 QQ 登录）
-      await query('UPDATE users SET qq_tiny_id = ?, guest_token = NULL, guest_pwd_hash = NULL WHERE id = ?', [s.tiny_id, u.id]);
-      u.qq_tiny_id = s.tiny_id;
-      await maybeGrantAdmin(u.id, s.tiny_id);
-      await linkSession(sessionId, u.id);
-      const fresh = await query('SELECT * FROM users WHERE id = ?', [u.id]);
-      return res.json({ token: issue(u.id), user: publicUser(fresh[0]) });
-    }
 
-    const result = await query(
-      'INSERT INTO users (class_name, real_name, qq_tiny_id, show_real_name, nickname) VALUES (?, ?, ?, ?, ?)',
-      [class_name, real_name, s.tiny_id, showReal ? 1 : 0, nickname]
-    );
-    const created = { id: result.insertId, class_name, real_name, qq_tiny_id: s.tiny_id, show_real_name: showReal ? 1 : 0, nickname, points: 0, created_at: new Date() };
-    // 首次登录奖励
-    await grant(created.id, 'first_login', 'once');
-    await maybeGrantAdmin(created.id, s.tiny_id);
-    const fresh = await query('SELECT points, is_admin, status FROM users WHERE id = ?', [created.id]);
-    created.points = fresh.length ? fresh[0].points : 0;
-    created.is_admin = fresh.length ? fresh[0].is_admin : 0;
-    created.status = fresh.length ? fresh[0].status : 'active';
-    await linkSession(sessionId, created.id);
-    return res.json({ token: issue(created.id), user: publicUser(created) });
+      // 新建用户 + 首次登录奖励同一事务（R2-10；uq_name 唯一键兜底并发双插）
+      const result = await conn.execute(
+        'INSERT INTO users (class_name, real_name, qq_tiny_id, show_real_name, nickname) VALUES (?, ?, ?, ?, ?)',
+        [class_name, real_name, s.tiny_id, showReal ? 1 : 0, nickname]
+      );
+      const createdId = result[0].insertId;
+      await grantInTx(conn, createdId, 'first_login', 'once');
+      await conn.commit();
+      conn.release();
+
+      const created = { id: createdId, class_name, real_name, qq_tiny_id: s.tiny_id, show_real_name: showReal ? 1 : 0, nickname, points: 0, created_at: new Date() };
+      await maybeGrantAdmin(createdId, s.tiny_id);
+      const fresh = await query('SELECT points, is_admin, status FROM users WHERE id = ?', [createdId]);
+      created.points = fresh.length ? fresh[0].points : 0;
+      created.is_admin = fresh.length ? fresh[0].is_admin : 0;
+      created.status = fresh.length ? fresh[0].status : 'active';
+      await linkSession(sessionId, createdId);
+      return res.json({ token: issue(createdId), user: publicUser(created) });
+    } catch (err) {
+      try { await conn.rollback(); } catch (_) { /* ignore */ }
+      conn.release();
+      if (err.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ error: '该姓名已被注册，请刷新后重试' });
+      }
+      throw err;
+    }
   })
 );
 

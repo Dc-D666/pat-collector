@@ -3,11 +3,11 @@
 const crypto = require('crypto');
 const express = require('express');
 const config = require('../config');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../utils/rateLimit');
-const { grant } = require('../utils/points');
+const { grantInTx } = require('../utils/points');
 const { hashPassword } = require('../utils/pwd');
 const { pinyinCandidates } = require('../utils/pinyin');
 
@@ -166,13 +166,32 @@ router.post(
         return res.status(429).json({ error: '当前访客登记人数过多，请稍后再试（班级统一登记可联系频道主）' });
       }
       guestRegTimes.push(now);
-      const result = await query(
-        'INSERT INTO users (class_name, real_name, show_real_name, nickname, guest_pwd_hash) VALUES (?, ?, ?, ?, ?)',
-        [class_name, real_name, showReal ? 1 : 0, nickname, guestPwdHash]
-      );
-      // 首次登录奖励（与旧流程一致；访客积分在系统内可见，直传本身不展示）
-      await grant(result.insertId, 'first_login', 'once');
-      const fresh = await query('SELECT * FROM users WHERE id = ?', [result.insertId]);
+      // R2-10（2026-08-21）：建号与首次登录奖励放同一事务——发分失败不再导致"身份已建但奖励永久漏发"
+      const conn = await pool.getConnection();
+      let insertedId = 0;
+      try {
+        await conn.beginTransaction();
+        const result = await conn.execute(
+          'INSERT INTO users (class_name, real_name, show_real_name, nickname, guest_pwd_hash) VALUES (?, ?, ?, ?, ?)',
+          [class_name, real_name, showReal ? 1 : 0, nickname, guestPwdHash]
+        );
+        insertedId = result[0].insertId;
+        await grantInTx(conn, insertedId, 'first_login', 'once');
+        await conn.commit();
+      } catch (err) {
+        try { await conn.rollback(); } catch (_) { /* ignore */ }
+        if (err.code === 'ER_DUP_ENTRY') {
+          // 并发同姓名双插（uq_name）：复用已存在身份（幂等找回），不视为失败
+          const dup = await query('SELECT * FROM users WHERE class_name = ? AND real_name = ?', [class_name, real_name]);
+          if (dup.length) { insertedId = dup[0].id; }
+          else { conn.release(); throw err; }
+        } else {
+          conn.release();
+          throw err;
+        }
+      }
+      conn.release();
+      const fresh = await query('SELECT * FROM users WHERE id = ?', [insertedId]);
       row = fresh[0];
     }
 

@@ -9,7 +9,7 @@ const { rateLimit } = require('../utils/rateLimit');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { extractLinks, resolveShare } = require('../qq/feed-links');
-const { grant, revoke } = require('../utils/points');
+const { grantInTx, revoke } = require('../utils/points');
 const { auditDisplayText } = require('../utils/audit');
 
 const router = express.Router();
@@ -203,6 +203,11 @@ router.post(
         [req.user.id, app_url, title, description, gameplay, sourceFeedId]
       );
       result = { insertId: ins[0].insertId };
+      // R2-10（2026-08-21）：提交积分与记录同事务——发分失败不再导致"应用已存在但奖励永久漏发"
+      // （此前提交后单独 grant，失败 500 且重试被去重拦截）
+      if (sourceFeedId) {
+        await grantInTx(conn, req.user.id, 'app_submit', 'app:' + result.insertId);
+      }
       await conn.commit();
     } catch (err) {
       try { await conn.rollback(); } catch (_) { /* ignore */ }
@@ -211,12 +216,8 @@ router.post(
     }
     conn.release();
     const inserted = await query('SELECT created_at FROM apps WHERE id = ?', [result.insertId]);
-    // 提交 AI 轻应用奖励（每个作品一次）。
-    // 2026-08-21 防刷分：仅"带来源帖（识别导入，已核验归属）"的应用发积分——
-    // 不带来源的手动添加（任意链接）不发放，防提交无关链接刷 app_submit（最多 3 次 × 15⭐）
-    if (sourceFeedId) {
-      await grant(req.user.id, 'app_submit', 'app:' + result.insertId);
-    }
+    // 提交 AI 轻应用奖励已在事务内发放（见上 grantInTx）：
+    // 仅"带来源帖（识别导入，已核验归属）"的应用发积分，不带来源的手动添加不发放（防刷分）
     res.json({
       app: {
         id: result.insertId, app_url, title, description, gameplay, source_feed_id: sourceFeedId,
