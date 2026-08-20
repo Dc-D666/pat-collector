@@ -120,6 +120,7 @@ async function getPoints(userId) {
     file_submit_revoke: '删除作品文件（回扣）',
     app_submit_revoke: '删除轻应用（回扣）',
     link_submit_revoke: '删除 GitHub 项目（回扣）',
+    purchase_refund: '频道操作失败退款',
   };
   return {
     points: rows.length ? rows[0].points : 0,
@@ -161,6 +162,82 @@ async function spend(userId, { item, cost, refType = '', refId = 0, feedId = '',
     );
     await conn.commit();
     return { ok: true, points: balance - cost, purchase_id: ins.insertId };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+/**
+ * 频道类兑换两阶段——第一阶段：原子预扣积分 + 创建 pending 记录（P1 修复，2026-08-21）。
+ * 原流程先执行外部频道操作再扣分，余额不足/DB 失败时频道操作已完成却无购买记录（免费兑换）。
+ * 现在先预扣，外部操作成功后转 active，失败退款（见 settlePurchase）。
+ * @returns {{ok: boolean, points: number, purchase_id?: number} | {ok:false, error:string}}
+ */
+async function spendPending(userId, { item, cost, refType = '', refId = 0, feedId = '', feedExtra = '', title = '', expiresAt = null }) {
+  if (!cost || cost <= 0) return { ok: false, error: '参数错误' };
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.execute('SELECT points FROM users WHERE id = ? FOR UPDATE', [userId]);
+    const balance = rows.length ? Number(rows[0].points) : 0;
+    if (balance < cost) {
+      await conn.rollback();
+      return { ok: false, error: '积分不足' };
+    }
+    await conn.execute('UPDATE users SET points = points - ? WHERE id = ?', [cost, userId]);
+    await conn.execute(
+      'INSERT INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+      [userId, -cost, 'purchase', item + ':' + (refId || title || feedId || 'x')]
+    );
+    const [ins] = await conn.execute(
+      `INSERT INTO purchases (user_id, item, cost, ref_type, ref_id, feed_id, feed_extra, title, status, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [userId, item, cost, refType, refId, feedId, feedExtra, title, expiresAt]
+    );
+    await conn.commit();
+    return { ok: true, points: balance - cost, purchase_id: ins.insertId };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+/**
+ * 频道类兑换两阶段——第二阶段：结算（P1 修复）。
+ * ok=true → pending 转 active；ok=false → 退款（加回积分 + 记流水）+ 标记 cancelled。
+ * 仅 pending 状态可结算（幂等：重复调用不重复退款）。
+ * @returns {{settled: boolean, user_id?: number, cost?: number}}
+ */
+async function settlePurchase(purchaseId, ok) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [rows] = await conn.execute(
+      "SELECT user_id, cost FROM purchases WHERE id = ? AND status = 'pending' FOR UPDATE",
+      [purchaseId]
+    );
+    if (rows.length === 0) {
+      await conn.commit();
+      return { settled: false }; // 非 pending（已结算/不存在）
+    }
+    const { user_id: uid, cost } = rows[0];
+    if (ok) {
+      await conn.execute("UPDATE purchases SET status = 'active' WHERE id = ?", [purchaseId]);
+    } else {
+      await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [cost, uid]);
+      await conn.execute(
+        'INSERT INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+        [uid, cost, 'purchase_refund', 'purchase:' + purchaseId]
+      );
+      await conn.execute("UPDATE purchases SET status = 'cancelled' WHERE id = ?", [purchaseId]);
+    }
+    await conn.commit();
+    return { settled: true, user_id: uid, cost };
   } catch (err) {
     await conn.rollback();
     throw err;
@@ -243,4 +320,4 @@ async function grantCapped(userId, reason, refId, amount, dailyCap) {
   }
 }
 
-module.exports = { RULES, grant, grantCapped, getPoints, spend, revoke, bonusAmount };
+module.exports = { RULES, grant, grantCapped, getPoints, spend, spendPending, settlePurchase, revoke, bonusAmount };

@@ -589,28 +589,6 @@ function judgeTotal(scores) {
   return Math.round(t * 100) / 100;
 }
 
-// 发放/回补评审积分（delta 可为负）；事务 + 用户行锁；限时 1.2 倍只作用于正向发放
-async function applyJudgePoints(userId, delta, ref) {
-  if (!delta) return;
-  delta = bonusAmount(delta);
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [userId]);
-    await conn.execute(
-      'INSERT INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
-      [userId, delta, 'judge_review', ref]
-    );
-    await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [delta, userId]);
-    await conn.commit();
-  } catch (e) {
-    try { await conn.rollback(); } catch (_) { /* ignore */ }
-    throw e;
-  } finally {
-    conn.release();
-  }
-}
-
 // 查询单个项目评审（预填用）或最近评审列表
 router.get('/judge', asyncHandler(async (req, res) => {
   const refType = String(req.query.ref_type || '');
@@ -662,6 +640,9 @@ router.get('/judge', asyncHandler(async (req, res) => {
 }));
 
 // 提交/覆盖评审：打分 → 自动折算 → 发放/回补积分
+// P2 修复（2026-08-21）：评审更新与积分差额发放放进同一事务（锁评审行 + 锁作者用户行）。
+// 原实现先更新 judge_reviews 再单独发分——发分失败时重提同一评分 delta=0 永久漏发；
+// 两个管理员并发评审还会重复发放差额。现在原子化：delta 在行锁下计算，差额随事务提交。
 router.post('/judge', asyncHandler(async (req, res) => {
   const refType = String((req.body && req.body.ref_type) || '');
   const refId = parseInt(req.body && req.body.ref_id, 10);
@@ -681,33 +662,59 @@ router.post('/judge', asyncHandler(async (req, res) => {
   const ownerId = ownerRows[0].user_id;
 
   const points = total < 6 ? 0 : Math.round(Math.round(total * 100) * 30 / 100); // 整数化防浮点漂移
-  const existing = await query(
-    'SELECT id, points FROM judge_reviews WHERE ref_type = ? AND ref_id = ?',
-    [refType, refId]
-  );
-  const oldPoints = existing.length ? Number(existing[0].points) : 0;
-  const delta = points - oldPoints;
-
   const scoresJson = JSON.stringify({
     creativity: Number(scores.creativity), content: Number(scores.content),
     completeness: Number(scores.completeness), values: Number(scores.values),
   });
-  if (existing.length) {
-    await query(
-      'UPDATE judge_reviews SET scores = ?, total = ?, points = ?, judge_user_id = ? WHERE id = ?',
-      [scoresJson, total, points, req.user.id, existing[0].id]
+
+  const conn = await pool.getConnection();
+  let delta = 0;
+  try {
+    await conn.beginTransaction();
+    // 锁作者用户行：串行化同一作者的并发评审（防重复发放差额）
+    await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [ownerId]);
+    // 锁评审行（存在则锁；首次提交依赖 uq_judge 防并发双插）
+    const [existing] = await conn.execute(
+      'SELECT id, points FROM judge_reviews WHERE ref_type = ? AND ref_id = ? FOR UPDATE',
+      [refType, refId]
     );
-  } else {
-    const ins = await query(
-      'INSERT INTO judge_reviews (ref_type, ref_id, scores, total, points, judge_user_id, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [refType, refId, scoresJson, total, points, req.user.id, ownerId]
-    );
-    existing[0] = { id: ins.insertId };
+    const oldPoints = existing.length ? Number(existing[0].points) : 0;
+    delta = points - oldPoints;
+    let reviewId;
+    if (existing.length) {
+      await conn.execute(
+        'UPDATE judge_reviews SET scores = ?, total = ?, points = ?, judge_user_id = ? WHERE id = ?',
+        [scoresJson, total, points, req.user.id, existing[0].id]
+      );
+      reviewId = existing[0].id;
+    } else {
+      const ins = await conn.execute(
+        'INSERT INTO judge_reviews (ref_type, ref_id, scores, total, points, judge_user_id, owner_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [refType, refId, scoresJson, total, points, req.user.id, ownerId]
+      );
+      reviewId = ins[0].insertId;
+    }
+    // 同事务发/回补差额（限时加成只作用于正向；delta=0 不写流水）
+    if (delta !== 0) {
+      const applied = bonusAmount(delta);
+      await conn.execute(
+        'INSERT INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+        [ownerId, applied, 'judge_review', 'judge:' + reviewId + ':' + Date.now()]
+      );
+      await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [applied, ownerId]);
+    }
+    await conn.commit();
+  } catch (err) {
+    try { await conn.rollback(); } catch (_) { /* ignore */ }
+    conn.release();
+    // 并发双插撞 uq_judge：让评委重试（重试时读到已存在行，delta 正确计算）
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: '该作品正在被其他评委评审，请稍后重试' });
+    }
+    throw err;
   }
-  // 差额发放（ref 带时间戳保证 points_log 唯一键不冲突）
-  if (delta !== 0) {
-    await applyJudgePoints(ownerId, delta, refType + ':' + refId + ':j' + Date.now());
-  }
+  conn.release();
+
   await writeAdminLog(req.user.id, 'judge.review', refType, refId, {
     scores: scoresJson, total, points, delta, reason: '评委评审',
   });

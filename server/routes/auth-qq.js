@@ -2,6 +2,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const express = require('express');
 const config = require('../config');
 const { query } = require('../db');
@@ -40,6 +41,12 @@ async function maybeGrantAdmin(userId, tinyId) {
 }
 
 const ipKey = (req) => req.ip || req.connection.remoteAddress || 'unknown';
+
+// P0 修复（2026-08-21）：bind_secret 仅在 /init 响应中返回给发起登录的浏览器，
+// 不落库、不随 ticket 外发；/poll 与 /bind 必须同时携带它，防止泄露的会话 ID 直接换 token。
+function checkBindSecret(s, body) {
+  return !!(s && s.bind_secret && String((body && body.bind_secret) || '') === s.bind_secret);
+}
 
 // 检查当前用户 QQ 会话是否仍有效（单设备登录被踢后 token 失效）；失效则清理会话
 router.get('/status', requireAuth, asyncHandler(async (req, res) => {
@@ -85,6 +92,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const sessionId = qqSessions.createSession();
     const s = qqSessions.getSession(sessionId);
+    // P0 修复（2026-08-21）：bind_secret 只保存在发起登录的浏览器里，
+    // /poll 与 /bind 必须同时提供——仅凭泄露的会话 ID 无法换取 Bearer token。
+    s.bind_secret = crypto.randomBytes(16).toString('hex');
     const qrcodePath = path.join(s.homeDir, 'login-qrcode.png');
     const env = qqSessions.sessionEnv(s);
     const result = await runCli(['login', '--yes', `--qrcode-path=${qrcodePath}`], 30000, env);
@@ -104,6 +114,7 @@ router.post(
     }
     return res.json({
       session: sessionId,
+      bind_secret: s.bind_secret,
       verification_uri: (result.data && result.data.verification_uri) || '',
       qrcode_base64: qrcodeBase64,
       expires_in_s: (result.data && result.data.expires_in_s) || 120,
@@ -269,6 +280,7 @@ router.post(
     if (!sessionId) return res.status(400).json({ error: 'Missing session' });
     const s = qqSessions.getSession(sessionId);
     if (!s) return res.status(404).json({ error: '会话已过期，请重新扫码' });
+    if (!checkBindSecret(s, req.body)) return res.status(401).json({ error: '登录凭据失效，请重新扫码授权' });
     if (s.token_obtained) {
       // 快捷分支：已授权。但若 tiny_id 缺失（上次反查失败），必须重查，
       // 否则前端拿到 authorized 但 bind 仍失败 → 用户看到的"弹表单又报扫码"循环
@@ -352,6 +364,10 @@ router.post(
     const s = qqSessions.getSession(sessionId);
     if (!s || !s.token_obtained) {
       return res.status(401).json({ error: '请先完成扫码授权' });
+    }
+    // P0：凭据校验——仅凭泄露的会话 ID（如从 ticket/日志/URL 获得）无法绑定登录
+    if (!checkBindSecret(s, req.body)) {
+      return res.status(401).json({ error: '登录凭据失效，请重新扫码授权' });
     }
 
     // 兜底：tiny_id 缺失时（poll 阶段反查失败/超时），用会话真实 token 再查一次

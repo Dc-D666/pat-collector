@@ -100,13 +100,15 @@ window.API = (() => {
 
   // 上传（带实时进度）：XMLHttpRequest 支持 upload.onprogress，可显示已传/总字节与速度。
   // 注意：不设超时——单文件最大 200MB，慢网速下可能传很久（fetch 版的 15s 超时不适用于上传）。
-  function uploadWithProgress(path, formData, onProgress) {
+  // extraHeaders：额外请求头（如访客上传的 x-guest-token）
+  function uploadWithProgress(path, formData, onProgress, extraHeaders) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', path);
       const token = getToken();
       const hadToken = !!token;
       if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+      for (const [k, v] of Object.entries(extraHeaders || {})) xhr.setRequestHeader(k, v);
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
       };

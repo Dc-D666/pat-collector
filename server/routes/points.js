@@ -6,7 +6,7 @@ const { query } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../utils/rateLimit');
-const { grant, grantCapped, getPoints, spend } = require('../utils/points');
+const { grant, grantCapped, getPoints, spend, spendPending, settlePurchase } = require('../utils/points');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { checkElapsed } = require('../utils/readTimer');
@@ -18,7 +18,11 @@ const router = express.Router();
 const LIKE_GIVE_DAILY = 10; // 主动点赞者每日积分上限（每次 +2⭐）
 const LIKE_RECEIVE_DAILY = 20; // 作品被赞作者每日积分上限（P3：每个赞 +5⭐，日上限 20）
 
+const HOUR_MS = 3600 * 1000;
+
 // ---- 积分商城（价格/说明集中在此，前端从 /api/points/shop 拉取）----
+// P1 修复（2026-08-21）：durationMs 直接配置毫秒数，不再解析展示文本
+// （原 "24 小时" 被算成 24 天：duration.includes('天')?30:24 → 24*24h=576h）。
 const SHOP = [
   {
     item: 'wall_top',
@@ -26,6 +30,7 @@ const SHOP = [
     desc: '你的作品在「全校作品展」顶部置顶展示 24 小时（选一个自己的文件或轻应用）',
     cost: 100,
     duration: '24 小时',
+    durationMs: 24 * HOUR_MS,
     target: 'file|app',
   },
   {
@@ -34,6 +39,7 @@ const SHOP = [
     desc: '你发表在 QQ 频道的帖子置顶 24 小时（需要 QQ 频道登录，帖子需为本人发布）',
     cost: 150,
     duration: '24 小时',
+    durationMs: 24 * HOUR_MS,
     target: 'app',
     need_feed: true,
   },
@@ -43,6 +49,7 @@ const SHOP = [
     desc: '你发表在 QQ 频道的帖子设为精华 24 小时（需要 QQ 频道登录）',
     cost: 100,
     duration: '24 小时',
+    durationMs: 24 * HOUR_MS,
     target: 'app',
     need_feed: true,
   },
@@ -52,11 +59,10 @@ const SHOP = [
     desc: '昵称旁展示自定义称号（如「AI 新星」），作品墙 / 总览 / 排行榜均可见',
     cost: 60,
     duration: '30 天',
+    durationMs: 30 * 24 * HOUR_MS,
     target: 'text',
   },
 ];
-
-const HOUR_MS = 3600 * 1000;
 
 const ipKey = (req) => req.ip || req.connection.remoteAddress || 'unknown';
 
@@ -211,7 +217,13 @@ router.post(
     const task = list[taskIndex];
     if (!task) return res.status(400).json({ error: '任务不存在' });
 
-    // 服务端核验该任务的真实完成条件（选择题答案 / NFTI 体验 / 频道发帖 / 项目上传 / tiny_id）
+    // P2 修复（2026-08-21）：选择题统一走 /api/points/quiz（带防试错冷却），
+    // /task 拒绝 quiz 类型——否则可通过 /task 直接提交答案无限试错绕过冷却。
+    if (task.type === 'quiz') {
+      return res.status(400).json({ error: '选择题请直接在题目下方作答（服务端判分）' });
+    }
+
+    // 服务端核验该任务的真实完成条件（NFTI 体验 / 频道发帖 / 项目上传 / tiny_id 等）
     const vr = await verifyTaskCompletion(task, req.user, req.body);
     if (!vr.ok) return res.status(400).json({ error: vr.error });
 
@@ -479,6 +491,9 @@ async function verifyOwnFeedWithTs(feedId, s, env) {
 }
 
 // ---- 积分兑换 ----
+// P1 修复（2026-08-21）：频道类（置顶/加精）改为两阶段——
+// 先原子预扣积分并创建 pending 记录 → 再执行外部频道操作 → 成功转 active / 失败退款，
+// 杜绝"外部操作已生效但余额不足/DB 失败导致免费兑换且无记录可回收"。
 router.post(
   '/purchase',
   requireAuth,
@@ -493,12 +508,12 @@ router.post(
     let channelMeta = ''; // 频道类兑换的帖子元数据（取消置顶需要 create_time）
 
     // 校验目标归属
+    let feedId = '';
     if (def.target.includes('file') || def.target.includes('app')) {
       if (!['file', 'app'].includes(refType) || !refId) {
         return res.status(400).json({ error: '请选择要生效的作品' });
       }
       let owner = null;
-      let feedId = '';
       if (refType === 'file') {
         const rows = await query('SELECT user_id FROM files WHERE id = ?', [refId]);
         if (rows.length === 0) return res.status(404).json({ error: '作品不存在' });
@@ -510,42 +525,6 @@ router.post(
         feedId = rows[0].source_feed_id || '';
       }
       if (owner !== req.user.id) return res.status(403).json({ error: '只能对自己的作品使用' });
-
-      // 频道类（置顶/精华）：需要 QQ 会话 + 帖子 BID
-      if (def.need_feed) {
-        if (!feedId) {
-          return res.status(400).json({ error: '该轻应用没有关联的频道帖子，无法置顶/加精华（请用「自动识别」提交的轻应用）' });
-        }
-        const s = await getUserSession(req.user.id);
-        if (!s) {
-          return res.status(400).json({ error: '需要 QQ 频道登录才能操作频道帖子，请重新扫码登录' });
-        }
-        const env = qqSessions.sessionEnv(s);
-        const verify = await verifyOwnFeedWithTs(feedId, s, env);
-        if (!verify.ok) {
-          return res.status(403).json({ error: '无法确认该帖子是你发布的（可能已删除或非本人），请先到「我的项目」重新识别' });
-        }
-        // 先执行频道操作，成功才扣积分
-        let cliArgs = [];
-        if (item === 'app_top') {
-          cliArgs = [
-            'feed', 'top-feed',
-            '--feed-id=' + feedId,
-            '--user-id=' + verify.author_id,
-            '--create-time=' + verify.create_time,
-            '--guild-id=' + config.guildId,
-            '--action=1',
-          ];
-        } else if (item === 'app_essence') {
-          cliArgs = ['feed', 'set-feed-essence', '--feed-id=' + feedId, '--action=1'];
-        }
-        const cliRes = await runCli(cliArgs, 20000, env);
-        if (!cliRes || cliRes.success === false) {
-          const msg = (cliRes && cliRes.error && cliRes.error.message) || '频道操作失败（可能没有管理权限）';
-          return res.status(502).json({ error: msg });
-        }
-        channelMeta = JSON.stringify({ create_time: verify.create_time, author_id: verify.author_id });
-      }
     }
 
     // 称号类：文本校验
@@ -554,15 +533,73 @@ router.post(
       if (title.length > 16) return res.status(400).json({ error: '称号最多 16 个字' });
     }
 
-    const expiresAt = new Date(Date.now() + (def.duration.includes('天') ? 30 : 24) * 24 * HOUR_MS);
+    // P1：有效期直接取配置的 durationMs（不再解析展示文本）
+    const expiresAt = new Date(Date.now() + def.durationMs);
+
+    // 频道类：两阶段兑换
+    if (def.need_feed) {
+      if (!feedId) {
+        return res.status(400).json({ error: '该轻应用没有关联的频道帖子，无法置顶/加精华（请用「自动识别」提交的轻应用）' });
+      }
+      const s = await getUserSession(req.user.id);
+      if (!s) {
+        return res.status(400).json({ error: '需要 QQ 频道登录才能操作频道帖子，请重新扫码登录' });
+      }
+      const env = qqSessions.sessionEnv(s);
+      const verify = await verifyOwnFeedWithTs(feedId, s, env);
+      if (!verify.ok) {
+        return res.status(403).json({ error: '无法确认该帖子是你发布的（可能已删除或非本人），请先到「我的项目」重新识别' });
+      }
+      channelMeta = JSON.stringify({ create_time: verify.create_time, author_id: verify.author_id });
+
+      // 阶段一：原子预扣积分 + 创建 pending 记录
+      const pending = await spendPending(req.user.id, {
+        item: def.item,
+        cost: def.cost,
+        refType,
+        refId,
+        feedId,
+        feedExtra: channelMeta,
+        title: '',
+        expiresAt,
+      });
+      if (!pending.ok) return res.status(400).json({ error: pending.error });
+
+      // 阶段二：执行外部频道操作；失败退款
+      let cliArgs = [];
+      if (item === 'app_top') {
+        cliArgs = [
+          'feed', 'top-feed',
+          '--feed-id=' + feedId,
+          '--user-id=' + verify.author_id,
+          '--create-time=' + verify.create_time,
+          '--guild-id=' + config.guildId,
+          '--action=1',
+        ];
+      } else if (item === 'app_essence') {
+        cliArgs = ['feed', 'set-feed-essence', '--feed-id=' + feedId, '--action=1'];
+      }
+      let cliRes = null;
+      try {
+        cliRes = await runCli(cliArgs, 20000, env);
+      } catch (_) { /* 按失败处理 */ }
+      if (!cliRes || cliRes.success === false) {
+        const msg = (cliRes && cliRes.error && cliRes.error.message) || '频道操作失败（可能没有管理权限）';
+        await settlePurchase(pending.purchase_id, false); // 退款 + cancelled
+        return res.status(502).json({ error: msg });
+      }
+      await settlePurchase(pending.purchase_id, true); // 转 active（幂等）
+      return res.json({ ok: true, points: pending.points, purchase_id: pending.purchase_id, expires_at: expiresAt });
+    }
+
+    // 普通类（wall_top / title）：单阶段直接扣分
     const result = await spend(req.user.id, {
       item: def.item,
       cost: def.cost,
       refType: def.target.includes('file') || def.target.includes('app') ? refType : '',
       refId: def.target.includes('file') || def.target.includes('app') ? refId : 0,
-      feedId: def.need_feed ? feedId : '',
-      // 频道类存帖子元数据（取消置顶需要 create_time）
-      feedExtra: channelMeta,
+      feedId: '',
+      feedExtra: '',
       title: item === 'title' ? title : '',
       expiresAt,
     });

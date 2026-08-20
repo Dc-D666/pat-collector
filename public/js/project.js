@@ -222,12 +222,12 @@ Views.project = (token) => {
       const f = files[i];
       const fd = new FormData();
       fd.append('file', f);
-      fd.append('token', tk);
+      // 令牌走 x-guest-token 请求头（P1：服务端在 multer 落盘前校验，不再放 multipart body）
       const tracker = Utils.createSpeedTracker();
       try {
         const up = await API.uploadWithProgress('/api/guest/upload', fd, (loaded, total) => {
           setProg(i, Utils.formatProgress(loaded, total, tracker(loaded)));
-        });
+        }, { 'x-guest-token': tk });
         setStatus(i, '✅');
         setProg(i, '已完成');
         ok++;

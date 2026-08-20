@@ -103,8 +103,8 @@ Views.login = () => {
 
   // ---- 移动端 OAuth 回调恢复：跳 connect.qq.com 授权再跳回时页面刷新会丢 session，用 localStorage 恢复 ----
   const PENDING_OAUTH_KEY = 'patplayer_pending_oauth';
-  function savePendingOAuth(sessionId) {
-    localStorage.setItem(PENDING_OAUTH_KEY, JSON.stringify({ sessionId, timestamp: Date.now() }));
+  function savePendingOAuth(sessionId, bindSecret) {
+    localStorage.setItem(PENDING_OAUTH_KEY, JSON.stringify({ sessionId, bindSecret: bindSecret || '', timestamp: Date.now() }));
   }
   function getPendingOAuth() {
     try {
@@ -116,7 +116,7 @@ Views.login = () => {
         localStorage.removeItem(PENDING_OAUTH_KEY);
         return null;
       }
-      return d.sessionId;
+      return { sessionId: d.sessionId, bindSecret: d.bindSecret || '' };
     } catch (_) { return null; }
   }
   function clearPendingOAuth() {
@@ -313,8 +313,9 @@ Views.login = () => {
   function renderQr(initData) {
     clearPoll();
     const session = initData.session;
+    const bindSecret = initData.bind_secret || '';
     const uri = initData.verification_uri || '';
-    savePendingOAuth(session);
+    savePendingOAuth(session, bindSecret);
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card" style="text-align:center;">
@@ -354,7 +355,7 @@ Views.login = () => {
     }
 
     const poll = async () => {
-      const done = await pollSession(session, document.getElementById('qr-status'));
+      const done = await pollSession(session, document.getElementById('qr-status'), bindSecret);
       if (!done) pollTimer = setTimeout(poll, 2500);
     };
     pollTimer = setTimeout(poll, 2000);
@@ -364,16 +365,16 @@ Views.login = () => {
   // 身份反查失败（tiny_id 拿不到）时最多重试 10 次（约 25 秒），避免无限轮询
   let pollRetries = 0;
   const MAX_POLL_RETRIES = 10;
-  async function pollSession(sessionId, statusEl) {
+  async function pollSession(sessionId, statusEl, bindSecret) {
     try {
-      const r = await API.post('/api/auth/qq/poll', JSON.stringify({ session: sessionId }), QQ_LOGIN_TIMEOUT);
+      const r = await API.post('/api/auth/qq/poll', JSON.stringify({ session: sessionId, bind_secret: bindSecret || '' }), QQ_LOGIN_TIMEOUT);
       if (r.status === 'authorized') {
         clearPoll();
         if (r.bound && r.user) {
-          const bindRes = await API.post('/api/auth/qq/bind', JSON.stringify({ session: sessionId }), QQ_LOGIN_TIMEOUT);
+          const bindRes = await API.post('/api/auth/qq/bind', JSON.stringify({ session: sessionId, bind_secret: bindSecret || '' }), QQ_LOGIN_TIMEOUT);
           enterSystem(bindRes);
         } else {
-          renderBindForm(sessionId, r.nickname || '');
+          renderBindForm(sessionId, r.nickname || '', bindSecret || '');
         }
         return true;
       }
@@ -405,8 +406,12 @@ Views.login = () => {
     }
   }
 
-  // 移动端回调恢复：页面刷新后凭 localStorage 里的 session 继续轮询（无二维码/链接）
-  function renderPendingAuth(sessionId) {
+  // 移动端回调恢复：页面刷新后凭 localStorage 里的 session+bind_secret 继续轮询（无二维码/链接）
+  function renderPendingAuth() {
+    const pending = getPendingOAuth();
+    if (!pending) { renderHome(); return; }
+    const sessionId = pending.sessionId;
+    const bindSecret = pending.bindSecret;
     clearPoll();
     view.innerHTML = `
       <div class="auth-wrap">
@@ -423,14 +428,14 @@ Views.login = () => {
       </div>`;
     document.getElementById('qr-back').onclick = renderHome;
     const poll = async () => {
-      const done = await pollSession(sessionId, document.getElementById('qr-status'));
+      const done = await pollSession(sessionId, document.getElementById('qr-status'), bindSecret);
       if (!done) pollTimer = setTimeout(poll, 2500);
     };
     pollTimer = setTimeout(poll, 2000);
   }
 
   // 扫码成功但未绑定 → 补全班级+姓名
-  async function renderBindForm(session, nickname) {
+  async function renderBindForm(session, nickname, bindSecret) {
     clearPoll();
     clearPendingOAuth();
     view.innerHTML = `
@@ -462,7 +467,7 @@ Views.login = () => {
       if (!v.show_real_name && !v.nickname) return showError('选择只展示昵称后，请填写姓名以生成展示昵称');
       try {
         const data = await API.post('/api/auth/qq/bind', JSON.stringify({
-          session, class_name: v.class_name, real_name: v.real_name,
+          session, bind_secret: bindSecret || '', class_name: v.class_name, real_name: v.real_name,
           show_real_name: v.show_real_name, nickname: v.nickname,
         }), QQ_LOGIN_TIMEOUT);
         enterSystem(data);
@@ -699,9 +704,8 @@ Views.login = () => {
     document.getElementById('again-submit').onclick = renderGuestSubmit;
   }
 
-  const pending = getPendingOAuth();
-  if (pending) {
-    renderPendingAuth(pending);
+  if (getPendingOAuth()) {
+    renderPendingAuth();
   } else {
     renderHome();
   }

@@ -93,12 +93,20 @@ router.get(
   })
 );
 
-// 访客上传（multipart：file + token 字段；每次一个文件，前端可循环传多个）
+// 访客上传（multipart：file；令牌走 x-guest-token 请求头；每次一个文件，前端可循环传多个）
 // IP 限流（2026-08-20）：防未认证请求无限投递 multipart 造成磁盘/CPU 写放大（multer 先落盘后校验 token）
+// P1 修复（2026-08-21）：multer 落盘前先校验 x-guest-token——未认证攻击者不再能向磁盘
+// 写入最大 200MB 的文件（原逻辑先落盘、后校验并清理，单 IP 每分钟可写约 2GB，并发还能绕过空间检查）。
 router.post(
   '/upload',
   rateLimit({ windowMs: 60 * 1000, max: 10, keyFn: ipKey }),
   asyncHandler(async (req, res) => {
+    // 落盘前校验令牌（请求头；前端已改为请求头携带，不再放 multipart body）
+    const preToken = String(req.headers['x-guest-token'] || '').trim();
+    const preUser = preToken ? await loadGuestByToken(preToken) : null;
+    if (!preUser || preUser.status !== 'active') {
+      return res.status(401).json({ error: '项目地址无效或已失效，请重新填写表单获取' });
+    }
     // 上传前磁盘自检：剩余空间不足时直接拒绝（不落盘任何文件）
     if (!ensureDiskSpace(res)) return;
 
@@ -110,7 +118,7 @@ router.post(
       }
       return res.status(400).json({ error: err.message || '上传失败' });
     }
-    // multer 可能已把文件写入磁盘，令牌无效/账号停用时必须清理落盘文件
+    // multer 后兜底校验（令牌有效性/账号状态以落库为准；无效则清理已落盘文件）
     const token = guestTokenOf(req);
     const user = await loadGuestByToken(token);
     if (!user || user.status !== 'active') {

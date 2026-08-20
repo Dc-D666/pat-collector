@@ -79,7 +79,11 @@ function verdictOf(attrs) {
  */
 async function scanWithVirusTotal(filePath) {
   if (!config.virustotal.apiKey) return { status: 'skip', reason: '未配置 VIRUSTOTAL_API_KEY' };
-  if (Date.now() < quotaExhaustedAt) return { status: 'skip', reason: '额度熔断中（12h 内放行）' };
+  // P2 修复（2026-08-21）：原判断 `Date.now() < quotaExhaustedAt` 恒为假（quotaExhaustedAt 是过去时间戳），
+  // 12h 熔断从未生效；改为"已熔断且距 429 未满冷却期"才跳过，避免 429 后仍持续打 VT 浪费配额/被限流。
+  if (quotaExhaustedAt && Date.now() - quotaExhaustedAt < QUOTA_COOLDOWN_MS) {
+    return { status: 'skip', reason: '额度熔断中（12h 内放行）' };
+  }
   try {
     // 1. 哈希查询（最快，命中即判）
     const hash = await sha256File(filePath);

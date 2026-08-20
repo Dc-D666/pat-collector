@@ -14,12 +14,14 @@ const { getAppPostedStatus, getProjectSubmitted } = require('../utils/learnStatu
 const router = express.Router();
 
 // 跨站体验（NFTI）：签发一次性 ticket / 判定已体验
-// ticket = base64url(payload).hmacHex，payload = { tiny_id, nickname, pat_sid, exp }
-function signPatTicket(user, patSid) {
+// ticket = base64url(payload).hmacHex，payload = { tiny_id, nickname, exp }
+// P0 修复（2026-08-21）：不再携带 QQ 会话 ID（pat_sid）——ticket 的 base64 部分可被任意解码，
+// 泄露的会话 ID 可被 /api/auth/qq/bind 直接换取 PAT Bearer token 造成账号接管。
+// 站外只暴露 tiny_id + 展示昵称（均已存在 NFTI 侧，非敏感凭据）。
+function signPatTicket(user) {
   const payload = {
     tiny_id: String(user.qq_tiny_id || ''),
     nickname: String(user.nickname || user.real_name || '同学').slice(0, 128),
-    pat_sid: String(patSid),
     exp: Date.now() + 5 * 60 * 1000, // 5 分钟有效
   };
   const b64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -120,13 +122,7 @@ router.get(
     if (!config.patTicketSecret) {
       return res.status(500).json({ error: '服务未配置体验密钥' });
     }
-    // 复用当前用户绑定的 QQ 会话目录（cliHome 用）
-    const rows = await query('SELECT qq_session_id FROM users WHERE id = ?', [req.user.id]);
-    const patSid = rows.length && rows[0].qq_session_id ? rows[0].qq_session_id : '';
-    if (!patSid) {
-      return res.status(400).json({ error: '未检测到 QQ 登录会话，请重新扫码登录' });
-    }
-    const ticket = signPatTicket(req.user, patSid);
+    const ticket = signPatTicket(req.user);
     res.json({
       url: 'https://nfti.weaxi.cn/?pat_ticket=' + encodeURIComponent(ticket),
       exp: Date.now() + 5 * 60 * 1000,

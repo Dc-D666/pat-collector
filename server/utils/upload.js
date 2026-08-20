@@ -166,7 +166,14 @@ async function runUploadPipeline(req, res, user, opts) {
     await conn.commit();
   } catch (err) {
     try { await conn.rollback(); } catch (_) { /* ignore */ }
-    conn.release();
+    conn.release(); // 提前返回必须释放连接，否则池耗尽
+    // P1 修复（2026-08-21）：事务阶段（含唯一键冲突）的异常必须在此清理落盘文件——
+    // 原实现直接 throw，外层 cleanup（unlink + ER_DUP_ENTRY→409）覆盖不到这里，
+    // 重复上传同名文件会留下孤儿磁盘文件并返回 500。
+    fs.promises.unlink(req.file.path).catch(() => {});
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: '同名文件已存在，请先删除或重命名' });
+    }
     throw err;
   }
   conn.release();
