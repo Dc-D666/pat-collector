@@ -112,6 +112,7 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 - **token 隔离**靠「每会话独立 HOME」：`storage/qq-sessions/<sessionId>/`，CLI 带 `HOME=<该目录>` env
 - 会话索引 `storage/qq-sessions/index.json`，30 天闲置回收
 - `users.qq_session_id` 关联用户；登录 bind 后**不清理会话**（AI 识别 + NFTI 跨站借用都需要它）
+- **bind_secret（2026-08-21 安全加固）**：`/init` 生成随机 bind_secret 只返回给发起登录的浏览器（不落库、不随 ticket 外发）；`/poll` 与 `/bind` 必须同时携带它——仅凭泄露的会话 ID（曾出现在 NFTI ticket 中）无法换取 Bearer token。前端存于 localStorage（移动端 OAuth 回调恢复用），页面刷新会丢失需重新扫码
 
 ## 6. AI 轻应用识别（核心难点，务必理解）
 
@@ -130,8 +131,9 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 
 ### 学AI（`/api/learn` + `public/js/learn.js`）
 - 5 章教程存在 `articles` 表，正文 Markdown，**前端自研渲染器**（支持标题/列表/引用/代码块/表格/链接，先转义防 XSS）
-- 每章 `tasks` JSON 数组，任务类型：`quiz`(单选，即时判题)、`action`(实操，可带 `nfti:true` 标记)；B站视频/本地 mp4 以媒体行嵌入正文（不是独立任务类型）
-- 文章页：阅读计时 ≥60s 上报积分；任务进度条 + 单选即时判题 + 实操打卡按钮。**2026-08-15 服务端校验**：`GET /api/learn/:slug` 记录阅读开始（`utils/readTimer.js`，进程内 Map），`POST /api/points/read` 需已读 ≥60s 才发分（防直接 POST 刷分）
+- 每章 `tasks` JSON 数组，任务类型：`quiz`(单选，**2026-08-21 起判分完全在服务端**，答案/解析不再下发前端，答错不泄露正确答案且有指数冷却防试错)、`action`(实操，带 `nfti`/`appcheck`/`projectcheck`/`tinyidcheck` 标记，**全部服务端核验**：NFTI 库查记录 / 站内有来源帖投稿或频道近 7 天发帖 / 近 14 天有上传 / tiny_id 与登录身份一致)；B站视频/本地 mp4 以媒体行嵌入正文（不是独立任务类型）
+- 文章页：阅读计时 ≥60s 上报积分；任务进度条 + 单选判分 + 实操打卡按钮。**服务端校验**：`GET /api/learn/:slug` 记录阅读开始（`utils/readTimer.js`，进程内 Map），`POST /api/points/read` 需已读 ≥60s 才发分；**`POST /api/points/task` 拒绝 quiz 类型**（强制走 `POST /api/points/quiz` 判分接口）；`/api/points/quiz` 防试错：答错按 10s→1min→5min→30min→60min 指数冷却
+- **章节完成人数 Tag**：`GET /api/learn` 每章返回 `completed_count`（完成该章全部文章的 `points_log reason='task'` 去重用户数），列表页显示「👥 N 人已完成」
 - 改教程内容：编辑 `seed-articles.js` 后 `node seed-articles.js`（**幂等 upsert**，按 slug 保留原 id，不清空学员进度；仅当某 slug 从脚本移除时才删除该文章）
 
 ### 积分规则（`utils/points.js` RULES）
@@ -155,7 +157,11 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 - **被赞积分（站内直发，不用 CLI）**：`POST /api/points/like` 时同步双向发分——点赞者本人 `like_give` +2⭐（每日上限 LIKE_GIVE_DAILY=10，票数不限、禁自赞 400、重复赞 409），作品作者 `like_receive` +2⭐（每日上限 LIKE_RECEIVE_DAILY=30）；同一 `likes.id` 作 ref_id、reason 区分，均幂等。~~原 CLI 增量方案~~（`jobs.refreshUserFeedLikes`、`/api/points/refresh-likes` 已删除；`feed_like_snapshots` 表废弃保留不删）
 - 彩蛋：前端 `app.js` 事件委托监听 `.points-badge` 连点 5 次（2s 窗口）→ `POST /api/points/easter-egg`（幂等 once）
 
-### 积分商城（已下架：前端无入口，后端接口+定时回收保留，待重新上架）
+### 积分商城（前端无入口待重新上架；后端接口保留）
+- **2026-08-21 两阶段兑换**（`utils/points.js` spendPending/settlePurchase）：频道类（app_top/app_essence）先原子预扣积分并写 `pending` 记录 → 执行 QQ CLI → 成功 `settlePurchase(true)` 转 active / 失败退款并标 cancelled。杜绝原「先外部操作后扣分」的免费兑换；悬空 pending（进程崩溃遗留）由 jobs 查询频道帖子状态处理：已生效→转 active、未生效→退款、无法判定→保持 pending 人工核对（**不再盲目退款**）
+- **有效期**：SHOP 每项直接配置 `durationMs`（不再解析展示文本；修了「24 小时」被算成 24 天）
+- **开关**：`settings.shop_enabled='0'` 后端强制关闭 `/api/points/purchase`（不再只藏前端入口）
+- 到期回收 `server/jobs.js`：查询已含 `feed_extra`（取消置顶需 create_time）；CLI 取消失败保持 active 下轮重试；删除作品/用户时主动作废关联购买并尽力撤销频道操作（`utils/channelOps.js` cancelChannelPurchase）
 | 商品 | 价格 | 说明 |
 | --- | --- | --- |
 | 作品展置顶 24h（wall_top） | 100 | 站内自动：class.js wall 排序置顶 + 前端 🔥 徽标 |
@@ -169,7 +175,7 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 
 ### 跨站体验（第1章实操任务 → NFTI）
 - **机制**：PatPlayer 签 HMAC ticket（`GET /api/learn/nfti-ticket`，含 tiny_id+nickname+一次性授权码 sid+5min 过期，**不再携带会话 ID**——2026-08-21 安全修复）→ 前端跳 `https://nfti.weaxi.cn/?pat_ticket=...` → NFTI 校验 ticket 后调 `POST https://pat.weaxi.cn/api/learn/nfti-session-grant` 服务端换发真实会话 ID（一次性消费）→ 建"借用会话"
-- **⚠️ 跨仓库同步**：NFTI 仓库（/home/nfti/NF-BTI）`backend/server.js` 已同步新格式（`verifyPatTicket` 校验 `sid` 授权码 + `exchangePatSession` 换发）；docker-compose 需配置 `PAT_BASE_URL`。若 NFTI 未更新，旧解析会因缺少 pat_sid 拒绝 ticket，体验任务将失败
+- **跨仓库同步（已完成）**：NFTI 仓库（/home/nfti/NF-BTI）`backend/server.js` 已同步新格式（`verifyPatTicket` 校验 `sid` 授权码 + `exchangePatSession` 换发）并重建容器；docker-compose 已配置 `PAT_BASE_URL`。后续若再改 ticket 格式，必须同步 NFTI 两侧（两边 `PAT_TICKET_SECRET` 也须一致）
 - **借用会话**：NFTI 会话的 `cliHome` 指向 docker 只读挂载的 PatPlayer 会话目录 `/patplayer-sessions/<sid>`（复用真实 QQ token，**无需重新扫码，不违反单设备登录**——token 从不改变）
 - **完成判定**：`GET /api/learn/nfti-status` 直查 nfti 库 `test_results WHERE tiny_id=? AND assessment_type='nfti'`（PatPlayer 的 DB 账号被授权只读 nfti 库）；有记录 → 前端自动标记任务完成
 - 未 QQ 登录（无 tiny_id）：前端提示必须 QQ 登录，ticket 接口拒绝
@@ -298,7 +304,8 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 - **访客直传是自报身份、无鉴权**：可冒名登记，且项目地址即凭证（谁拿到地址谁可看文件）；访客不进入系统，NFTI 体验任务强制 QQ 登录规避了系统侧冒名问题
 - **访客项目地址需要真人走一遍**：填表 → 上传 → 复制地址 → 用地址回访下载/继续上传（本 session 已用 curl 冒烟验证接口，前端交互建议浏览器实测一次）
 - **NFTI 借用会话依赖 PatPlayer 会话存活**：PatPlayer 30 天闲置回收会连带 NFTI 借用失效（提示重新登录，符合预期）
-- **跨站 ticket 安全**：HMAC + 5min 过期 + 16 位 hex pat_sid 白名单 + 常量时间比较；密钥在两边 .env，勿泄露/勿改一侧
+- **跨站 ticket 安全（2026-08-21 重构）**：ticket 只含一次性授权码（32 位 hex sid）+ HMAC + 5min 过期；真实会话 ID 由 `POST /api/learn/nfti-session-grant` 服务端换发（单次消费）。密钥在两边 .env 必须一致，勿泄露/勿改一侧
+- **已知边界（2026-08-21 第三轮结论）**：① 视频任务与纯自报实操任务无法服务端核验（当前 5 章无此类任务，未来新增章节注意）；② GitHub Fork 检测依赖 API，API 故障时链接验证暂缓（503 提示重试）而非放行；③ NFTI 换发依赖 PAT 服务在线，PAT 重启会丢失内存中的授权码（5 分钟内重试即恢复）；④ 访客未设找回密码时无法自助找回项目地址（防冒名取舍，联系频道主人工处理）
 - `feed_links.py` 提取正则依赖轻应用链接格式，变了需更新
 - **B站视频链接**是教程任务的一部分，若失效需替换 `seed-articles.js` 中 BV 号并重跑
 
@@ -474,3 +481,37 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 - **保留不变**：`ADMIN_QQ_TINY_IDS` 白名单自动授权（maybeGrantAdmin，部署层配置）；其余管理接口对所有管理员开放。
 - **实测**：胡誉腾（非超管）调授权接口 403 ✓；戴睿羲（超管）设/取消谭一凡管理员均 200 ✓（测试后已恢复谭一凡为非管理员）。
 - **注意**：改最高管理员身份需同步 `config.js`（或 env）与前端 `admin.js` 的 `isSuperAdmin` 两处。
+
+### 13.19 三轮安全修复（2026-08-21，安全复审 P0-P2 全部落地）
+
+> 涉及两个仓库：PatPlayer（`Dc-D666/pat-collector`）与 NFTI（`Dc-D666/NF-BTI`）；NFTI 侧已同步并重建容器。
+
+**P0 账号接管（已修）**
+- NFTI ticket 不再携带 QQ 会话 ID（pat_sid，base64 可解码 + 曾可被 `/api/auth/qq/bind` 直接换 token）→ 改为一次性授权码 + `POST /api/learn/nfti-session-grant` 服务端换发；`/init` 增加 `bind_secret`（仅发起登录的浏览器持有），`/poll`/`/bind` 必须携带。
+- **NFTI 侧必须同步**（已同步+部署）：`verifyPatTicket` 校验 `sid` 授权码、`exchangePatSession` 换发；docker-compose 需 `PAT_BASE_URL`；两边 `PAT_TICKET_SECRET` 必须一致（.env 与 docker-compose 已核对一致）。
+
+**P1（已修）**
+- 频道兑换两阶段化（先扣分写 pending → CLI → 结算/退款）；有效期用 `durationMs`；jobs 到期回收补 `feed_extra` + 失败重试；pending 悬空按外部状态处理（不盲目退款）。
+- 访客上传在 multer 落盘前校验 `x-guest-token`（前端已改请求头）；nginx 加上传限速（`deploy/0.pat-upload-limits.conf`，10r/s burst 20 + 并发 4）。
+- 重复文件上传：事务阶段清理落盘文件并返回 409（不再留孤儿文件 + 500）。
+- 审核（单条/批量/改状态）：状态变更与积分回扣/恢复同事务；恢复积分按原发放流水金额（不再硬编码 30、不重复乘活动倍率）。
+- 作品墙/总览/下载/预览：仅 `reviewed` 文件公开（pending/flagged 仅所有者可见）；排除停用用户。
+- 未验证 GitHub 链接禁止点赞；点赞接口复用作品墙可见性（文件 reviewed + 用户 active + 链接 verified）。
+- 商城开关 `settings.shop_enabled` 后端强制。
+- QQ 绑定访客身份：事务 + 行锁 + `WHERE qq_tiny_id IS NULL` 条件更新（并发双绑第二个 409）。
+- 最高管理员保护：调分/停用/删除/重置密码/权限变更一律禁止作用于 `config.superAdmin`。
+- 删除（文件/应用/GitHub/访客/审核/用户）与积分回扣同事务；删除作品/用户时作废关联商城购买并尽力撤销频道操作（`utils/channelOps.js`）。
+- 访客已有账号取回 token 必须验证安全密码；未设密码则拒绝自助找回（防「班级+姓名」冒名接管）。
+
+**P2（已修）**
+- `/api/points/task` 拒绝 quiz 类型（防绕过 `/quiz` 冷却）。
+- VirusTotal 12h 熔断时间判断修复（原 `Date.now() < quotaExhaustedAt` 恒假，熔断从未生效——ClamAV 移除改造遗留）。
+- 评委评审与积分差额发放同事务（锁评审行+用户行，防并发重复/失败漏发）。
+- HTML 预览挂 `requireAuth`（停用/删除用户 token 过期前无法预览）；下载/预览非 reviewed 仅本人。
+- 删除/停用用户立即清理 QQ 会话目录。
+- 提交应用/访客注册/QQ 首次绑定：积分发放与业务记录同事务（`grantInTx`，防永久漏发）。
+- CDN（jsDelivr）验证按内容匹配决定是否回退 raw 源；Fork 检测 API 不可达时暂缓验证（503 fail-closed）。
+- 全站安全响应头（nosniff / X-Frame-Options DENY / no-referrer / Permissions-Policy / HSTS）。
+- 内测清理脚本 `scripts/clear-beta-data.js` 同步清空 `storage/uploads` 与 `storage/qq-sessions`。
+
+**遗留已知边界（见 §11）**：视频/纯自报任务无服务端核验（当前章节无此类）；Fork 检测 API 故障时新验证暂缓；NFTI 换发依赖 PAT 在线；访客未设密码无法自助找回地址。

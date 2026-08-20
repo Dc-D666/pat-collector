@@ -38,6 +38,8 @@ vim .env
 | `DB_HOST` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | 生产库连接 |
 | `TOKEN_SECRET` | **强随机值**（如 `openssl rand -hex 32`），缺失/示例值将拒绝启动 |
 | `MAX_UPLOAD_MB` | 与 nginx `client_max_body_size` 对齐（默认 200） |
+| `PAT_TICKET_SECRET` | 跨站体验（NFTI）ticket 签名密钥，**必须与 NFTI 仓库 `docker-compose.yml` 的 `PAT_TICKET_SECRET` 完全一致**（NFTI 侧校验/换发依赖），改一侧必改另一侧 |
+| `GITHUB_TOKEN` | 可选：GitHub Fork 检测 API 配额（未认证 60 次/时/IP，填 token 提至 5000/时） |
 
 ## 4. 启动（PM2）
 
@@ -55,10 +57,15 @@ pm2 startup   # 开机自启（按提示执行输出命令）
 
 参考 `deploy/pat.weaxi.cn.conf`：80 → 301 → 443 → `127.0.0.1:3001`，`client_max_body_size 200m`。
 
+**两个文件都要部署**：`pat.weaxi.cn.conf`（server 块）+ `0.pat-upload-limits.conf`（http 上下文 zone，上传限速 10r/s burst 20 + 并发 4，防未认证写放大）。
+
 ```bash
-cp deploy/pat.weaxi.cn.conf /www/server/panel/vhost/nginx/patplayer.conf
+cp deploy/pat.weaxi.cn.conf /www/server/panel/vhost/nginx/pat.weaxi.cn.conf
+cp deploy/0.pat-upload-limits.conf /www/server/panel/vhost/nginx/0.pat-upload-limits.conf
 nginx -t && nginx -s reload
 ```
+
+> ⚠️ 漏部署 `0.pat-upload-limits.conf` 会因 zone 未定义导致 `nginx -t` 报错；改上传速率/并发需同时改此文件与注释说明。
 
 ## 6. 验证
 

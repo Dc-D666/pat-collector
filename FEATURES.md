@@ -16,8 +16,8 @@
 
 | 功能 | 说明 | 位置 |
 | --- | --- | --- |
-| QQ 频道扫码登录（主） | `init` 拿二维码 → `poll` 轮询授权并反查 tiny_id → `bind` 绑定班级+姓名；已绑定直接登录；身份识别失败（未加入频道）时自动展示频道二维码引导加入（`public/img/qq-channel.jpg`） | auth-qq.js:73/164/244 / auth.js(前端) |
-| **访客直传（无 QQ）** | 登录页点「我没有QQ，或直接提交我的程序文件」→ 表单：**年级 → 班级 → 姓名 → 展示名授权 → 安全密码（选填）** → 上传程序文件 → 提交后签发**专属项目地址**（`#/p/<token>`），凭地址查看/下载/继续上传/删除；**不进入系统**（无系统令牌，其余功能全部不可用）。额度：单文件 ≤200MB（`MAX_UPLOAD_MB`），每天最多 5 次（`GUEST_MAX_UPLOADS_PER_DAY`）；**全局新建登记限速（P2，`GUEST_REG_GLOBAL_HOUR` 默认 60/小时，幂等找回不耗额度）**。**防冒名（2026-08-15）**：该姓名+班级已被 QQ 账号绑定时拒绝访客登记（请用 QQ 登录），纯访客身份仍走幂等找回地址 | auth.js(前端) / routes/auth.js:44 / routes/guest.js / public/js/project.js |
+| QQ 频道扫码登录（主） | `init` 拿二维码 → `poll` 轮询授权并反查 tiny_id → `bind` 绑定班级+姓名；已绑定直接登录；身份识别失败（未加入频道）时自动展示频道二维码引导加入（`public/img/qq-channel.jpg`）。**2026-08-21 安全加固**：`/init` 返回 `bind_secret`（随机、仅存发起登录的浏览器），`/poll` 与 `/bind` 必须携带——泄露的会话 ID 无法换取 token | auth-qq.js / auth.js(前端) |
+| **访客直传（无 QQ）** | 登录页点「我没有QQ，或直接提交我的程序文件」→ 表单：**年级 → 班级 → 姓名 → 展示名授权 → 安全密码（选填）** → 上传程序文件 → 提交后签发**专属项目地址**（`#/p/<token>`），凭地址查看/下载/继续上传/删除；**不进入系统**（无系统令牌，其余功能全部不可用）。额度：单文件 ≤200MB（`MAX_UPLOAD_MB`），每天最多 5 次（`GUEST_MAX_UPLOADS_PER_DAY`）；**全局新建登记限速（P2，`GUEST_REG_GLOBAL_HOUR` 默认 60/小时，幂等找回不耗额度）**。**防冒名（2026-08-15）**：该姓名+班级已被 QQ 账号绑定时拒绝访客登记（请用 QQ 登录）。**取回凭据（2026-08-21）**：已有访客账号**不能仅凭班级+姓名取回 token**——设置了安全密码须密码校验通过；未设密码则拒绝自助找回（防冒名接管项目地址，遗失联系频道主） | auth.js(前端) / routes/auth.js:44 / routes/guest.js / public/js/project.js |
 | 访客项目地址 | `GET /api/guest/files`（令牌走 `x-guest-token` 请求头，身份+文件列表+今日额度）、`POST /api/guest/upload`（multipart file+token）、`GET /api/guest/download/:id`（令牌走头）、`GET /api/guest/preview/:id?token=`（预览为顶层导航只能用 query，响应带 `Referrer-Policy: no-referrer` + CSP sandbox）；令牌为 64 位 hex 长随机串、无过期、同一身份幂等返回同一地址 | routes/guest.js |
 | **访客删除（密码保护）** | `DELETE /api/guest/files/:id`：令牌走 `x-guest-token` 头、密码走 **JSON body**（2026-08-15 起不再放 URL，防 nginx 访问日志记录）；仅删本项目地址下的文件；密码 = 提交时自定义（scrypt 加盐哈希存 `users.guest_pwd_hash`）或未设置时的默认密码（`GUEST_DEFAULT_PASSWORD`）；错误 403、限流（10 次/10 分钟/令牌+IP）防爆破；删除回扣提交积分（与系统内删除一致），不返还当天上传次数 | routes/guest.js / utils/pwd.js / public/js/project.js |
 | 上传磁盘自检 | **每次上传前**（登录与访客共用）检测服务器磁盘剩余空间，低于 `MIN_FREE_DISK_GB`（默认 2GB）返回 507「磁盘即将爆满，文件上传失败，请联系频道主扩容处理」，不落盘 | utils/upload.js:63（ensureDiskSpace）/ utils/disk.js |
@@ -41,9 +41,9 @@
 | 大小限制 | 单文件默认 **200MB**（`MAX_UPLOAD_MB`）；每人总容量默认 **1GB**（`MAX_USER_STORAGE_MB`，超限提示联系频道主扩容）；每人作品文件总数上限 **20**（`MAX_FILES_PER_USER`）、轻应用总数上限 **20**（`MAX_APPS_PER_USER`，删除可释放名额） | config.js / utils/upload.js / apps.js |
 | 文件列表 | 仅列本人文件（含标题/简介/玩法） | files.js:123 |
 | 作品信息 | `PATCH /api/files/:id` 补标题/简介/玩法（标题必填） | files.js:136 |
-| 下载 | `GET /api/files/download/:id`：**全校公开**（登录即可下载任意作品，2026-08 起的产品决策）；落盘缺失返回「文件已丢失」 | files.js:169 |
-| 删除 | `DELETE /api/files/:id` 仅本人；删记录 + 落盘文件 | files.js:193 |
-| 同名冲突 | `(user_id, original_name)` 唯一约束 → 409 提示先删除或重命名 | schema.sql / files.js:114 |
+| 下载 | `GET /api/files/download/:id`：**全校公开**（登录即可下载）；**2026-08-21 起仅已过审（reviewed）文件对他人公开**（pending/flagged 仅所有者本人可下载/预览）；落盘缺失返回「文件已丢失」 | files.js |
+| 删除 | `DELETE /api/files/:id` 仅本人；**2026-08-21 起删除与积分回扣同一事务**，并作废该文件相关商城购买（wall_top）；落盘文件在事务提交后删除 | files.js |
+| 同名冲突 | `(user_id, original_name)` 唯一约束 → **409 提示先删除或重命名，且自动清理本次落盘的临时文件**（不再留孤儿文件/500） | schema.sql / utils/upload.js |
 
 ## 三、AI 轻应用收集（server/routes/apps.js + dashboard.js「AI 轻应用」tab）
 
@@ -58,7 +58,8 @@
 ## 三·五、GitHub 项目外链（server/routes/links.js + dashboard.js「🔗 GitHub 项目」tab，2026-08-20）
 
 - **定位**：解决"频繁更新"痛点——提交 GitHub 仓库链接，push 即更新，无需重新上传；**仅支持 `github.com/{owner}/{repo}` 公开仓库**
-- **防冒充（Token 文件验证）**：提交后平台生成 `PAT-xxx` token，要求用户在仓库根目录新建 `nanfang-pat.txt` 写入（GitHub 网页端可建），平台经 **jsDelivr CDN**（`cdn.jsdelivr.net/gh/{owner}/{repo}@HEAD/nanfang-pat.txt`，境内可达）为主源、`raw.githubusercontent.com` 兜底比对（本服务器实测 raw 间歇超时，勿单独用 raw） → 通过才标记 ✓ 已认证并**发分**（`link_submit` +25⭐，**与 `file_submit` 合计最多 5 个**（2026-08-20 用户拍板：项目文件+GitHub 项目共同上限，走 REASON_CAPS+CAP_GROUPS）；删除回扣 `link_submit_revoke`）；只有仓库 owner 能 push 文件，冒充零成本问题被堵死
+- **防冒充（Token 文件验证）**：提交后平台生成 `PAT-xxx` token，要求用户在仓库根目录新建 `nanfang-pat.txt` 写入（GitHub 网页端可建），平台经 **jsDelivr CDN**（`cdn.jsdelivr.net/gh/{owner}/{repo}@HEAD/nanfang-pat.txt`，境内可达）为主源、`raw.githubusercontent.com` 兜底比对（**2026-08-21：按内容匹配决定是否回退**——CDN 缓存旧内容时不直接返回，继续尝试 raw） → 通过才标记 ✓ 已认证并**发分**
+- **Fork 防护（2026-08-21）**：token 只能证明「能 push」，Fork 的仓库人人可 push——验证时调 GitHub API `/repos/{owner}/{repo}` 查 `fork` 标志，**Fork 仓库直接拒绝**（提示新建仓库勿点 Fork）；**API 不可达/限流时暂缓验证（503 提示重试，fail-closed）**，不因 API 故障放行 Fork（`link_submit` +25⭐，**与 `file_submit` 合计最多 5 个**（2026-08-20 用户拍板：项目文件+GitHub 项目共同上限，走 REASON_CAPS+CAP_GROUPS）；删除回扣 `link_submit_revoke`）；只有仓库 owner 能 push 文件，冒充零成本问题被堵死
 - 去重：同用户同 url 唯一（`uq_link_user_url`）；展示文本过 R2 AI 审查；点赞支持 `link` 类型（与被赞积分联动）
 - 作品展：已验证外链混排入墙（🔗 图标 + ✓ 已认证徽标 + owner/repo + 「前往 GitHub」），总览统计 link_count
 - 管理后台「外链」页签：搜索/删除（回扣积分，记 admin_log）
@@ -67,7 +68,7 @@
 ## 四、全校作品展（server/routes/class.js:77 + public/js/class-wall.js）
 
 - 全校**文件 + 轻应用 + 已验证 GitHub 外链**项目平铺展示（**访客作品不参展，R1**：仅 QQ 用户作品入墙；访客 QQ 合并后自动转正），按时间倒序混排，带班级 tag + 年级归属
-- **违规下架（2026-08-15）**：`audit_status='flagged'` 的作品不进入作品展/总览，下载/预览/点赞一律 403「该作品因违规已被下架」
+- **可见性（2026-08-21 收紧）**：作品展/总览仅展示**已过审（reviewed）**文件（pending 待审/flagged 违规均不公开）+ **活跃用户**（`status='active'`，停用用户作品移除）；下载/预览/点赞对他人同样仅限 reviewed
 - 展示名遵循授权（`show_real_name=0` 用昵称/频道名）；生效中的**专属称号**以小徽章展示
 - 每项标注 `is_mine` / `same_class`；文件可下载（登录即可，全校公开），应用可跳转
 - **点赞**：每日票数不限（🤍→❤️），主动点赞 +2⭐/次；重复点赞 409；置顶作品排最前 + 🔥 徽标
@@ -84,10 +85,10 @@
 | 功能 | 说明 | 位置 |
 | --- | --- | --- |
 | 教程内容 | **5 章** AI 教程存 `articles` 表（Markdown 正文 + `tasks` JSON 任务数组） | seed-articles.js |
-| 章节列表 | `GET /api/learn` 按章节分组返回摘要（不含正文） | learn.js:46 |
+| 章节列表 | `GET /api/learn` 按章节分组返回摘要（不含正文）；每章含 `completed_count`（已完成本章人数，列表页「👥 N 人已完成」小标签） | learn.js |
 | 文章详情 | `GET /api/learn/:slug`（含任务数组；固定路径如 nfti-ticket 必须先于 `/:slug` 注册） | learn.js:223 |
 | Markdown 渲染 | 前端自研轻量渲染器：标题/列表/引用/代码块/表格/媒体行（B站 iframe、本地 mp4），先转义防 XSS | learn.js(前端) |
-| 章节任务 | 类型：`quiz`（单选即时判题）、`action`（实操打卡，可带 `nfti:true` 标记跳 NFTI 体验）；B站视频嵌入正文 | seed-articles.js |
+| 章节任务 | 类型：`quiz`（单选，**2026-08-21 判分完全在服务端**——答案/解析不下发，`POST /api/points/quiz` 判分，答错不泄露正确答案且有指数冷却防试错）、`action`（实操，带 `nfti`/`appcheck`/`projectcheck`/`tinyidcheck` 标记，**全部服务端核验**）；`/api/points/task` 拒绝 quiz 类型 | seed-articles.js / points.js |
 | 阅读计时 | 文章页 ≥60s 上报积分；路由切换时取消计时器（防切页刷分）；**服务端校验（2026-08-15）**：加载文章详情记录开始时间，`/api/points/read` 需已读 ≥60s 才发分（`utils/readTimer.js`） | learn.js(前端) / app.js:25 / routes/points.js / utils/readTimer.js |
 | 学习进度 | `GET /api/learn/progress`（每章是否完成；游客宽松返回空进度） | learn.js:74 |
 
@@ -111,7 +112,7 @@
 
 - **幂等发放**：`points_log` 唯一键 `(user_id, reason, ref_id)` + 事务内插流水/更新 `users.points` | utils/points.js:19
 - **整章判定**：`POST /api/points/task` 记 `task_progress` → 该章任务全完成才发整章积分；`GET /api/points/task-progress` 回填完成状态 | points.js
-- **被赞积分（站内直发）**：`POST /api/points/like` 时，除点赞者本人 +2⭐（`like_give`，每日上限 10）外，同步给作品作者 +2⭐（`like_receive`，每日上限 30）；同一 `likes.id` 作 ref_id、reason 区分，均幂等。**不使用 CLI 查频道点赞**（原 CLI 增量方案及 `feed_like_snapshots` 表已废弃，表保留不删）
+- **被赞积分（站内直发）**：`POST /api/points/like` 时，除点赞者本人 +2⭐（`like_give`，每日上限 10）外，同步给作品作者 +2⭐（`like_receive`，每日上限 30）；同一 `likes.id` 作 ref_id、reason 区分，均幂等。**2026-08-21 可见性**：仅 `reviewed` 文件/已验证链接、且作者 `status='active'` 可点赞（与作品墙一致，防枚举 ID 刷分）。不使用 CLI 查频道点赞（`feed_like_snapshots` 表已废弃保留）
 - 排行榜：`GET /api/points/leaderboard` top20 降序 + 我的排名（0 分不占榜）；**访客（无 QQ）不参与（O1，2026-08-16）**；展示名遵循授权 + **同班才显真名（P1）**，非同班显示昵称（拼音缩写）、无昵称兜底「同学」 | points.js
 - 流水：`GET /api/points` 积分+最近 50 条记录（含中文原因文案，消费为负数） | utils/points.js
 
@@ -126,8 +127,9 @@
 | 频道精华 24h（app_essence） | 100 ⭐ | 自己帖子加精华（CLI `feed set-feed-essence` 自动执行） |
 | 专属称号 30 天（title） | 60 ⭐ | 昵称旁展示自定义称号（作品展/总览/排行榜可见） |
 
-- 消费走 `spend()` 事务：余额检查（`FOR UPDATE`）→ 扣分 → 负数流水（reason=purchase）→ 写 `purchases` 记录 | utils/points.js:57
-- 频道类兑换：先调 CLI 成功才扣分；24h 到期由 `server/jobs.js` 定时（每 10 分钟）自动取消并标记 expired（`feed_extra` 存 create_time 供取消用）
+- 消费走 `spend()` 事务：余额检查（`FOR UPDATE`）→ 扣分 → 负数流水（reason=purchase）→ 写 `purchases` 记录 | utils/points.js
+- **频道类两阶段（2026-08-21）**：`spendPending` 先原子预扣+写 `pending` → 执行 CLI → `settlePurchase` 成功转 active / 失败退款（杜绝「外部已生效但未扣分」的免费兑换）；**有效期用 SHOP 每项 `durationMs`**（修「24 小时」被算成 24 天）；**`settings.shop_enabled='0'` 后端强制关闭** `/purchase`
+- 到期回收 `server/jobs.js`（每 10 分钟）：查询已含 `feed_extra`（取消置顶需 create_time），CLI 取消失败保持 active 下轮重试；**悬空 pending 按频道状态处理**（已生效→转 active / 未生效→退款 / 无法判定→保持 pending 人工核对，不盲目退款）；删除作品/用户时主动作废关联购买并尽力撤销频道操作（`utils/channelOps.js`）
 - 接口：`GET /api/points/shop` / `POST /api/points/purchase` / `GET /api/points/my-purchases`
 
 ## 八、跨站体验（NFTI 联动，server/routes/learn.js:106 + config.js nftiDb）
@@ -152,11 +154,11 @@
 
 ## 九.五、管理后台（server/routes/admin.js + public/js/admin.js，仅 QQ 管理员）
 
-- **权限**：`users.is_admin` 标志 + `ADMIN_QQ_TINY_IDS` 白名单引导（QQ 绑定自动授权）；全部接口 `requireAdmin`（非管理员 403）；`users.status='disabled'` 停用（禁登录/登记/上传）；所有写操作记 `admin_log` 审计
+- **权限**：`users.is_admin` 标志 + `ADMIN_QQ_TINY_IDS` 白名单引导（QQ 绑定自动授权）；全部接口 `requireAdmin`（非管理员 403）；`users.status='disabled'` 停用（禁登录/登记/上传）；所有写操作记 `admin_log` 审计。**最高管理员保护（2026-08-21）**：调分/停用/删除/重置密码/权限变更一律禁止作用于 `config.superAdmin`（默认 2120 戴睿羲，env 可覆盖）
 - **总览**：用户/文件/轻应用/积分/存储统计、磁盘剩余、待审核数（`GET /api/admin/stats`）
 - **用户**：搜索（姓名/昵称/班级/访客令牌前缀）、身份与状态筛选；调积分（±，防自肥）、设/取消管理员（仅 QQ）、停用/恢复、重置访客删除密码、删除（级联+物理文件）
-- **文件**：搜索（文件名/标题/作者/班级/审核状态）、预览/下载、改作品信息与审核状态（flagged→reviewed 自动补发积分）、删除（回扣 +50）
-- **审核**：pending/flagged/reviewed 队列，通过（补发回扣积分）/拒绝（+原因，回扣积分）/删除；**批量**勾选通过/删除
+- **文件**：搜索（文件名/标题/作者/班级/审核状态）、预览/下载、改作品信息与审核状态（flagged→reviewed 自动补发积分，**2026-08-21 起按原发放流水金额恢复**）、删除（回扣 +25）
+- **审核**：pending/flagged/reviewed 队列，通过（补发回扣积分）/拒绝（+原因，回扣积分）/删除；**批量**勾选通过/删除。**2026-08-21：状态变更与积分回扣/恢复同事务**（单条/批量/改状态均原子）
 - **轻应用**：搜索、删除（回扣 +25——普通用户路径未回扣，管理端补齐）
 - **积分**：排行榜 TOP50、流水检索（用户/类型）
 - **运营**：置顶/称号/精华记录、手动过期、免费手动置顶（file/app，≤168h）、发放称号、商城开关（`settings.shop_enabled`）
