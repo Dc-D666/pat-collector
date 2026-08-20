@@ -13,7 +13,7 @@ const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../utils/rateLimit');
-const { grant, revoke } = require('../utils/points');
+const { grant, revokeInTx } = require('../utils/points');
 const { auditDisplayText } = require('../utils/audit');
 
 const router = express.Router();
@@ -231,15 +231,35 @@ router.get(
   })
 );
 
-// 删除（回扣提交积分）
+// 删除（回扣提交积分）——R3-3：删除与回扣同一事务
 router.delete(
   '/:id',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await query('SELECT id FROM links WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-    if (rows.length === 0) return res.status(404).json({ error: '链接不存在' });
-    await query('DELETE FROM links WHERE id = ?', [req.params.id]);
-    const revoked = await revoke(req.user.id, 'link_submit', 'link:' + req.params.id);
+    const linkId = Number(req.params.id);
+    const conn = await pool.getConnection();
+    let revoked = null;
+    try {
+      await conn.beginTransaction();
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [req.user.id]);
+      const [rows] = await conn.execute(
+        'SELECT id FROM links WHERE id = ? AND user_id = ? FOR UPDATE',
+        [linkId, req.user.id]
+      );
+      if (rows.length === 0) {
+        await conn.rollback();
+        conn.release();
+        return res.status(404).json({ error: '链接不存在' });
+      }
+      revoked = await revokeInTx(conn, req.user.id, 'link_submit', 'link:' + linkId);
+      await conn.execute('DELETE FROM links WHERE id = ?', [linkId]);
+      await conn.commit();
+    } catch (err) {
+      try { await conn.rollback(); } catch (_) { /* ignore */ }
+      conn.release();
+      throw err;
+    }
+    conn.release();
     res.json({ ok: true, points_revoked: revoked });
   })
 );

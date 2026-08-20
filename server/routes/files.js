@@ -5,10 +5,10 @@ const fs = require('fs');
 const express = require('express');
 const multer = require('multer');
 const config = require('../config');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
-const { revoke } = require('../utils/points');
+const { revokeInTx, deactivatePurchasesInTx } = require('../utils/points');
 const { runMulter, ensureDiskSpace, runUploadPipeline, sanitizeName, extOf } = require('../utils/upload');
 const { auditDisplayText } = require('../utils/audit');
 
@@ -161,24 +161,44 @@ router.get(
   })
 );
 
-// 删除（仅本人）：删除文件并回扣对应提交积分（+50⭐）
+// 删除（仅本人）：删除文件并回扣对应提交积分。
+// R3-3（2026-08-21）：删除与回扣同一事务（此前 DELETE 后再 revoke，回扣失败会永久保留积分）；
+// R3-4：一并作废该文件相关商城购买（wall_top 置顶记录）。
 router.delete(
   '/:id',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await query('SELECT stored_name FROM files WHERE id = ? AND user_id = ?', [
-      req.params.id,
-      req.user.id,
-    ]);
-    if (rows.length === 0) {
-      return res.status(404).json({ error: '文件不存在' });
+    const fid = Number(req.params.id);
+    const conn = await pool.getConnection();
+    let storedName = null;
+    let revoked = null;
+    try {
+      await conn.beginTransaction();
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [req.user.id]);
+      const [rows] = await conn.execute(
+        'SELECT stored_name FROM files WHERE id = ? AND user_id = ? FOR UPDATE',
+        [fid, req.user.id]
+      );
+      if (rows.length === 0) {
+        await conn.rollback();
+        conn.release();
+        return res.status(404).json({ error: '文件不存在' });
+      }
+      storedName = rows[0].stored_name;
+      revoked = await revokeInTx(conn, req.user.id, 'file_submit', 'file:' + fid);
+      await deactivatePurchasesInTx(conn, req.user.id, 'file', fid);
+      await conn.execute('DELETE FROM files WHERE id = ?', [fid]);
+      await conn.commit();
+    } catch (err) {
+      try { await conn.rollback(); } catch (_) { /* ignore */ }
+      conn.release();
+      throw err;
     }
-    await query('DELETE FROM files WHERE id = ?', [req.params.id]);
-    // 回扣提交作品文件积分（若发过）
-    const revoked = await revoke(req.user.id, 'file_submit', 'file:' + req.params.id);
-    fs.promises
-      .unlink(path.join(config.storageDir, rows[0].stored_name))
-      .catch(() => {});
+    conn.release();
+    // 事务提交后再物理删盘（删盘失败仅留孤儿文件，不影响一致性）
+    if (storedName) {
+      fs.promises.unlink(path.join(config.storageDir, storedName)).catch(() => {});
+    }
     res.json({ ok: true, points_revoked: revoked });
   })
 );

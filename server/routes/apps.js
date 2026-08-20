@@ -9,7 +9,8 @@ const { rateLimit } = require('../utils/rateLimit');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { extractLinks, resolveShare } = require('../qq/feed-links');
-const { grantInTx, revoke } = require('../utils/points');
+const { grantInTx, revoke, revokeInTx, deactivatePurchasesInTx } = require('../utils/points');
+const { cancelChannelPurchase } = require('../utils/channelOps');
 const { auditDisplayText } = require('../utils/audit');
 
 const router = express.Router();
@@ -241,15 +242,50 @@ router.get(
 );
 
 // 删除
+// R3-3：删除与积分回扣同一事务；R3-4：作废相关商城购买（wall_top），并尽力撤销频道置顶/加精
 router.delete(
   '/:id',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await query('SELECT id FROM apps WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-    if (rows.length === 0) return res.status(404).json({ error: '应用不存在' });
-    await query('DELETE FROM apps WHERE id = ?', [req.params.id]);
-    // 删除轻应用回扣提交积分（与文件删除一致）
-    const revoked = await revoke(req.user.id, 'app_submit', 'app:' + req.params.id);
+    const appId = Number(req.params.id);
+    const conn = await pool.getConnection();
+    let revoked = null;
+    let channelPurchases = [];
+    try {
+      await conn.beginTransaction();
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [req.user.id]);
+      const [rows] = await conn.execute(
+        'SELECT id FROM apps WHERE id = ? AND user_id = ? FOR UPDATE',
+        [appId, req.user.id]
+      );
+      if (rows.length === 0) {
+        await conn.rollback();
+        conn.release();
+        return res.status(404).json({ error: '应用不存在' });
+      }
+      // 收集待撤销的频道购买（app_top/app_essence，提交后尽力执行外部撤销）
+      const [cps] = await conn.execute(
+        "SELECT id, user_id, item, feed_id, feed_extra FROM purchases WHERE user_id = ? AND ref_type = 'app' AND ref_id = ? AND item IN ('app_top','app_essence') AND status = 'active' AND expires_at > NOW() FOR UPDATE",
+        [req.user.id, appId]
+      );
+      channelPurchases = cps;
+      revoked = await revokeInTx(conn, req.user.id, 'app_submit', 'app:' + appId);
+      await deactivatePurchasesInTx(conn, req.user.id, 'app', appId);
+      await conn.execute('DELETE FROM apps WHERE id = ?', [appId]);
+      await conn.commit();
+    } catch (err) {
+      try { await conn.rollback(); } catch (_) { /* ignore */ }
+      conn.release();
+      throw err;
+    }
+    conn.release();
+    // 提交后尽力撤销频道置顶/加精（不阻塞删除；失败写警告，需人工处理）
+    for (const cp of channelPurchases) {
+      const r = await cancelChannelPurchase(cp);
+      if (!r.ok) {
+        console.warn('[apps] 删除应用后撤销频道操作失败 purchase#' + cp.id + '（' + (r.reason || '未知') + '），需人工处理');
+      }
+    }
     res.json({ ok: true, points_revoked: revoked });
   })
 );

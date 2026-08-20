@@ -313,6 +313,16 @@ async function restoreFileSubmitInTx(conn, userId, fileId) {
   return amount;
 }
 
+// 事务内作废某作品相关的生效中商城购买（R3-4，2026-08-21）：
+// 删除文件/轻应用时调用，避免 wall_top 等记录在目标已删后仍残留"生效中"。
+// 频道类（app_top/app_essence）的外部撤销由调用方在提交后尽力执行（见 channelOps）。
+async function deactivatePurchasesInTx(conn, userId, refType, refId) {
+  await conn.execute(
+    "UPDATE purchases SET status = 'expired' WHERE user_id = ? AND ref_type = ? AND ref_id = ? AND status = 'active'",
+    [userId, refType, refId]
+  );
+}
+
 /**
  * 带每日上限的积分发放（点赞双向发分用）：用户行锁 + 事务内「SUM 每日已发 → 防重插入 → 更新余额」，
  * 并发下也不会突破 dailyCap（L4 修复：替代原"先查 SUM 再 grant"的非原子检查）。
@@ -351,4 +361,4 @@ async function grantCapped(userId, reason, refId, amount, dailyCap) {
   }
 }
 
-module.exports = { RULES, grant, grantInTx, grantCapped, getPoints, spend, spendPending, settlePurchase, revoke, revokeInTx, restoreFileSubmitInTx, bonusAmount };
+module.exports = { RULES, grant, grantInTx, grantCapped, getPoints, spend, spendPending, settlePurchase, revoke, revokeInTx, restoreFileSubmitInTx, deactivatePurchasesInTx, bonusAmount };

@@ -134,7 +134,8 @@
 
 | 功能 | 说明 | 位置 |
 | --- | --- | --- |
-| 体验 ticket | `GET /api/learn/nfti-ticket`：HMAC 签名一次性 ticket（tiny_id+pat_sid+5min 过期）→ 跳 `https://nfti.weaxi.cn/?pat_ticket=...` 免登录体验 | learn.js:107 |
+| 体验 ticket | `GET /api/learn/nfti-ticket`：HMAC 签名一次性 ticket（tiny_id+nickname+一次性授权码 sid+5min 过期，**不含会话 ID**）→ 跳 `https://nfti.weaxi.cn/?pat_ticket=...`；NFTI 凭 ticket 调 `POST /api/learn/nfti-session-grant` 服务端换发真实会话 ID（一次性） | learn.js |
+| 会话换发 | `POST /api/learn/nfti-session-grant`：校验 ticket（HMAC+过期+一次性授权码）后返回真实 QQ 会话 ID 给 NFTI 服务端（单次消费；URL 永不出现会话 ID） | learn.js |
 | 体验判定 | `GET /api/learn/nfti-status`：只读连接 nfti 库查 `test_results`（`assessment_type='nfti'`） | learn.js:132 |
 | 第2章任务 | `GET /api/learn/app-status`：近 7 天是否在频道发帖 **+ 是否已在本站投稿轻应用**，两者都满足才算完成 | learn.js:145 |
 | 第3章任务 | `GET /api/learn/project-status`：近 14 天是否上传过项目文件 | learn.js:191 |

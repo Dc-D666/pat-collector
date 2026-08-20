@@ -168,7 +168,8 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 - CLI 命令参数（已实测 schema）：`top-feed` 需 `--feed-id --user-id --create-time --guild-id --action 1|2`；`set-feed-essence` 需 `--feed-id --action 1|2`
 
 ### 跨站体验（第1章实操任务 → NFTI）
-- **机制**：PatPlayer 签 HMAC ticket（`GET /api/learn/nfti-ticket`，含 tiny_id+pat_sid+5min 过期）→ 前端跳 `https://nfti.weaxi.cn/?pat_ticket=...` → NFTI 校验后建"借用会话"
+- **机制**：PatPlayer 签 HMAC ticket（`GET /api/learn/nfti-ticket`，含 tiny_id+nickname+一次性授权码 sid+5min 过期，**不再携带会话 ID**——2026-08-21 安全修复）→ 前端跳 `https://nfti.weaxi.cn/?pat_ticket=...` → NFTI 校验 ticket 后调 `POST https://pat.weaxi.cn/api/learn/nfti-session-grant` 服务端换发真实会话 ID（一次性消费）→ 建"借用会话"
+- **⚠️ 跨仓库同步**：NFTI 仓库（/home/nfti/NF-BTI）`backend/server.js` 已同步新格式（`verifyPatTicket` 校验 `sid` 授权码 + `exchangePatSession` 换发）；docker-compose 需配置 `PAT_BASE_URL`。若 NFTI 未更新，旧解析会因缺少 pat_sid 拒绝 ticket，体验任务将失败
 - **借用会话**：NFTI 会话的 `cliHome` 指向 docker 只读挂载的 PatPlayer 会话目录 `/patplayer-sessions/<sid>`（复用真实 QQ token，**无需重新扫码，不违反单设备登录**——token 从不改变）
 - **完成判定**：`GET /api/learn/nfti-status` 直查 nfti 库 `test_results WHERE tiny_id=? AND assessment_type='nfti'`（PatPlayer 的 DB 账号被授权只读 nfti 库）；有记录 → 前端自动标记任务完成
 - 未 QQ 登录（无 tiny_id）：前端提示必须 QQ 登录，ticket 接口拒绝

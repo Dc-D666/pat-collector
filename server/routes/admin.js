@@ -12,7 +12,8 @@ const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAdmin } = require('../middleware/admin');
 const { writeAdminLog } = require('../utils/adminLog');
-const { grant, revoke, bonusAmount, revokeInTx, restoreFileSubmitInTx } = require('../utils/points');
+const { grant, revoke, bonusAmount, revokeInTx, restoreFileSubmitInTx, deactivatePurchasesInTx } = require('../utils/points');
+const { cancelChannelPurchase } = require('../utils/channelOps');
 const { freeDiskBytes } = require('../utils/disk');
 const qqSessions = require('../qq/sessions');
 
@@ -194,6 +195,18 @@ router.delete('/users/:id', asyncHandler(async (req, res) => {
   if (!row) return res.status(404).json({ error: '用户不存在' });
   // R2-1：最高管理员账号不可被删除
   if (isSuperAdminRow(row)) return res.status(403).json({ error: '不能删除最高管理员账号' });
+  // R3-4：删除前先撤销该用户生效中的频道置顶/加精（删用户会级联删 purchases，
+  // jobs 届时找不到记录无法自动回收；必须在删库前用其 QQ 会话主动撤销）
+  const [activeChannel] = await query(
+    "SELECT id, user_id, item, feed_id, feed_extra FROM purchases WHERE user_id = ? AND item IN ('app_top','app_essence') AND status = 'active' AND expires_at > NOW()",
+    [uid]
+  );
+  for (const cp of activeChannel) {
+    const r = await cancelChannelPurchase(cp);
+    if (!r.ok) {
+      console.warn('[admin] 删除用户前撤销频道操作失败 purchase#' + cp.id + '（' + (r.reason || '未知') + '），频道侧需人工处理');
+    }
+  }
   const files = await query('SELECT stored_name FROM files WHERE user_id = ?', [uid]);
   // R2-14：删除用户时立即撤销并清理其 QQ 会话（CLI token 残留于 storage/qq-sessions）
   if (row.qq_session_id) {
@@ -343,6 +356,8 @@ router.post('/audit/:id/review', asyncHandler(async (req, res) => {
     } else if (action === 'delete') {
       await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [f.user_id]);
       revoked = (await revokeInTx(conn, f.user_id, 'file_submit', 'file:' + fid)) || 0;
+      // R3-4：作废该文件相关商城购买（wall_top 置顶）
+      await deactivatePurchasesInTx(conn, f.user_id, 'file', fid);
       await conn.execute('DELETE FROM files WHERE id = ?', [fid]);
     } else {
       await conn.rollback();
@@ -903,6 +918,7 @@ router.post('/audit/batch', asyncHandler(async (req, res) => {
       await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [f.user_id]);
       if (action === 'delete') {
         await revokeInTx(conn, f.user_id, 'file_submit', 'file:' + fid);
+        await deactivatePurchasesInTx(conn, f.user_id, 'file', fid);
         await conn.execute('DELETE FROM files WHERE id = ?', [fid]);
       } else {
         const restored = await restoreFileSubmitInTx(conn, f.user_id, fid);

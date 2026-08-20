@@ -8,7 +8,7 @@ const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../utils/rateLimit');
 const { grantInTx } = require('../utils/points');
-const { hashPassword } = require('../utils/pwd');
+const { hashPassword, verifyPassword } = require('../utils/pwd');
 const { pinyinCandidates } = require('../utils/pinyin');
 
 const router = express.Router();
@@ -151,9 +151,25 @@ router.post(
       }
       // 防冒名：该身份已被 QQ 账号绑定 → 拒绝访客登记。
       // 否则任何人填「姓名+班级」即可拿到对方（QQ 用户）的项目地址令牌，查看/下载其文件。
-      // 纯访客身份（无 QQ 绑定）仍走幂等找回地址的流程（地址即凭证，文档已明示）。
+      // 纯访客身份（无 QQ 绑定）走幂等找回地址的流程（地址即凭证，文档已明示）。
       if (existing[0].qq_tiny_id) {
         return res.status(403).json({ error: '该姓名已由 QQ 账号绑定，请使用 QQ 扫码登录' });
+      }
+      // R3-5（2026-08-21）高危修复：已有访客账号不能仅凭「班级+姓名」取回 token——
+      // 任何知道对方班级姓名的人都能接管其项目地址（查看/下载/上传/删除/改信息）。
+      // 必须验证额外凭据：
+      //   - 设置了自定义安全密码 → 校验密码；
+      //   - 未设置自定义密码 → 拒绝自动找回（默认密码等于公开，无法作为可靠凭据），
+      //     引导联系频道主人工找回。
+      if (existing[0].guest_pwd_hash) {
+        const pwd = String((req.body && req.body.guest_pwd) || '');
+        if (!verifyPassword(pwd, existing[0].guest_pwd_hash)) {
+          return res.status(403).json({ error: '该姓名已登记过访客账号，安全密码不正确。如忘记密码请联系频道主' });
+        }
+      } else {
+        return res.status(403).json({
+          error: '该姓名已登记过访客账号，且未设置找回密码。为防止他人冒名，请使用原项目地址访问；如遗失请联系频道主',
+        });
       }
       row = existing[0];
     } else {

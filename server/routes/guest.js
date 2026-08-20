@@ -9,10 +9,10 @@ const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
 const config = require('../config');
-const { query } = require('../db');
+const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { rateLimit } = require('../utils/rateLimit');
-const { revoke } = require('../utils/points');
+const { revokeInTx } = require('../utils/points');
 const { verifyPassword } = require('../utils/pwd');
 const { runMulter, ensureDiskSpace, runUploadPipeline, sanitizeName, extOf } = require('../utils/upload');
 
@@ -223,9 +223,30 @@ router.delete(
     );
     if (rows.length === 0) return res.status(404).json({ error: '文件不存在' });
 
-    await query('DELETE FROM files WHERE id = ?', [req.params.id]);
-    // 回扣提交作品文件积分（若发过）
-    const revoked = await revoke(user.id, 'file_submit', 'file:' + req.params.id);
+    // R3-3：删除与回扣同一事务（与系统内删除一致）
+    const conn = await pool.getConnection();
+    let revoked = null;
+    try {
+      await conn.beginTransaction();
+      await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [user.id]);
+      const [lockRows] = await conn.execute(
+        'SELECT stored_name FROM files WHERE id = ? AND user_id = ? FOR UPDATE',
+        [req.params.id, user.id]
+      );
+      if (lockRows.length === 0) {
+        await conn.rollback();
+        conn.release();
+        return res.status(404).json({ error: '文件不存在' });
+      }
+      revoked = await revokeInTx(conn, user.id, 'file_submit', 'file:' + req.params.id);
+      await conn.execute('DELETE FROM files WHERE id = ?', [req.params.id]);
+      await conn.commit();
+    } catch (err) {
+      try { await conn.rollback(); } catch (_) { /* ignore */ }
+      conn.release();
+      throw err;
+    }
+    conn.release();
     fs.promises.unlink(path.join(config.storageDir, rows[0].stored_name)).catch(() => {});
     return res.json({ ok: true, points_revoked: revoked });
   })

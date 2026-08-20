@@ -327,22 +327,34 @@ router.post(
       return res.status(400).json({ error: '参数错误' });
     }
 
-    // 目标作品存在性 + 禁止自赞（防止自赞刷分）；违规下架作品不可点赞（L5 修复）
+    // 目标作品存在性 + 禁止自赞（防止自赞刷分）；违规下架作品不可点赞（L5 修复）。
+    // R3-6（2026-08-21）：完全复用作品墙可见性——文件须已过审、所属用户须 active，
+    // 链接须已验证；防止通过枚举 ID 点赞"不应公开"的作品刷双方积分。
     let owner = 0;
     if (targetType === 'file') {
-      const rows = await query('SELECT user_id, audit_status FROM files WHERE id = ?', [targetId]);
-      if (rows.length === 0) return res.status(404).json({ error: '作品不存在' });
-      if (rows[0].audit_status === 'flagged') return res.status(403).json({ error: '该作品因违规已被下架' });
+      const rows = await query(
+        "SELECT f.user_id, u.status FROM files f JOIN users u ON u.id = f.user_id WHERE f.id = ? AND f.audit_status = 'reviewed'",
+        [targetId]
+      );
+      if (rows.length === 0) return res.status(404).json({ error: '作品不存在或未通过审核' });
+      if (rows[0].status !== 'active') return res.status(403).json({ error: '该用户账号已停用，作品不可点赞' });
       owner = rows[0].user_id;
     } else if (targetType === 'app') {
-      const rows = await query('SELECT user_id FROM apps WHERE id = ?', [targetId]);
+      const rows = await query(
+        'SELECT a.user_id, u.status FROM apps a JOIN users u ON u.id = a.user_id WHERE a.id = ?',
+        [targetId]
+      );
       if (rows.length === 0) return res.status(404).json({ error: '作品不存在' });
+      if (rows[0].status !== 'active') return res.status(403).json({ error: '该用户账号已停用，作品不可点赞' });
       owner = rows[0].user_id;
     } else {
-      // R2-7：仅已验证（verified=1）的 GitHub 链接可点赞——未验证链接不进作品墙，
-      // 但不能通过枚举 ID 点赞刷双方积分
-      const rows = await query('SELECT user_id FROM links WHERE id = ? AND verified = 1', [targetId]);
+      // 仅已验证（verified=1）的 GitHub 链接可点赞
+      const rows = await query(
+        'SELECT l.user_id, u.status FROM links l JOIN users u ON u.id = l.user_id WHERE l.id = ? AND l.verified = 1',
+        [targetId]
+      );
       if (rows.length === 0) return res.status(404).json({ error: '作品不存在或未通过验证' });
+      if (rows[0].status !== 'active') return res.status(403).json({ error: '该用户账号已停用，作品不可点赞' });
       owner = rows[0].user_id;
     }
     if (owner === req.user.id) return res.status(400).json({ error: '不能给自己点赞' });
