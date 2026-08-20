@@ -2,15 +2,14 @@
 
 const express = require('express');
 const crypto = require('crypto');
-const mysql = require('mysql2/promise');
 const config = require('../config');
 const { query } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
 const { verify } = require('../utils/token');
-const qqSessions = require('../qq/sessions');
-const { runCli } = require('../qq/proxy');
 const readTimer = require('../utils/readTimer');
+const { hasNftiExperience } = require('../utils/nfti');
+const { getAppPostedStatus, getProjectSubmitted } = require('../utils/learnStatus');
 
 const router = express.Router();
 
@@ -28,21 +27,6 @@ function signPatTicket(user, patSid) {
   return `${b64}.${sig}`;
 }
 
-// 判定用户在 NFTI 是否已完成过人格测试（只读 nfti 库）
-async function hasNftiExperience(tinyId) {
-  if (!config.nftiDb.password || !tinyId) return false;
-  const conn = await mysql.createConnection(config.nftiDb);
-  try {
-    const [rows] = await conn.execute(
-      "SELECT COUNT(*) AS cnt FROM test_results WHERE tiny_id = ? AND assessment_type = 'nfti'",
-      [String(tinyId)]
-    );
-    return rows.length > 0 && Number(rows[0].cnt) > 0;
-  } finally {
-    await conn.end();
-  }
-}
-
 // 章节列表：按章节+排序返回摘要（不含正文，列表页够用）
 router.get(
   '/',
@@ -50,12 +34,33 @@ router.get(
     const rows = await query(
       'SELECT id, slug, chapter, title, summary, updated_at FROM articles ORDER BY chapter ASC, sort_order ASC, id ASC'
     );
-    // 按章节分组，返回 [{ chapter, title, articles: [...] }]
+    // 每章完成人数：完成"整章积分已发放"（points_log reason='task' ref_id='article:<id>'）
+    // 即完成该章全部任务；一章含多篇文章时，须该章所有文章都完成才算完成本章。
+    const doneRows = await query(
+      `SELECT g.chapter, COUNT(*) AS completed_users
+       FROM (
+         SELECT u.id AS uid, a.chapter, COUNT(DISTINCT a.id) AS done_articles
+         FROM users u
+         JOIN articles a ON EXISTS (
+           SELECT 1 FROM points_log pl
+           WHERE pl.user_id = u.id AND pl.reason = 'task'
+             AND pl.ref_id = CONCAT('article:', a.id)
+         )
+         GROUP BY u.id, a.chapter
+       ) g
+       JOIN (
+         SELECT chapter, COUNT(*) AS total_articles FROM articles GROUP BY chapter
+       ) c ON c.chapter = g.chapter
+       WHERE g.done_articles = c.total_articles
+       GROUP BY g.chapter`
+    );
+    const doneMap = new Map(doneRows.map((r) => [Number(r.chapter), Number(r.completed_users)]));
+    // 按章节分组，返回 [{ chapter, title, completed_count, articles: [...] }]
     const chapters = [];
     const map = new Map();
     for (const r of rows) {
       if (!map.has(r.chapter)) {
-        const entry = { chapter: r.chapter, title: '', articles: [] };
+        const entry = { chapter: r.chapter, title: '', completed_count: doneMap.get(r.chapter) || 0, articles: [] };
         map.set(r.chapter, entry);
         chapters.push(entry);
       }
@@ -142,55 +147,16 @@ router.get(
   })
 );
 
-// 第2章任务检测：用户最近 7 天是否在频道发表过帖子（QQ 登录；复用 auto-scan 的查帖逻辑，只检测不提取）
+// 第2章任务检测：判定"是否已发表 AI 应用"（口径与任务完成核验共用 utils/learnStatus）。
+// 优先看站内投稿：apps 表有带来源帖（source_feed_id）的记录即视为已发帖——
+// 来源帖在自动/手动识别导入阶段已核验归属（verifyOwnFeed），提交接口也会再复核，
+// 无需重复扫频道；也避免旧帖超出"最近 7 天 / 最近 24 条"扫描窗口被误判未发帖。
+// 尚未导入的用户走 CLI 扫描兜底（近期发过帖也可自动完成）。
 router.get(
   '/app-status',
   requireAuth,
   asyncHandler(async (req, res) => {
-    // 是否已在本站投稿轻应用（apps 表有带来源帖子的记录）
-    const appRows = await query(
-      "SELECT COUNT(*) AS cnt FROM apps WHERE user_id = ? AND source_feed_id IS NOT NULL AND source_feed_id != ''",
-      [req.user.id]
-    );
-    const submitted = Number(appRows[0].cnt) > 0;
-    if (!req.user.qq_tiny_id) {
-      return res.json({ posted: false, submitted, need_login: true });
-    }
-    const rows = await query('SELECT qq_session_id FROM users WHERE id = ?', [req.user.id]);
-    const sid = rows.length && rows[0].qq_session_id ? rows[0].qq_session_id : '';
-    const s = sid ? qqSessions.getSession(sid) : null;
-    if (!s || !s.token_obtained || !s.tiny_id) {
-      return res.json({ posted: false, submitted, need_login: true });
-    }
-    const env = qqSessions.sessionEnv(s);
-    let posted = false;
-    let postCount = 0;
-    try {
-      const feedsRes = await runCli(
-        ['feed', 'get-guild-feeds', '--guild-id=' + config.guildId, '--get-type=2', '--count=24'],
-        15000,
-        env
-      );
-      const feeds = (feedsRes && feedsRes.data && feedsRes.data.feeds) || [];
-      const tinyId = s.tiny_id;
-      const now = Date.now();
-      for (const f of feeds) {
-        const aid = String(f.author_id || (f.author && f.author.tiny_id) || '');
-        if (aid !== tinyId) continue;
-        // 时间窗口：最近 7 天（create_time 兼容秒/毫秒时间戳；字符串或缺失则视为近期）
-        let recent = true;
-        if (f.create_time) {
-          const t = Number(f.create_time);
-          if (!isNaN(t) && t > 0) {
-            const ms = t < 1e12 ? t * 1000 : t;
-            recent = now - ms < 7 * 24 * 3600 * 1000;
-          }
-        }
-        if (recent) postCount++;
-      }
-      posted = postCount > 0;
-    } catch (_) { /* CLI 异常：返回未检测到，前端可重试 */ }
-    res.json({ posted, post_count: postCount, submitted });
+    res.json(await getAppPostedStatus(req.user.id, req.user));
   })
 );
 
@@ -199,12 +165,7 @@ router.get(
   '/project-status',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await query(
-      'SELECT COUNT(*) AS cnt FROM files WHERE user_id = ? AND uploaded_at >= (NOW() - INTERVAL 14 DAY)',
-      [req.user.id]
-    );
-    const cnt = rows.length ? Number(rows[0].cnt) : 0;
-    res.json({ submitted: cnt > 0, file_count: cnt });
+    res.json(await getProjectSubmitted(req.user.id));
   })
 );
 
@@ -242,6 +203,15 @@ router.get(
       try { tasks = typeof raw === 'string' ? JSON.parse(raw) : raw; }
       catch (_) { tasks = []; }
     }
+    // 2026-08-21：选择题判分移到服务端——不再下发答案与解析（防客户端读取后刷题）。
+    // 答案/解析仅在答对（/api/points/quiz）或已完成（/api/points/task-progress）时返回。
+    tasks = tasks.map((t) => {
+      if (t && t.type === 'quiz') {
+        const { answer, explain, ...rest } = t;
+        return rest;
+      }
+      return t;
+    });
     res.json({
       article: {
         id: a.id,

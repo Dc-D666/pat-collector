@@ -112,18 +112,17 @@ router.get(
   })
 );
 
-// HTML 文件预览（只读，浏览器直接打开）：全校公开（登录即可预览）。
-// 鉴权：Bearer 或 ?token=（顶层导航无法带自定义请求头，故支持 query 传 token）。
-// 安全：CSP sandbox allow-scripts——脚本可运行（预览正常），但页面为独特源（opaque origin），
-// 无法访问本站 localStorage / 调用本站 API，防存储型 XSS 窃取登录态。
+// HTML 文件预览（只读）：全校公开（登录即可预览）。
+// 鉴权：仅 Bearer 请求头（2026-08-20 修复：禁止 ?token= query——预览 URL 会暴露令牌，
+// 上传的 HTML 可读取自身 location.href 外传令牌，导致任意登录用户账号被窃取。
+// 前端改用 /preview.html 预览壳，经 fetch+请求头取内容、sandbox iframe 渲染）。
+// 安全：响应带 CSP sandbox allow-scripts；预览壳再套一层 sandbox iframe（unique origin）。
 router.get(
   '/preview/:id',
   asyncHandler(async (req, res) => {
     const { verify } = require('../utils/token');
-    let payload = null;
     const header = req.headers.authorization || '';
-    if (header.startsWith('Bearer ')) payload = verify(header.slice(7));
-    if (!payload && req.query.token) payload = verify(String(req.query.token));
+    const payload = header.startsWith('Bearer ') ? verify(header.slice(7)) : null;
     if (!payload) return res.status(401).json({ error: '未登录' });
 
     const rows = await query(
@@ -138,8 +137,9 @@ router.get(
     if (ext !== 'html' && ext !== 'htm') {
       return res.status(400).json({ error: '仅支持 HTML 文件预览' });
     }
-    // 违规下架：flagged 文件不可预览（L5 修复）；所有者本人除外
-    if (file.audit_status === 'flagged' && file.user_id !== req.user.id) {
+    // 违规下架：flagged 文件不可预览（L5 修复）；所有者本人除外。
+    // 注意：本路由未挂 requireAuth（自行解析 Bearer 到 payload），所有者判断用 payload.uid
+    if (file.audit_status === 'flagged' && file.user_id !== payload.uid) {
       return res.status(403).json({ error: '该作品因违规已被下架' });
     }
     const absPath = path.join(config.storageDir, file.stored_name);

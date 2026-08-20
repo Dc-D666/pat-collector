@@ -32,6 +32,7 @@ Views.overview = async () => {
     { label: '总文件数', value: stats.total_files },
     { label: '总大小', value: formatSize(stats.total_size) },
     ...(stats.total_apps ? [{ label: 'AI 轻应用', value: stats.total_apps }] : []),
+    ...(stats.total_links ? [{ label: 'GitHub 项目', value: stats.total_links }] : []),
   ];
 
   const content = document.getElementById('overview-content');
@@ -57,7 +58,7 @@ Views.overview = async () => {
                 <button class="student-head" data-toggle="stu-${ci}-${si}">
                   <span class="avatar" style="width:30px;height:30px;font-size:13px;">${escapeHtml((s.display_name || '?').trim().charAt(0))}</span>
                   <span class="stu-name">${escapeHtml(s.display_name || '')}</span>
-                  <span class="stu-stats">${s.file_count} 文件${s.app_count ? ' · ' + s.app_count + ' 轻应用' : ''} · ${formatSize(s.total_size)} · ${formatTime(s.last_submit)}</span>
+                  <span class="stu-stats">${s.file_count} 文件${s.app_count ? ' · ' + s.app_count + ' 轻应用' : ''}${s.link_count ? ' · ' + s.link_count + ' GitHub' : ''} · ${formatSize(s.total_size)} · ${formatTime(s.last_submit)}</span>
                   <span class="chevron">▾</span>
                 </button>
                 <div class="student-files">

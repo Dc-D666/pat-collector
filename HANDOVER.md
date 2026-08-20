@@ -248,7 +248,7 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 49. **R3 恶意程序扫描（ClamAV，2026-08-16 上线）**：本机为 OpenCloudOS 9.4（dnf 系，EPOL 源含 clamd/clamav-freshclam）；已装 clamd 1.0.7 + 签名库（main/daily/bytecode 共 360 万+ 签名），服务 `systemctl enable --now clamd@scan clamav-freshclam.service`；**clamd 仅监听 127.0.0.1:3310**（务必确认 `TCPAddr 127.0.0.1`，勿公网暴露）。集成：`server/utils/clamav.js`（clamd INSTREAM 协议流式扫描，`scanFile(filePath)` → `{available, clean, virus}`；不可用/超时返回 available:false）；上传管线 `utils/upload.js` 在**落库/发分前**扫描，命中病毒直接删盘拒收 400（无 DB/积分副作用）；`config.malwareScan`（env `MALWARE_SCAN`，默认 1）。扫描不可用 → 降级放行（与 DeepSeek fail-open 一致）。实测：EICAR 拒收、正常文件放行
 50. **P2 全局访客登记限速（2026-08-16）**：`routes/auth.js` /guest 新建身份分支加进程内滑动窗口 `guestRegTimes`（`config.guestRegGlobalPerHour`，env `GUEST_REG_GLOBAL_HOUR`，默认 60/小时）——**只统计新建身份**，幂等找回地址不消耗额度；批量脚本即使换 IP 绕过单 IP 限流也会全局熔断 429。实测：阈值 3 时第 4 个 429、找回同身份 200
 51. **2026-08-16 二轮（用户拍板）**：① O1 排行榜加「在校/全部」切换（`GET /api/points/leaderboard?scope=in_school|all`，默认 in_school=标准班 2401-2425/2501-2524/2601-2624，全部=含毕业生/外校；前端 points.js 滑块局部刷新）；② R1 落地：访客作品**不进作品展/总览**（class.js wall/overview 的 JOIN 加 `u.qq_tiny_id IS NOT NULL`，QQ 合并后自动转正）；③ R3 双扫描：新增 `server/utils/virustotal.js`（VT v3 API：sha256 哈希查询命中即判 → 未收录且 ≤32MB 则上传；429 额度耗尽进程内熔断 12h 自动降级只跑 ClamAV；key 在 `.env` 的 `VIRUSTOTAL_API_KEY`，勿泄露/勿提交）；④ P3 积分重平衡：被赞 +2→**+5**（日上限 30→**20**）、提交文件 30→**25**、阅读 10→**8**、整章任务 20→**15**、毕业 50→**40**（RULES 在 utils/points.js 单源；前端 tips/README/FEATURES 已同步）；评委打分走既有 `POST /api/admin/users/:id/points`（±，reason 备注评委评审）
-52. **评委评审（P3，2026-08-16 上线；2026-08-17 升级为独立页签 `#/admin/judge`）**：管理后台「评审」页签 → 打分表单（文件/应用搜索选择器 + 4 维度输入 + 实时预览）+ **待评审作品列表**（`GET /api/admin/judge?pending=1`，未评审的 QQ 用户作品）+ 已评审记录（可重新评审）→ 4 维度 0-10 整数打分（`JUDGE_DIMS`：创意 30% / 内容 25% / 完成 25% / 价值观 20%）→ 实时预览综合分与积分 → 提交。算法：`total=Σ(分×权重)`（2 位小数）→ `points=total<6?0:round(round(total*100)*30/100)`（满分 300，整数化防浮点漂移——勿用 `Math.round(total*30)` 直接乘，8.45×30 会因浮点得 253）。表 `judge_reviews`（ref_type/ref_id 唯一，覆盖评审 upsert）；差额发放走 `applyJudgePoints`（事务+行锁，points_log reason=`judge_review`，ref 带 `:j<时间戳>` 保证唯一键）；接口 `GET/POST /api/admin/judge`；管理员操作记 admin_log。P2 增强（口令/验证码）用户已取消
+52. **评委评审（P3，2026-08-16 上线；2026-08-17 升级为独立页签 `#/admin/judge`；2026-08-17 权重改为 4:3:2:1）**：管理后台「评审」页签 → 打分表单（文件/应用搜索选择器 + 4 维度输入 + 实时预览）+ **待评审作品列表**（`GET /api/admin/judge?pending=1`，未评审的 QQ 用户作品）+ 已评审记录（可重新评审）→ 4 维度 0-10 整数打分（`JUDGE_DIMS`：创意 40% / 内容 30% / 完成 20% / 价值观 10%，4:3:2:1）→ 实时预览综合分与积分 → 提交。算法：`total=Σ(分×权重)`（2 位小数）→ `points=total<6?0:round(round(total*100)*30/100)`（满分 300，整数化防浮点漂移——勿用 `Math.round(total*30)` 直接乘，8.45×30 会因浮点得 253）。表 `judge_reviews`（ref_type/ref_id 唯一，覆盖评审 upsert）；差额发放走 `applyJudgePoints`（事务+行锁，points_log reason=`judge_review`，ref 带 `:j<时间戳>` 保证唯一键）；接口 `GET/POST /api/admin/judge`；管理员操作记 admin_log。P2 增强（口令/验证码）用户已取消
 53. **⚠️ TDZ 坑（2026-08-17，评审页加载不出来的根因）**：`Views.admin` 函数体内 `const JUDGE_DIMS` 声明在函数体**靠后**，但 `loaders` 分发（前面）调用 `loadJudge()` 时该 const 处于**暂时性死区** → `ReferenceError: Cannot access 'JUDGE_DIMS' before initialization` → 页面内容从未渲染。**教训**：函数声明会提升、`const` 不会；页签级函数引用的模块级/函数级 const 必须声明在 loaders 分发之前。`node --check` 查不出 TDZ，用「DOM 桩 + 真实调用 Views.admin(page)」的 stub 测试才能抓到（stub 方法见本轮）。另：`audit_logs` 现记录 `kind='file_scan'`（每次上传的 ClamAV/VT 扫描结论，approved/rejected + 原因摘要 + ref_id=文件 id，`utils/upload.js` logScan）；作品信息/轻应用保存按钮有「审核中.」点点滚动动画（disabled 变浅，`public/js/dashboard.js` 两处）
 
 ## 9. 部署环境
@@ -307,3 +307,169 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 - 若 PatPlayer 要独立 QQ 频道（不用南方中学频道），改 `.env` 的 `GUILD_ID`（会连带 NFTI 跨站失效，两边都要改）
 - 若访客直传也要防冒名/防盗链，可参考 NFTI 的邀请码 + 设备指纹方案，或给 `guest_token` 加过期/重置机制
 - NFTI 项目 `/home/nfti/NF-BTI`，QQ 集成思路同源；跨站体验的 import-session/cliHome 机制在其 backend/server.js 中
+
+## 13. 2026-08-20 限时积分加成（1.2 倍）
+
+- **顶部横幅**改为「🚀 系统上线，限时可得 1.2 倍积分」（index.html，静态文本）。
+- **限时加成**：2026-08-20 00:00 ~ 2026-08-23 24:00（北京时间，UTC+8，即 `[2026-08-20T00:00, 2026-08-24T00:00)` 北京时），窗口内**所有正向积分 ×1.2**（`Math.round(amount*1.2)`，只乘正向发放，回扣/负数不乘）。实现集中在 `server/utils/points.js`：`BONUS_START_TS/BONUS_END_TS`（`Date.UTC(2026,7,20,0,0,0)-8h` 与 `Date.UTC(2026,7,24,0,0,0)-8h`，不依赖服务器时区）+ `bonusAmount()`；`grant()` 与 `grantCapped()` 入口处调用；评审积分在 `routes/admin.js` 的 `applyJudgePoints` 里对正向 delta 调用（`bonusAmount` 已从 points.js 导出）。**管理员手动调整 `admin_adjust`（正值）也走 grant()，同样会乘**——这是"所有积分"的预期行为。
+- **幂等/回扣不受影响**：points_log 记录的是乘倍后的实际金额；`revoke()` 按流水原额扣回（删掉加成期提交的文件会扣回乘倍后的数）。
+- 活动结束后（2026-08-24 00:00 北京时起）`bonusAmount` 自动失效；如需提前结束/改倍率，改 `points.js` 顶部常量并重启 pm2 即可。前端横幅文案需同步改（index.html）。
+
+### 13.1 超限提交显示 +0 与 ⓘ（2026-08-20）
+
+- 背景：有同学误以为「提交作品超 5 次导致 +30 未计入」——实际 `REASON_CAPS`（file_submit≤5 / app_submit≤3）超限时 `grant()` 原本**静默跳过、不写流水**，积分记录页什么都看不到。
+- 改动：`server/utils/points.js` `grant()` 超限分支改为 `INSERT IGNORE ... amount=0`（ref 同幂等键，同一作品只记一条 +0），仍返回 `null`（调用方行为不变）；`revoke()` 对 0 行不扣分（amount<=0 直接 return），`restoreFilePoints` 不受影响。
+- 前端：`public/js/points.js` 积分记录页对 `amount===0` 的行显示中性色 `+0 ⭐` + ⓘ 按钮（`ZERO_REASON_HINTS`：file_submit/app_submit 专属文案，点击 `Utils.toast` 说明「超出计分规则」）；`style.css` 新增 `.lb-info`。
+- 注意：+0 行会计入 `COUNT(*)` 上限判断（本来也已达上限，无影响）；改倍率/窗口见 §13。
+
+### 13.2 轻应用重复提交修复（2026-08-20）
+
+- **Bug**：自动识别与手动识别同一帖子会得到同一 app_url，`POST /api/apps` 无去重 → 同一作品可入库两条列表（实测 Codex 用户 apps 28/41 重复，且重复的 41 还多拿了 +18 星，15×1.2）。
+- **修复**：① `server/routes/apps.js` 提交接口在「用户行锁事务」内先查 `SELECT id FROM apps WHERE user_id=? AND app_url=? LIMIT 1`，存在则 400「该作品已提交过了，请勿重复提交」（与 maxAppsPerUser 检查同一事务，并发安全）；② `public/js/dashboard.js` 新增模块级 `submittedAppUrls`（loadApps 时刷新），`addScanItems` 对已提交 url 直接跳过，识别结果不再提示重复项。
+- **清理**：`revoke(36,'app_submit','app:41')` 回扣 18 星 + 删 apps 行 + admin_log 记 `apps.dedupe.cleanup`（admin_id=3）。去重键用 **app_url** 而非 source_feed_id——同一帖子可能含多个应用链接，按 feed 去重会误杀同帖多应用。
+
+### 13.3 GitHub 项目外链（2026-08-20，讨论后落地）
+
+- **需求**：频繁更新的项目用 GitHub 链接最合适；**防冒充是核心**（粘贴别人仓库 URL 冒充零成本，比文件上传更严重）。
+- **决策**：Token 文件验证 + +25⭐ 最多 5 个 + 仅 GitHub 公开仓库。
+- **实现**：新表 `links`（`uq_link_user_url` 唯一）；`server/routes/links.js`：POST / 生成 `PAT-` token（解析 `github.com/{owner}/{repo}`）→ POST /:id/verify 读 `raw.githubusercontent.com/{owner}/{repo}/HEAD/nanfang-pat.txt` 比对（8s 超时，404/网络失败=未验证可重试）→ 通过发分 `link_submit`（RULES 25 / REASON_CAPS 5，走 grant 自动吃限时 1.2 倍）；删除 `revoke('link_submit','link:<id>')`。
+- **接入**：`index.js` 挂 `/api/links`；点赞接口支持 `link` 类型；作品展 wall 混排已验证外链（🔗 + ✓ 已认证 + owner/repo + 前往 GitHub），overview 统计 `link_count`/`total_links`；管理后台新增「外链」页签（`/api/admin/links` 列表 + DELETE，回扣+审计）；「我的项目」新增第三个 Tab。
+- **注意**：`GET /api/links` 不返回 verify_token（只在下单响应里给用户）；验证幂等（verified 后不再发分）；仓库改名/删除后链接失效属预期（作品展展示的是提交时 URL）。
+
+### 13.4 审查修复（2026-08-20）
+
+- **网络坑（重要）**：本服务器（腾讯云境内）访问 `raw.githubusercontent.com` **间歇超时**（curl/node fetch 时而 200 时而 000）；`raw.gitmirror.com`、`ghproxy.com` 不可达。**jsDelivr `cdn.jsdelivr.net/gh/{owner}/{repo}@HEAD/...` 稳定可达**（@HEAD 解析默认分支）。`links.js fetchRepoToken` 已改为 jsDelivr 主源 + raw 兜底；验证失败提示加「刚提交请等 1 分钟（CDN 缓存延迟）」。
+- **verify 幂等补发**：原 `if (row.verified) return` 早退会让"验证成功但发分途中 500"的链接永久漏分；改为已认证也走 `grant()`（按 ref 幂等）补发。
+- **token 可找回**：`GET /api/links` 现在返回 `verify_token`（仅本人可见），前端列表加「验证指引」按钮（`showVerifyBox` 复用），刷新页面后仍可完成验证。
+- **url 规范化**：入库统一存 `https://github.com/{owner}/{repo}`，去重按规范化值（`/foo/bar/` 与 `/foo/bar` 不再算两条）。
+- **守卫**：owner/repo 拒绝含 `..`（防 raw URL 路径穿越，GitHub 本身也不允许）。
+- **+0 提示**：前端 `ZERO_REASON_HINTS` 补 `link_submit`（超 5 个验证时 ⓘ 显示「提交 GitHub 项目最多计 5 个」）。
+- **全库对账**：`SELECT users WHERE points <> SUM(points_log.amount)` → 0 条不一致（1.2 倍/回扣/+0/评审全部一致）。
+
+### 13.5 ClamAV 移除 → 纯 VirusTotal（2026-08-20，内存危机处理）
+
+- **背景**：2GB 小服务器内存打满、swap 耗尽。实测 **clamd 常驻占 744MB**（签名库载入内存），连"按需 clamscan"也不可行（每次扫描瞬时加载 ~600MB 同样触发 OOM）。用户决策：只停 ClamAV，其余服务不动。
+- **改动**：① `server/utils/clamav.js` **已删除**，`utils/upload.js` 扫描块改为纯 `scanWithVirusTotal`（`config.malwareScan && config.virustotal.enabled` 门控；infected 拒收删盘，其余状态放行并记 audit_logs file_scan）；② `systemctl disable --now clamd@scan clamav-freshclam`（释放 ~730MB，可用内存 399→1129MB）；③ virustotal.js 清理残留"ClamAV 兜底"文案；④ 实测：普通文件放行、EICAR 被 VT 拦截（W32.EicarTest.Trojan）。
+- **注意**：① VT 免费档 4 次/分、500 次/天，429 熔断 12h 降级放行——高峰期可能短暂无扫描（fail-open，可接受）；② >32MB 文件不传 VT（哈希未命中即放行）；③ 如需恢复本地扫描：`dnf install clamd clamav-freshclam` + `systemctl enable --now clamd@scan` + 恢复 utils/clamav.js（旧版在 git 历史）；④ freshclam 已停，签名库不再更新（本地已无扫描器，无所谓）。
+
+### 13.6 上线前安全审查修复（2026-08-20，双子代理独立审计 + 人工复核）
+
+**严重项（已修复）**
+- **HTML 预览令牌泄露（存储型 XSS 链 → 账号接管）**：旧实现 `/api/files/preview/:id?token=...`（及 guest preview）把令牌放 URL，CSP sandbox 挡不住上传 HTML 读自身 `location.href` 外传令牌。修复：① 新建 `public/preview.html` 安全预览壳——令牌只走请求头（登录态从 localStorage 读；访客令牌经壳页 hash 传入，本就是 URL 凭据），fetch 取内容后经 **blob URL + `<iframe sandbox="allow-scripts">`**（无 allow-same-origin，unique origin）渲染，上传页面读不到父壳/自身 URL 的任何令牌；② 服务端两个 preview 端点**改为仅接受请求头**（files.js 删 `req.query.token`；guest.js 预览改 header-only，不再走 loadActiveGuest 的 query 兼容）；③ 前端三处预览链接改指向 `/preview.html#/file|guest/...`。
+
+**中危（已修复）**
+- **`.env` 644 世界可读**（含 DB 密码/TOKEN_SECRET/API 密钥）→ `chmod 600`。
+- **`/poll` 无限流**（可伪造会话刷 CLI 子进程）→ 加 `rateLimit 120 次/10 分钟/IP`。
+- **VT 请求无超时**（VT 不可达时上传挂起）→ `vtRequest` 加 12s AbortController 超时，超时/错误按 pass 放行（fail-open 语义不变）。
+
+**已知设计取舍（子代理列为中危但属文档化的产品决策，不改）**：① QQ 扫码无设备绑定（QR 登录固有，bind 前展示昵称确认）；② 访客自报身份 + 默认删除密码公开（README 已声明"地址即凭证/默认密码=不设防"）；③ guest_token 永久 URL 凭据（产品设计）；④ token 24h 过期无撤销（可接受）；⑤ 扫描 fail-open（防阻断学生上传）；⑥ 访客上传先落盘后鉴权（有清理兜底）；⑦ AI 审查 16K 截断（覆盖率取舍）。
+**未发现**：SQL 注入、token 算法缺陷、admin 提权绕过、密码哈希问题、路径穿越、配额竞态。
+
+### 13.7 子代理 B 报告剩余项处理（2026-08-20）
+
+- **multer 字段数限制**：`limits` 补 `parts:20 / fields:20 / fieldSize:64KB`（防 multipart 海量字段内存 OOM DoS，upload.js）。
+- **访客上传 IP 限流**：`POST /api/guest/upload` 加 `rateLimit 10 次/分钟/IP`（防未认证无限投递 multipart 磁盘写放大——multer 先落盘后校验 token，现限流在 multer 之前生效）。
+- **links.js 抓取响应体上限**：`fetchText` 改流式读取 + 64KB 上限（防仓库里放大文件造成内存尖峰）。
+- **上传发分容错**：`grant(file_submit)` 失败不再让已入库的上传整体 500，记录日志（积分可后台补发）。
+- **复查不成立的项**：QQ 会话 `.qqcli/.env` 实为 600（CLI 自建，安全）；`execFile` 无 shell 无 flag 注入；访客默认删除密码为文档化产品决策（"地址即凭证+留空=不设防"）。
+- **记录不改（迭代排期）**：AI 审查 16K 截断（覆盖率取舍）、pending 文件全校可见（审核队列兜底）、ensureDiskSpace TOCTOU、guest_token 永久凭据、token 无撤销。
+
+### 13.8 子代理 A（认证与权限）报告处理结论（2026-08-20）
+
+- **严重 1 QQ 扫码无设备绑定**：QR 登录固有模型（微信/QQ 扫码同款）；bind 表单要求受害者填班级姓名=二次确认；属文档化设计取舍，不改。
+- **严重 2 访客"姓名+班级"找回 token + 公开删除密码**：README 已声明"地址即凭证/留空=不设防/防冒名仅 QQ 保护"——产品决策（便利性换安全），用户拍板保留，不改。已知边界：知道姓名+班级可枚举找回任意访客 token。
+- **严重 3 预览 token 泄露**：✅ 已修复（§13.6，安全预览壳 + header-only 端点）。
+- **中 4 /poll 无限流**：✅ 已加 120 次/10min/IP（§13.6）。
+- **中 5 .env 644**：✅ chmod 600（§13.6）。
+- **中 6 scryptSync 阻塞事件循环**：记录排期（访客删除限流 10/10min 已缓解；需改 pwd.js 异步 + auth.js/guest.js 调用点 await）。
+- **中 7 guest_token 永久 + query 兼容**：文档化设计；前端已走 x-guest-token 头，query 仅老客户端兼容（nginx noquery 日志缓解）。
+- **中 8 token 24h 无撤销**：学校平台可接受，记录。
+- **低 9-12**：限流非原子（单实例可接受）/uid 类型（无注入）/删除密码 query（nginx 缓解）/trust proxy（已核实 nginx $remote_addr 覆盖安全）。
+- **复核不成立**：preview 未拦 flagged（实已拦，files.js:140-141）；pending 文件他人可见为 fail-open 设计（审核队列兜底）。
+
+### 13.9 共同计分上限 + 作品展标识 + topbar 全宽（2026-08-20）
+
+- **共同上限**：`file_submit`（作品文件）与 `link_submit`（GitHub 项目）**合计最多计 5 个**（此前分别计 5）。实现：`points.js` 新增 `CAP_GROUPS`，`grant()` 上限计数按组 `reason IN (...)` 统计（file/link 互相计入）；`app_submit` 仍独立 3 个。前端 +0 提示、GitHub tab 文案、README/FEATURES 已同步。**存量已发积分不回扣**（向前生效）。
+- **作品展**：GitHub 项目卡片的「✓ 已认证」徽标移除（class-wall.js proj-title），避免误导（所有入墙链接本来就是已验证的）。
+- **topbar 全宽**：`index.html` 把 `#topbar` 从 `.main` 移到 `#app` 直属（rail/appbar 之间）——移动端不再被 `.main` 的 14px 侧内边距约束，撑满全屏；桌面端仍 `display:none` 不受影响。
+
+### 13.10 QQ 登录超时修复（2026-08-20）
+
+- **问题**：前端 `api.js` 全局 15s 超时，但服务端 `/api/auth/qq/poll` 内部 `runCli` 就有 25s 超时，扫码后 tiny_id 反查还是多步 CLI——单次 poll 合法耗时可超 15s；而 `pollSession` 的 catch 遇超时就 `clearPoll()` 停轮询 → 登录流程被掐死（"请求超时，请检查网络后重试"后必须重新扫码）。
+- **修复**：`api.js` `request(path, opts, timeoutMs)` 支持按请求指定超时（默认仍 15s，get/post/patch/del 透传）；`auth.js` 定义 `QQ_LOGIN_TIMEOUT = 599000`（约 10 分钟，覆盖整个扫码授权窗口），init/poll/bind 四处调用全部传长超时。**全局仍是 15s**（避免其他接口挂 10 分钟），只放大 QQ 登录链路。
+- **遗留可选**：pollSession catch 对瞬时网络错误仍会停轮询（599s 下超时不再发生，仅剩真实网络故障场景）；如需彻底抗抖动可改成"连续 N 次失败才停"。
+
+### 13.11 姓名合法性校验（2026-08-20，清理内测数据前补充）
+
+- **现状（此前）**：real_name 只有「标准年级必填 + 最长 32 字符」，无汉字/长度/字符集校验（"abc"、"A" 都能过）。
+- **规则（用户拍板）**：姓名须为 **2-4 个汉字**，禁英文字符/数字/符号：`/^[\u4e00-\u9fa5]{2,4}$/`。
+- **落点**：后端 `routes/auth.js`（访客登记）+ `routes/auth-qq.js`（QQ bind）——typed 值非空时校验；「其他」年级（毕业生/外校）可留空（仍回落 QQ 昵称/「同学」，**回落值不校验**，避免挡住英文昵称的毕业生）；前端 `auth.js` 两处提交前校验 + 输入框 `maxlength=4`。
+- **边界提示**：复姓 4 字（欧阳娜娜/司马相如）可过；5 字名、生僻扩展区汉字、少数民族转写名会被拒（如需放宽改正则）。
+- **存量数据不受影响**：校验只作用于提交时；内测数据（含 ikuu/fhq/F=kQq/r² 等不合规名）清理后消失。
+
+### 13.12 内测数据清理（2026-08-20 执行）
+
+- **备份**：`storage/backups/pre-clear-pat-20260820-213204.sql.gz`（全库 15 表）+ `pre-clear-uploads-20260820-213204.tar.gz`（93MB/13 文件）。**用户确认无误后可删除**（建议保留到上线后稳定一周）。
+- **清理**：`scripts/clear-beta-data.js`（保留在仓库可复用）TRUNCATE 13 张业务表（users/files/apps/links/points_log/task_progress/likes/purchases/judge_reviews/upload_log/audit_logs/admin_log/feed_like_snapshots）；**保留 articles（5 章教程）与 settings**；`storage/uploads`、`storage/qq-sessions` 清空。users AUTO_INCREMENT 归零（新用户从 id=1 开始）。
+- **清后状态**：全部业务表 0 行；首页/学AI 200；访客登记接口 400 校验正常；内存 available ~975MB。
+- **注意**：管理员已随 users 清空——QQ 扫码绑定后由 `ADMIN_QQ_TINY_IDS` 白名单自动恢复（.env 已配置 ✓）；QQ 会话已清，需重新扫码。冒烟测试由用户手动执行。
+
+### 13.13 「其他」年级身份表单逻辑理顺（2026-08-20）
+
+- **问题（用户反馈"逻辑怪"）**：「其他」分支姓名字段标签是「姓名(或昵称)」，但方案二下昵称=姓名拼音首字母、不可手填——用户以为能直接填昵称，填进去却被当姓名用，还要再走"选展示方式→生成缩写"，语义矛盾。
+- **修复**（`public/js/auth.js` renderIdentity，「其他」分支）：标签改「姓名」；placeholder「可留空」→「选填：毕业生/外校可不填」；新增小字说明「展示昵称固定为姓名拼音首字母（在下方选择，不可手填）；不填姓名则展示默认名」；**移除 QQ 频道昵称预填**（预填英文昵称会撞上 2-4 汉字校验且语义错误）。前端报错文案「选择只展示昵称后，请填写昵称」→「选择只展示昵称后，请填写姓名以生成展示昵称」（两处，与后端文案对齐）。
+- **顺带明确**：「其他」班级 2120 能通过是因为毕业生班号只能约束为 4 位数字（历届无法穷举），属文档化设计取舍；已知边界=任何 4 位数字均可，呼应访客自报身份风险。
+
+### 13.14 「其他」年级误填在校班级的引导（2026-08-20）
+
+- **需求**：选「其他」却填了在校班级号（2401-2425/2501-2524/2601-2624）时，引导用户选择对应年级。
+- **实现三层**：
+  1. 前端实时提示（auth.js renderIdentity「其他」分支）：输入在校班号即出现「⚠️ 检测到这是在校班级（范围），请在年级中选择」+ **一键「切换到高一/高二/高三」**按钮（点击即切年级下拉并重渲染）；
+  2. 前端提交拦截（`checkOtherClass` 新增 `inSchoolClassOf` 判断）：提示「「2401」是在校高三班级，请返回选择「高三」」；
+  3. **后端硬校验**（routes/auth.js 访客登记 + routes/auth-qq.js bind）：`config.isStandardClass(class_name)` 命中即 400「「2401」是在校高三班级，请返回选择对应年级」。
+- **边界**：`gradeOf` 按前缀判断（26→高一/25→高二/24→高三）；2600、2625、2312、9999、0 等非标准范围班级仍走「其他」放行（毕业班号无法穷举，仅挡当前在校班号）。
+- 复用：`config.isStandardClass` + `gradeOf`；前端 `GRADE_RANGES` 与 config 对齐（改班级范围需同步两处）。
+
+### 13.15 毕业班合法班号规则（2026-08-20 用户提供）+ 在校班引导修正
+
+- **毕业班合法班号**（「其他」分支，后端 routes/auth.js + auth-qq.js）：格式 4 位 `YYCC`（前两位年级、后两位班号）或 `0`（外校）；3/2/1 位（除 0）非法。规则：
+  - 年级 ≤20 → 班号 01-18（2001~2018…，含 19xx 及更早）
+  - 21 → 01-20（2101~2120）；22 → 01-22（2201~2222）；23 → 01-20（2301~2320）
+  - 年级 >26 非法；其余非法 → 400「不是合法的毕业班班级号」
+- **⚠️ 关键认知（踩过）**：后端**没有年级参数**，`isStandard` 完全由 class_name 推导（`normalizeClass`+`isStandardClass`）。因此：
+  1. 在校班号（24xx/25xx/26xx）**永远不会进「其他」分支**——后端直接按标准年级接受（本就是合法在校班，语义正确）。此前加的"在校班号不允许走其他"后端校验是**恒假死代码**（`!isStandard && isStandardClass(class_name)` 永假），已删除。
+  2. "选「其他」误填在校班号 → 引导选年级"**只能在前端实现**（前端才有"选了其他"的显式状态）：黄色提示条 + 一键切换年级 + 提交拦截（auth.js `checkOtherClass` → `inSchoolClassOf`）。前端还加了红色实时提示「不是合法的毕业班班级号」（`isValidGraduateClass`）。
+- **边界**：2120 现按规则**合法**（21级20班，用户修正 2101~2120）；0000 非法（grade 0）；0101-0118 合法（年级≤20 规则）。
+- **改动班级范围需同步**：config.js（标准班）+ 前端 `GRADE_RANGES`/`isValidGraduateClass` + 后端两处 maxCls 规则。
+
+### 13.16 「其他」年级身份逻辑与在校生统一（2026-08-20 用户最终拍板）
+
+- **背景**：用户先要求"一个姓名/昵称框+去掉授权单选"，随后撤回（"前面的当我没说，昵称还是别让他们自由填写了，太乱"），最终拍板：**所有年级（含「其他」毕业生/外校）与在校生表单逻辑完全一致**。
+- **改动**：
+  1. 前端 auth.js renderIdentity「其他」分支姓名框 = 与标准年级相同：**姓名必填 2-4 汉字**，placeholder「请输入真实姓名（2-4 个汉字）」；删除「姓名(或昵称)/选填/可留空」及"不填姓名则展示默认名"提示。
+  2. 两处提交校验 `v.grade !== '其他' && !v.real_name` → `!v.real_name`（所有年级必填）。
+  3. 后端 routes/auth.js（访客登记）与 auth-qq.js（bind）：`isStandard && !real_name` → `!real_name`；**删除 `real_name = '同学'` / `= s.nickname || '同学'` 回落逻辑**（「其他」不再可留空）。
+- **保留**：「是否授权展示真实姓名」单选 + 昵称=姓名拼音首字母（方案二，选定后不可更改）；「其他」班级的在校班引导（前端）与毕业班合法班号校验（前端+后端，§13.14/13.15）。
+- **注意**：§13.13 中"「其他」姓名可留空/回落 QQ 昵称"的描述已被本节取代（以本节为准）。
+
+### 13.17 排行榜"同学"问题修复 + 个例昵称修正（2026-08-20）
+
+- **现象**：排行榜出现"同学"（真实用户 2505 肖熙桐、2506 黄俊宇）。
+- **根因**：P1 隐私规则（非同班只显示昵称、无昵称兜底"同学"）+ 方案二缺口——昵称只在选「否，只展示昵称」时生成，选「是」的用户 nickname 恒 NULL，非同班查看者即显示"同学"。
+- **修复（逻辑改动，本次唯一一次）**：
+  1. 后端 `routes/auth.js`（访客登记）+ `auth-qq.js`（bind）：`showReal` 且 nickname 为空时自动用 `pinyinCandidates(real_name)` 取**首个候选**作兜底昵称存入（选「是」也生成昵称）。
+  2. 前端 `auth.js` renderIdentity：输入姓名**总是**刷新拼音缩写（`refreshInitials` 不再仅限选「否」时）；`utils.js` `initialsPicker` 新增 `autoFirst` 参数（是：自动选首个候选，不展示候选区；否：展示候选区手选）。
+  3. 回填存量 NULL 昵称用户（脚本一次性执行）：肖熙桐→XXD、黄俊宇→HDY。
+- **个例修正（2026-08-20，用户指定，逻辑不动）**：黄俊宇昵称 **HDY → HJY**（SQL 直改，`UPDATE users SET nickname='HJY' WHERE id=6`）。肖熙桐的 XXD 保留（首个候选）——多音字默认取首个候选是设计行为，用户如需其他读音可在注册时选「否」手选。
+- **注意**：自动兜底昵称也受"选定后不可更改"约束（PATCH profile 锁已有合法缩写）；后续如需调整某用户昵称，直接 SQL 改即可（与本次个例相同）。
+
+### 13.18 最高管理员权限（2026-08-20）
+
+- **需求**：仅「2120班 戴睿羲」可设置/取消其他管理员（最高管理员）；其余管理员除不能调整管理员权限外，其他权限不变。
+- **实现**：
+  1. `server/config.js` 新增 `superAdmin: { class_name: '2120', real_name: '戴睿羲' }`（env `SUPER_ADMIN_CLASS`/`SUPER_ADMIN_NAME` 可覆盖；按 (class_name, real_name) 唯一身份识别）。
+  2. 后端 `routes/admin.js` `POST /api/admin/users/:id/admin` 开头守卫：非超管 → 403「仅最高管理员可设置/取消管理员权限」。
+  3. 前端 `admin.js`：`isSuperAdmin`（与 config 同步的硬编码）非真时不渲染「设为/取消管理员」按钮（仅隐藏按钮，后端 403 才是硬保障）。
+- **保留不变**：`ADMIN_QQ_TINY_IDS` 白名单自动授权（maybeGrantAdmin，部署层配置）；其余管理接口对所有管理员开放。
+- **实测**：胡誉腾（非超管）调授权接口 403 ✓；戴睿羲（超管）设/取消谭一凡管理员均 200 ✓（测试后已恢复谭一凡为非管理员）。
+- **注意**：改最高管理员身份需同步 `config.js`（或 env）与前端 `admin.js` 的 `isSuperAdmin` 两处。

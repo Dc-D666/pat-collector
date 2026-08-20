@@ -86,8 +86,8 @@ router.post(
     let real_name = String((req.body && req.body.real_name) || '').trim();
     const isStandard = config.isStandardClass(class_name);
 
-    // 标准年级：姓名必填；「其他」：姓名选填（缺省用「同学」）
-    if (isStandard && !real_name) {
+    // 姓名必填（2026-08-20：所有年级统一，与在校生逻辑一致；不再区分「其他」可留空）
+    if (!real_name) {
       return res.status(400).json({ error: '请输入姓名' });
     }
     // 「其他」年级：班级必填，仅接受 4 位班级号（毕业生）或 0（外校）
@@ -95,11 +95,22 @@ router.post(
       if (!class_name || (class_name !== '0' && !/^\d{4}$/.test(class_name))) {
         return res.status(400).json({ error: '毕业生请填自己班级（4 位数字），外校请填 0' });
       }
+      // 毕业班合法班号（2026-08-20 用户提供）：YYCC（前两位年级、后两位班号）；
+      // 年级 ≤20 → 班号 01-18（2001~2018…）；21 → 01-20（2101~2120）；22 → 01-22（2201~2222）；23 → 01-20（2301~2320）；年级 >26 非法。
+      // 注：在校班号（24xx/25xx/26xx）不会进此分支——后端按标准年级直接接受（本就是合法在校班），
+      // 选「其他」误填在校班号的引导由前端完成（前端才有"选了其他"的显式状态）。
+      if (class_name !== '0') {
+        const grade = parseInt(class_name.slice(0, 2), 10);
+        const cls = parseInt(class_name.slice(2, 4), 10);
+        const maxCls = (grade >= 1 && grade <= 20) ? 18 : (grade === 21 ? 20 : (grade === 22 ? 22 : (grade === 23 ? 20 : -1)));
+        if (maxCls < 0 || cls < 1 || cls > maxCls) {
+          return res.status(400).json({ error: '「' + class_name + '」不是合法的毕业班班级号' });
+        }
+      }
     }
-    if (real_name.length > 32) {
-      return res.status(400).json({ error: '姓名过长' });
+    if (real_name && !/^[\u4e00-\u9fa5]{2,4}$/.test(real_name)) {
+      return res.status(400).json({ error: '姓名需为 2-4 个汉字，且不能包含英文字符、数字或符号' });
     }
-    if (!real_name) real_name = '同学';
 
     // 展示名授权：show_real_name 默认 1（是）；选「否」时昵称 = 姓名拼音首字母（方案二）
     const showReal = req.body && req.body.show_real_name !== false && req.body.show_real_name !== 0 && req.body.show_real_name !== '0';
@@ -115,6 +126,10 @@ router.post(
       if (!nickname || !pc.candidates.includes(nickname)) {
         return res.status(400).json({ error: '昵称须为姓名拼音首字母，请从候选中选择' });
       }
+    } else if (!nickname) {
+      // 选「展示真实姓名」也自动生成拼音缩写昵称（非同班查看时的展示兜底，2026-08-20 修排行榜"同学"问题）
+      const pc = await pinyinCandidates(real_name);
+      nickname = (pc.candidates && pc.candidates[0]) || null;
     }
 
     // 访客删除安全密码（选填）：留空存 NULL（校验时按默认密码比对）；自定义则 scrypt 加盐哈希

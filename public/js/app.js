@@ -4,6 +4,7 @@
 window.App = (() => {
   const routes = {
     activity: () => Views.activity(),
+    club: () => Views.club(),
     login: () => Views.login(),
     files: () => Views.files(),
     'class-wall': () => Views.classWall(),

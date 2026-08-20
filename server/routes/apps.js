@@ -149,6 +149,25 @@ router.post(
     const gameplay = String((req.body && req.body.gameplay) || '').trim().slice(0, 2000) || null;
     const source_feed_id = String((req.body && req.body.source_feed_id) || '').trim().slice(0, 128) || null;
 
+    // 来源帖归属复核（2026-08-21）：source_feed_id 本应来自自动/手动识别（已核验归属），
+    // 但提交接口信任客户端传入，若直接据此判定"已发帖"可被伪造刷第 2 章任务——这里复核一次，
+    // 非本人帖子/已失效直接拒绝（需 QQ 会话；纯手动添加不带来源帖，不受影响）。
+    let sourceFeedId = source_feed_id;
+    if (sourceFeedId) {
+      const s = await getUserSession(req.user.id);
+      if (!s) {
+        return res.status(400).json({ error: '带来源帖子的轻应用需要 QQ 频道登录，请重新扫码登录后再提交' });
+      }
+      const env = qqSessions.sessionEnv(s);
+      let own = false;
+      try {
+        own = (await verifyOwnFeed(sourceFeedId, s, env)).ok;
+      } catch (_) { own = false; }
+      if (!own) {
+        return res.status(400).json({ error: '来源帖子核验失败：该帖子不是你发布的、已失效或网络异常，请重新识别后再提交' });
+      }
+    }
+
     // R2（2026-08-15）：轻应用标题/简介/玩法公开展示，同步 AI 审查；违规拒绝，AI 不可用降级放行
     const displayText = [title, description, gameplay].filter(Boolean).join('\n');
     const d = await auditDisplayText(displayText, { userId: req.user.id, refType: 'app', refId: 0 });
@@ -168,9 +187,20 @@ router.post(
         conn.release(); // 提前返回必须释放连接，否则池耗尽
         return res.status(400).json({ error: `轻应用总数已达上限（${config.maxAppsPerUser} 个），请删除部分后重试，或联系频道主扩容` });
       }
+      // 去重（2026-08-20）：同一用户已提交过相同 app_url 的作品，拒绝重复提交——
+      // 自动识别与手动识别同一个帖子会得到同一链接，此前可重复入库出现两条列表
+      const [dup] = await conn.execute(
+        'SELECT id FROM apps WHERE user_id = ? AND app_url = ? LIMIT 1',
+        [req.user.id, app_url]
+      );
+      if (dup.length) {
+        await conn.rollback();
+        conn.release();
+        return res.status(400).json({ error: '该作品已提交过了，请勿重复提交' });
+      }
       const ins = await conn.execute(
         'INSERT INTO apps (user_id, app_url, title, description, gameplay, source_feed_id) VALUES (?, ?, ?, ?, ?, ?)',
-        [req.user.id, app_url, title, description, gameplay, source_feed_id]
+        [req.user.id, app_url, title, description, gameplay, sourceFeedId]
       );
       result = { insertId: ins[0].insertId };
       await conn.commit();
@@ -181,11 +211,15 @@ router.post(
     }
     conn.release();
     const inserted = await query('SELECT created_at FROM apps WHERE id = ?', [result.insertId]);
-    // 提交 AI 轻应用奖励（每个作品一次）
-    await grant(req.user.id, 'app_submit', 'app:' + result.insertId);
+    // 提交 AI 轻应用奖励（每个作品一次）。
+    // 2026-08-21 防刷分：仅"带来源帖（识别导入，已核验归属）"的应用发积分——
+    // 不带来源的手动添加（任意链接）不发放，防提交无关链接刷 app_submit（最多 3 次 × 15⭐）
+    if (sourceFeedId) {
+      await grant(req.user.id, 'app_submit', 'app:' + result.insertId);
+    }
     res.json({
       app: {
-        id: result.insertId, app_url, title, description, gameplay, source_feed_id,
+        id: result.insertId, app_url, title, description, gameplay, source_feed_id: sourceFeedId,
         created_at: inserted[0].created_at,
       },
     });

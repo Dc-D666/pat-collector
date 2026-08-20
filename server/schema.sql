@@ -52,6 +52,24 @@ CREATE TABLE IF NOT EXISTS apps (
   CONSTRAINT fk_apps_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- GitHub 项目外链（2026-08-20）：Token 文件验证防冒充（仓库根目录 nanfang-pat.txt 写入平台发放的 token），验证通过才计分
+CREATE TABLE IF NOT EXISTS links (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  url VARCHAR(512) NOT NULL COMMENT 'GitHub 仓库链接',
+  title VARCHAR(255) NOT NULL DEFAULT '' COMMENT '项目名称',
+  description VARCHAR(2000) NULL COMMENT '简介（选填）',
+  owner VARCHAR(128) NOT NULL DEFAULT '' COMMENT '仓库 owner',
+  repo VARCHAR(128) NOT NULL DEFAULT '' COMMENT '仓库名',
+  verify_token VARCHAR(64) NOT NULL DEFAULT '' COMMENT '验证 token（写入仓库根目录 nanfang-pat.txt）',
+  verified TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否通过所有权验证',
+  verified_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_user (user_id),
+  UNIQUE KEY uq_link_user_url (user_id, url),
+  CONSTRAINT fk_links_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS articles (
   id INT AUTO_INCREMENT PRIMARY KEY,
   slug VARCHAR(64) NOT NULL COMMENT 'URL 标识',

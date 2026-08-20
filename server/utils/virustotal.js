@@ -1,8 +1,9 @@
 'use strict';
 
-// VirusTotal v3 API 恶意程序扫描（R3 补充，2026-08-16）：
-// 与 ClamAV 双扫描——先 ClamAV（本地、必扫），再 VT（哈希查询命中直接判、未收录则上传 ≤32MB）。
-// 免费档：4 次/分、500 次/天；429（额度耗尽）→ 进程内熔断 12h 自动降级为只跑 ClamAV。
+// VirusTotal v3 API 恶意程序扫描（R3；2026-08-20 起为唯一扫描器——本地 ClamAV 需加载 ~600MB 签名库，
+// 2GB 小服务器内存吃紧已移除，VT 云查杀零本地内存）：
+// 流程：sha256 哈希查询命中直接判 → 未收录且 ≤32MB 才上传 → 分析中/异常/额度耗尽一律放行（fail-open）。
+// 免费档：4 次/分、500 次/天；429（额度耗尽）→ 进程内熔断 12h 自动降级放行。
 // 隐私提示：上传文件会发送给 VirusTotal（Google 系第三方）；学生代码类作品如介意可关 VIRUSTOTAL_ENABLED=0。
 const config = require('../config');
 const crypto = require('crypto');
@@ -12,6 +13,7 @@ const path = require('path');
 const BASE = 'https://www.virustotal.com/api/v3';
 const MAX_UPLOAD = 32 * 1024 * 1024; // 免费档上传上限 32MB
 const QUOTA_COOLDOWN_MS = 12 * 3600 * 1000; // 额度耗尽后 12 小时内不再调 VT
+const REQ_TIMEOUT_MS = 12000; // 单次 VT 请求超时（防 VT 不可达时上传挂起；超时按 pass 放行）
 
 let quotaExhaustedAt = 0;
 
@@ -26,10 +28,20 @@ function sha256File(filePath) {
 }
 
 async function vtRequest(pathName, options) {
-  const res = await fetch(BASE + pathName, {
-    ...options,
-    headers: { 'x-apikey': config.virustotal.apiKey, ...((options && options.headers) || {}) },
-  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQ_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(BASE + pathName, {
+      ...options,
+      signal: ctrl.signal,
+      headers: { 'x-apikey': config.virustotal.apiKey, ...((options && options.headers) || {}) },
+    });
+  } catch (e) {
+    return { error: 'VT 请求失败: ' + (e.message || 'timeout') }; // 超时/网络错误 → 上层按 pass 放行
+  } finally {
+    clearTimeout(timer);
+  }
   if (res.status === 429) {
     quotaExhaustedAt = Date.now();
     return { quota: true };
@@ -63,18 +75,18 @@ function verdictOf(attrs) {
 /**
  * 用 VirusTotal 扫描文件
  * @returns {Promise<{status:'clean'|'infected'|'pass'|'skip', virus?:string, reason?:string}>}
- *  clean=VT 明确安全；infected=检出；pass=无结论（未收录/分析未完成/错误，交给 ClamAV）；skip=未启用/额度熔断
+ *  clean=VT 明确安全；infected=检出；pass=无结论（未收录/分析未完成/错误，放行）；skip=未启用/额度熔断
  */
 async function scanWithVirusTotal(filePath) {
   if (!config.virustotal.apiKey) return { status: 'skip', reason: '未配置 VIRUSTOTAL_API_KEY' };
-  if (Date.now() < quotaExhaustedAt) return { status: 'skip', reason: '额度熔断中（只跑 ClamAV）' };
+  if (Date.now() < quotaExhaustedAt) return { status: 'skip', reason: '额度熔断中（12h 内放行）' };
   try {
     // 1. 哈希查询（最快，命中即判）
     const hash = await sha256File(filePath);
     const look = await vtRequest('/files/' + hash);
     if (look.quota) return { status: 'skip', reason: '429 额度耗尽，熔断 12h' };
     if (look.notFound) {
-      // 未收录 → 仅 ≤32MB 才上传（大文件交给 ClamAV）
+      // 未收录 → 仅 ≤32MB 才上传（大文件/未收录样本直接放行）
       const size = (await fs.promises.stat(filePath)).size;
       if (size > MAX_UPLOAD) return { status: 'pass', reason: '>32MB 不上传 VT' };
       const fd = new FormData();
@@ -84,7 +96,7 @@ async function scanWithVirusTotal(filePath) {
       if (up.error) return { status: 'pass', reason: up.error };
       const v = verdictOf(up.data && up.data.data && up.data.data.attributes);
       if (v && v.malicious > 0) return { status: 'infected', virus: v.virus };
-      return { status: 'pass', reason: '新样本分析未完成，ClamAV 兜底' }; // 上传成功但分析异步
+      return { status: 'pass', reason: '新样本分析未完成，暂放行' }; // 上传成功但分析异步
     }
     if (look.error) return { status: 'pass', reason: look.error };
     const v = verdictOf(look.data && look.data.data && look.data.data.attributes);
@@ -92,7 +104,7 @@ async function scanWithVirusTotal(filePath) {
     if (v) return { status: 'clean' };
     return { status: 'pass', reason: '无分析结果' };
   } catch (e) {
-    return { status: 'pass', reason: '异常: ' + e.message }; // 任何异常不阻断（ClamAV 兜底）
+    return { status: 'pass', reason: '异常: ' + e.message }; // 任何异常不阻断（fail-open 放行）
   }
 }
 

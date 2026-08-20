@@ -38,6 +38,12 @@ Views.points = async () => {
   const myRank = me.rank || '-';
   const logs = mine.logs || [];
   const medal = ['🥇', '🥈', '🥉'];
+  // +0 流水（超出计分规则被置 0）的 ⓘ 提示文案
+  const ZERO_REASON_HINTS = {
+    file_submit: '超出计分规则：作品文件 + GitHub 项目合计最多计 5 个',
+    app_submit: '超出计分规则：提交 AI 轻应用最多计 3 个',
+    link_submit: '超出计分规则：作品文件 + GitHub 项目合计最多计 5 个',
+  };
 
   // ---- 刷新积分余额显示（领取毕业奖后）----
   function refreshPoints() {
@@ -59,8 +65,8 @@ Views.points = async () => {
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
         <h2 style="margin:0;font-size:17px;">🎓 课程毕业奖励</h2>
         ${graduate.has_claimed
-          ? '<button class="btn btn-sm" disabled>已领取 +50 ⭐</button>'
-          : `<button class="btn btn-sm btn-primary" id="grad-btn" ${graduate.eligible ? '' : 'disabled'}>领取 +50 ⭐</button>`}
+          ? '<button class="btn btn-sm" disabled>已领取 +40 ⭐</button>'
+          : `<button class="btn btn-sm btn-primary" id="grad-btn" ${graduate.eligible ? '' : 'disabled'}>领取 +40 ⭐</button>`}
       </div>
       <div style="font-size:13px;color:var(--text-dim);line-height:1.8;">
         读完 5 章全部课程 + 完成全部章节任务，即可领取毕业大奖。
@@ -106,14 +112,23 @@ Views.points = async () => {
         <span style="font-size:12px;color:var(--text-dim);">最近 ${logs.length} 条</span>
       </div>
       ${logs.length ? `<div class="lb-list">
-        ${logs.map((l) => `
+        ${logs.map((l) => {
+          const zero = l.amount === 0;
+          const zeroHint = zero ? (ZERO_REASON_HINTS[l.reason] || '超出计分规则，该次未计入积分') : '';
+          return `
           <div class="lb-row">
-            <span class="lb-reason">${escapeHtml(l.reason_text)}</span>
+            <span class="lb-reason">${escapeHtml(l.reason_text)}${zero ? `<button class="lb-info" type="button" data-hint="${zeroHint}" title="${zeroHint}" aria-label="${zeroHint}">ⓘ</button>` : ''}</span>
             <span class="lb-time">${formatTime(l.created_at)}</span>
-            <span class="lb-points" style="color:${l.amount > 0 ? 'var(--success)' : 'var(--danger)'};">${l.amount > 0 ? '+' : ''}${l.amount} ⭐</span>
-          </div>`).join('')}
+            <span class="lb-points" style="color:${l.amount > 0 ? 'var(--success)' : (l.amount < 0 ? 'var(--danger)' : 'var(--text-dim)')};">${l.amount > 0 ? '+' : ''}${l.amount} ⭐</span>
+          </div>`;
+        }).join('')}
       </div>` : `<div class="empty" style="padding:20px;">还没有积分记录</div>`}
     </div>`;
+
+  // 积分记录中 +0 流水（超出计分规则）的 ⓘ 图标：点击 toast 说明原因
+  document.querySelectorAll('.lb-info').forEach((btn) => {
+    btn.onclick = () => Utils.toast(btn.dataset.hint || '超出计分规则，该次未计入积分');
+  });
 
   // 排行榜「在校/全部」切换：局部刷新列表与我的排名（默认在校）
   document.querySelectorAll('.lb-scope-btn').forEach((btn) => {
@@ -157,7 +172,7 @@ Views.points = async () => {
       try {
         const r = await API.post('/api/points/graduate', '{}');
         if (r.granted) {
-          toast('毕业奖励 +50 ⭐ 🎓');
+          toast('毕业奖励 +40 ⭐ 🎓');
           refreshPoints();
           setTimeout(() => Views.points(), 600);
         } else {

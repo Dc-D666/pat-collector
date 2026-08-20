@@ -1,0 +1,49 @@
+'use strict';
+
+// 清内测数据（2026-08-20）：TRUNCATE 全部业务表，保留 articles（教程）与 settings（运行时设置）。
+// 用法：node scripts/clear-beta-data.js
+// 警告：执行前请先备份（storage/backups/ 已含 pre-clear 快照）；本脚本不可逆。
+
+const mysql = require('mysql2/promise');
+const config = require('../server/config');
+
+// 清空顺序无要求（FOREIGN_KEY_CHECKS=0 下 TRUNCATE），按依赖列出便于阅读
+const CLEAR_TABLES = [
+  'points_log', 'task_progress', 'likes', 'purchases', 'judge_reviews',
+  'upload_log', 'audit_logs', 'admin_log', 'feed_like_snapshots',
+  'files', 'apps', 'links', 'users',
+];
+const KEEP_TABLES = ['articles', 'settings'];
+
+async function countAll(conn, tables) {
+  for (const t of tables) {
+    const [r] = await conn.query('SELECT COUNT(*) AS c FROM `' + t + '`');
+    console.log('  ' + String(t).padEnd(20), r[0].c);
+  }
+}
+
+async function main() {
+  const conn = await mysql.createConnection(config.db);
+  try {
+    console.log('== 清理前 ==');
+    await countAll(conn, [...CLEAR_TABLES, ...KEEP_TABLES]);
+
+    await conn.query('SET FOREIGN_KEY_CHECKS = 0');
+    for (const t of CLEAR_TABLES) {
+      await conn.query('TRUNCATE TABLE `' + t + '`');
+    }
+    await conn.query('SET FOREIGN_KEY_CHECKS = 1');
+    console.log('== 已 TRUNCATE', CLEAR_TABLES.length, '张业务表 ==');
+
+    console.log('== 清理后 ==');
+    await countAll(conn, [...CLEAR_TABLES, ...KEEP_TABLES]);
+    console.log('✅ 清理完成（articles 教程与 settings 已保留）');
+  } finally {
+    await conn.end();
+  }
+}
+
+main().catch((e) => {
+  console.error('❌ 清理失败：', e.message);
+  process.exit(1);
+});

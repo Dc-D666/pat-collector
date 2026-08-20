@@ -74,7 +74,10 @@ Views.classWall = async () => {
 
     content.innerHTML = `<div class="wall-grid">${visible.map((p) => {
       const isFile = p.type === 'file';
-      const icon = isFile ? getFileIcon(p.original_name || '') : { emoji: '🤖', color: '#EDE6D6' };
+      const isLink = p.type === 'link';
+      const icon = isFile
+        ? getFileIcon(p.original_name || '')
+        : (isLink ? { emoji: '🔗', color: '#E3E8F5' } : { emoji: '🤖', color: '#EDE6D6' });
       // 全校公开：所有文件都可下载/预览（不再限同班）
       const canDl = isFile;
       // HTML 文件额外提供「预览」：新窗口直接打开（CSP sandbox 隔离）
@@ -86,7 +89,7 @@ Views.classWall = async () => {
           <div class="proj-head">
             <div class="proj-icon" style="background:${icon.color};">${icon.emoji}</div>
             <div class="proj-main">
-              <div class="proj-title">${escapeHtml(p.title || (isFile ? p.original_name : 'AI 轻应用'))}</div>
+              <div class="proj-title">${escapeHtml(p.title || (isFile ? p.original_name : (isLink ? 'GitHub 项目' : 'AI 轻应用')))}</div>
               <div class="proj-meta">${classTag(p)}<span class="proj-author">${escapeHtml(p.display_name)}</span>${p.title_tag ? `<span class="title-tag">${escapeHtml(p.title_tag)}</span>` : ''}</div>
             </div>
           </div>
@@ -96,7 +99,7 @@ Views.classWall = async () => {
             <div class="proj-time">
               ${isFile
                 ? `${escapeHtml(p.original_name)} · ${formatSize(p.size)}<br>${formatTime(p.time)}`
-                : formatTime(p.time)}
+                : (isLink ? `${escapeHtml(p.owner + '/' + p.repo)}<br>${formatTime(p.time)}` : formatTime(p.time))}
             </div>
             <div class="file-actions">
               <button class="like-btn${p.liked_by_me ? ' liked' : ''}" data-like="${p.type}:${p.id}"
@@ -106,10 +109,12 @@ Views.classWall = async () => {
               ${isFile
                 ? (canDl
                     ? `<button class="btn btn-sm btn-ghost" data-dl="${p.id}" data-name="${escapeHtml(p.original_name)}">下载</button>${isHtml
-                        ? `<a class="btn btn-sm btn-primary" href="/api/files/preview/${p.id}?token=${encodeURIComponent(API.getToken() || '')}" target="_blank" rel="noopener">预览</a>`
+                        ? `<a class="btn btn-sm btn-primary" href="/preview.html#/file/${p.id}" target="_blank" rel="noopener">预览</a>`
                         : ''}`
                     : `<span class="proj-lock" title="仅同班可下载">🔒</span>`)
-                : `<a class="btn btn-sm btn-primary" href="${escapeHtml(p.app_url)}" target="_blank" rel="noopener">跳转试玩</a>`}
+                : (isLink
+                    ? `<a class="btn btn-sm btn-primary" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">前往 GitHub</a>`
+                    : `<a class="btn btn-sm btn-primary" href="${escapeHtml(p.app_url)}" target="_blank" rel="noopener">跳转试玩</a>`)}
             </div>
           </div>
         </div>`;

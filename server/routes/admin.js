@@ -12,7 +12,7 @@ const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAdmin } = require('../middleware/admin');
 const { writeAdminLog } = require('../utils/adminLog');
-const { grant, revoke } = require('../utils/points');
+const { grant, revoke, bonusAmount } = require('../utils/points');
 const { freeDiskBytes } = require('../utils/disk');
 const qqSessions = require('../qq/sessions');
 
@@ -127,8 +127,11 @@ router.post('/users/:id/points', asyncHandler(async (req, res) => {
   res.json({ ok: true, points: after ? after.points : 0, amount, reason });
 }));
 
-// 设置 / 取消管理员（仅 QQ 登录用户）
+// 设置 / 取消管理员（仅 QQ 登录用户；2026-08-20 起仅最高管理员可调整，其余管理员 403）
 router.post('/users/:id/admin', asyncHandler(async (req, res) => {
+  if (req.user.class_name !== config.superAdmin.class_name || req.user.real_name !== config.superAdmin.real_name) {
+    return res.status(403).json({ error: '仅最高管理员可设置/取消管理员权限' });
+  }
   const uid = Number(req.params.id);
   const enabled = !!(req.body && req.body.enabled);
   const [row] = await query('SELECT qq_tiny_id FROM users WHERE id = ?', [uid]);
@@ -308,10 +311,11 @@ async function restoreFilePoints(userId, fileId) {
 // ---- 积分管理 ----
 const REASON_TEXT = {
   first_login: '首次登录奖励', read_article: '阅读课程', task: '完成任务',
-  app_submit: '提交 AI 轻应用', file_submit: '提交作品文件', like_give: '点赞他人',
-  like_receive: '作品被点赞', graduate: '课程毕业奖励', easter_egg: '彩蛋奖励',
+  app_submit: '提交 AI 轻应用', file_submit: '提交作品文件', link_submit: '提交 GitHub 项目',
+  like_give: '点赞他人', like_receive: '作品被点赞', graduate: '课程毕业奖励', easter_egg: '彩蛋奖励',
   purchase: '积分商城兑换', admin_adjust: '管理员调整', file_submit_restore: '审核通过补发',
   file_submit_revoke: '删除作品文件（回扣）', app_submit_revoke: '删除轻应用（回扣）',
+  link_submit_revoke: '删除 GitHub 项目（回扣）',
 };
 
 router.get('/points/leaderboard', asyncHandler(async (req, res) => {
@@ -375,6 +379,39 @@ router.delete('/apps/:id', asyncHandler(async (req, res) => {
   await query('DELETE FROM apps WHERE id = ?', [aid]);
   const revoked = await revoke(rows[0].user_id, 'app_submit', 'app:' + aid);
   await writeAdminLog(req.user.id, 'app.delete', 'app', aid, { user_id: rows[0].user_id }, req);
+  res.json({ ok: true, points_revoked: revoked });
+}));
+
+// ---- GitHub 项目外链管理（2026-08-20）----
+router.get('/links', asyncHandler(async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const where = [];
+  const params = [];
+  if (q) {
+    where.push('(l.title LIKE ? OR l.url LIKE ? OR u.real_name LIKE ? OR u.class_name LIKE ?)');
+    const like = '%' + q + '%';
+    params.push(like, like, like, like);
+  }
+  const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const rows = await query(
+    `SELECT l.id, l.url, l.title, l.description, l.owner, l.repo, l.verified, l.verified_at, l.created_at,
+            u.id AS user_id, u.class_name, u.real_name, u.nickname, u.show_real_name
+     FROM links l JOIN users u ON u.id = l.user_id
+     ${whereSql}
+     ORDER BY l.id DESC LIMIT 100`,
+    params
+  );
+  res.json({ links: rows });
+}));
+
+// 删除 GitHub 项目外链（回扣已发提交积分）
+router.delete('/links/:id', asyncHandler(async (req, res) => {
+  const lid = Number(req.params.id);
+  const rows = await query('SELECT user_id, url FROM links WHERE id = ?', [lid]);
+  if (!rows.length) return res.status(404).json({ error: '链接不存在' });
+  await query('DELETE FROM links WHERE id = ?', [lid]);
+  const revoked = await revoke(rows[0].user_id, 'link_submit', 'link:' + lid);
+  await writeAdminLog(req.user.id, 'link.delete', 'link', lid, { user_id: rows[0].user_id, url: rows[0].url }, req);
   res.json({ ok: true, points_revoked: revoked });
 }));
 
@@ -531,15 +568,15 @@ router.get('/audit-logs', asyncHandler(async (req, res) => {
 }));
 
 // ==================== P3 评委评审（2026-08-16）====================
-// 维度与权重：创意与创新 30% / 内容质量 25% / 完成度与实现 25% / 价值观与合规 20%
+// 维度与权重：创意与创新 40% / 内容质量 30% / 完成度与实现 20% / 价值观与合规 10%（4:3:2:1）
 // 综合分 = Σ(维度分×权重)，0-10；积分 = round(综合分×30)，满分 300；综合分 <6 不兑现。
 // 每个项目一条评审（重新评审覆盖并自动补/扣差额积分）；points_log 记 reason='judge_review'，ref 带时间戳保证唯一。
 
 const JUDGE_DIMS = [
-  { key: 'creativity', label: '创意与创新', weight: 0.30 },
-  { key: 'content', label: '内容质量', weight: 0.25 },
-  { key: 'completeness', label: '完成度与实现', weight: 0.25 },
-  { key: 'values', label: '价值观与合规', weight: 0.20 },
+  { key: 'creativity', label: '创意与创新', weight: 0.40 },
+  { key: 'content', label: '内容质量', weight: 0.30 },
+  { key: 'completeness', label: '完成度与实现', weight: 0.20 },
+  { key: 'values', label: '价值观与合规', weight: 0.10 },
 ];
 
 function judgeTotal(scores) {
@@ -552,9 +589,10 @@ function judgeTotal(scores) {
   return Math.round(t * 100) / 100;
 }
 
-// 发放/回补评审积分（delta 可为负）；事务 + 用户行锁
+// 发放/回补评审积分（delta 可为负）；事务 + 用户行锁；限时 1.2 倍只作用于正向发放
 async function applyJudgePoints(userId, delta, ref) {
   if (!delta) return;
+  delta = bonusAmount(delta);
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();

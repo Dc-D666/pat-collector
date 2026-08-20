@@ -3,15 +3,38 @@
 // 轻量积分体系：积分发放 + 流水记录（唯一索引防重）
 const { pool, query } = require('../db');
 
+// ==================== 限时积分加成（2026-08-20 00:00 ~ 2026-08-23 24:00 北京时间）====================
+// 窗口内获得的所有正向积分 ×1.2（四舍五入到整数）；回扣/负数发放不乘。
+// 北京时间 = UTC+8：窗口为 [2026-08-20 00:00:00, 2026-08-24 00:00:00)（8月23日24点 = 8月24日0点前）
+const BONUS_MULTIPLIER = 1.2;
+const BONUS_START_TS = Date.UTC(2026, 7, 20, 0, 0, 0) - 8 * 3600 * 1000;
+const BONUS_END_TS = Date.UTC(2026, 7, 24, 0, 0, 0) - 8 * 3600 * 1000;
+
+function bonusAmount(amount) {
+  if (!amount || amount <= 0) return amount;
+  const now = Date.now();
+  if (now >= BONUS_START_TS && now < BONUS_END_TS) {
+    return Math.round(amount * BONUS_MULTIPLIER);
+  }
+  return amount;
+}
+
+
 // 积分规则（⭐）
 // 计数上限：reason 的历史发放次数达到上限后不再发放（删除/回扣不释放名额，防刷分）
-const REASON_CAPS = { file_submit: 5, app_submit: 3 };
+const REASON_CAPS = { file_submit: 5, app_submit: 3, link_submit: 5 };
+// 共同上限组（2026-08-20 用户拍板）：作品文件 + GitHub 项目 合计最多计 5 个（此前分别计 5）
+const CAP_GROUPS = {
+  file_submit: ['file_submit', 'link_submit'],
+  link_submit: ['file_submit', 'link_submit'],
+};
 const RULES = {
   first_login: 10, // 首次登录（注册时发放，仅一次）
   read_article: 8, // 阅读课程 ≥1 分钟（每篇一次；P3 微降 10→8）
   task: 15, // 完成整章所有任务（每章一次；P3 微降 20→15）
   app_submit: 15, // 提交 AI 轻应用（QQ 频道，每个作品一次；每人最多计 3 个）
-  file_submit: 25, // 提交作品文件（每个文件一次；每人最多计 5 个；P3 30→25）
+  file_submit: 25, // 提交作品文件（每个文件一次；与 GitHub 项目合计最多计 5 个；P3 30→25）
+  link_submit: 25, // 提交 GitHub 项目外链（Token 文件验证通过后发放；与作品文件合计最多计 5 个；2026-08-20）
   liked: 0, // （已废弃：被赞积分改由 like_receive 通过 CLI 增量发放）
   like_give: 2, // 主动点赞他人（网页操作，每次 +2⭐，每日上限 10）
   like_receive: 2, // 帖子被点赞（CLI 增量统计，每个赞 +2⭐，作者每日上限 30）
@@ -24,18 +47,30 @@ const RULES = {
  * @returns {number|null} 实际发放的积分数；已发过返回 null
  */
 async function grant(userId, reason, refId, extraAmount) {
-  const amount = extraAmount != null ? extraAmount : RULES[reason];
+  let amount = bonusAmount(extraAmount != null ? extraAmount : RULES[reason]);
   if (!amount || amount <= 0) return null;
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
     // 用户行锁：串行化同一用户的并发发放，保证 REASON_CAPS 计数上限与幂等防重在并发下依然成立
     await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [userId]);
-    // 计数上限：该 reason 历史发放达上限则跳过（file_submit ≤5 个 / app_submit ≤3 个）
+    // 计数上限：该 reason（或共同上限组）历史发放达上限则跳过
+    // （file_submit+link_submit 合计 ≤5 个 / app_submit ≤3 个）
     const cap = REASON_CAPS[reason];
     if (cap) {
-      const [cntRows] = await conn.execute('SELECT COUNT(*) AS c FROM points_log WHERE user_id = ? AND reason = ?', [userId, reason]);
+      const group = CAP_GROUPS[reason] || [reason];
+      const ph = group.map(() => '?').join(',');
+      const [cntRows] = await conn.execute(
+        `SELECT COUNT(*) AS c FROM points_log WHERE user_id = ? AND reason IN (${ph})`,
+        [userId, ...group]
+      );
       if (Number(cntRows[0].c) >= cap) {
+        // 超限：不发放积分，但写一条 +0 流水（INSERT IGNORE 按 (user,reason,ref) 幂等，同一作品只记一次），
+        // 供「我的积分记录」展示 ⓘ「超出计分规则」提示；0 行不计入发放，revoke 也不会扣回
+        await conn.execute(
+          'INSERT IGNORE INTO points_log (user_id, amount, reason, ref_id) VALUES (?, 0, ?, ?)',
+          [userId, reason, String(refId || '')]
+        );
         await conn.commit();
         return null;
       }
@@ -73,6 +108,7 @@ async function getPoints(userId) {
     task: '完成任务',
     app_submit: '提交 AI 轻应用',
     file_submit: '提交作品文件',
+    link_submit: '提交 GitHub 项目',
     liked: '作品被点赞',
     like_give: '点赞他人',
     like_receive: '作品被点赞',
@@ -83,6 +119,7 @@ async function getPoints(userId) {
     file_submit_restore: '审核通过补发',
     file_submit_revoke: '删除作品文件（回扣）',
     app_submit_revoke: '删除轻应用（回扣）',
+    link_submit_revoke: '删除 GitHub 项目（回扣）',
   };
   return {
     points: rows.length ? rows[0].points : 0,
@@ -174,6 +211,7 @@ async function revoke(userId, reason, refId) {
  * @returns {number} 实际发放积分数（到上限或已发过返回 0）
  */
 async function grantCapped(userId, reason, refId, amount, dailyCap) {
+  amount = bonusAmount(amount);
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -205,4 +243,4 @@ async function grantCapped(userId, reason, refId, amount, dailyCap) {
   }
 }
 
-module.exports = { RULES, grant, grantCapped, getPoints, spend, revoke };
+module.exports = { RULES, grant, grantCapped, getPoints, spend, revoke, bonusAmount };

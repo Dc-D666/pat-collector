@@ -24,6 +24,7 @@ Views.files = () => {
       <div class="tabs" id="files-tabs">
         <button class="tab-btn ${isQqBound ? 'active' : ''}" data-tab="apps">🤖 AI 轻应用</button>
         <button class="tab-btn ${isQqBound ? '' : 'active'}" data-tab="files">📁 项目文件</button>
+        <button class="tab-btn" data-tab="links">🔗 GitHub 项目</button>
       </div>
 
       <!-- Tab 1：项目文件 -->
@@ -54,6 +55,29 @@ Views.files = () => {
           <div id="apps-list"></div>
         </div>
       </div>
+
+      <!-- Tab 3：GitHub 项目外链（2026-08-20：Token 文件验证防冒充，验证通过 +25⭐） -->
+      <div id="panel-links" style="display:none;">
+        <div class="card">
+          <div style="margin-bottom:12px;">
+            <h2 style="margin:0;font-size:17px;">🔗 GitHub 项目</h2>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:4px;line-height:1.7;">提交你的 GitHub 仓库链接，push 即更新，无需重新上传。需通过<strong>所有权验证</strong>（在仓库里放一个验证文件，防止冒充他人作品；<strong>Fork 的仓库无法通过验证</strong>），验证通过 +25⭐（作品文件 + GitHub 项目合计最多计 5 个）</div>
+          </div>
+          <div class="field"><label>仓库链接（必填）</label><input id="lk-url" type="text" placeholder="https://github.com/用户名/仓库名" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
+          <div class="field"><label>项目名称（必填）</label><input id="lk-title" type="text" maxlength="255" placeholder="例如：错题本小工具" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
+          <div class="field"><label>简介（选填）</label><input id="lk-desc" type="text" maxlength="2000" placeholder="一句话介绍这个项目" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
+          <div class="form-error" id="lk-error"></div>
+          <button class="btn btn-primary" id="lk-submit">提交链接</button>
+          <div id="lk-verify-box" style="display:none;margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg);font-size:13px;line-height:1.9;"></div>
+        </div>
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">
+            <h2 style="margin:0;font-size:17px;">我的 GitHub 项目</h2>
+            <span style="font-size:12px;color:var(--text-dim);">已验证的作品会展现在全校作品展</span>
+          </div>
+          <div id="links-list"><div class="spinner"></div></div>
+        </div>
+      </div>
     </div>`;
 
   // ---- Tab 切换 ----
@@ -65,8 +89,10 @@ Views.files = () => {
       tabs.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b === btn));
       const panelFiles = document.getElementById('panel-files');
       const panelApps = document.getElementById('panel-apps');
+      const panelLinks = document.getElementById('panel-links');
       if (panelFiles) panelFiles.style.display = btn.dataset.tab === 'files' ? '' : 'none';
       if (panelApps) panelApps.style.display = btn.dataset.tab === 'apps' ? '' : 'none';
+      if (panelLinks) panelLinks.style.display = btn.dataset.tab === 'links' ? '' : 'none';
     });
   }
 
@@ -361,6 +387,7 @@ Views.files = () => {
           <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="ds-show-real" value="1" ${notShowReal ? '' : 'checked'} /> 是，展示真实姓名</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="ds-show-real" value="0" ${notShowReal ? 'checked' : ''} /> 否，只展示昵称</label>
         </div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:6px;text-align:center;line-height:1.6;">💡 真实姓名<strong>只对同班同学</strong>展示；其他班级/访客看到的是你的昵称（姓名拼音首字母）</div>
       </div>
       <div class="field" id="ds-nickname-field" style="display:${notShowReal ? '' : 'none'};">
         <label>展示昵称（姓名拼音首字母）</label>
@@ -413,6 +440,7 @@ Views.files = () => {
     try {
       const data = await API.get('/api/apps');
       const apps = data.apps;
+      submittedAppUrls = new Set(apps.map((a) => a.app_url));
       if (!apps.length) {
         list.innerHTML = `<div class="empty" style="padding:20px;">还没有收集的轻应用</div>`;
         return;
@@ -443,6 +471,8 @@ Views.files = () => {
 
   // 已识别但未提交的轻应用（累积，按 url 去重；localStorage 持久化，刷新不丢）
   let scanItems = [];
+  // 已提交过的轻应用 url（loadApps 时刷新）：识别结果不再提示重复提交（2026-08-20 去重修复）
+  let submittedAppUrls = new Set();
   const scanStorageKey = 'pat-scanitems-' + ((API.getUser() || {}).id || 'anon');
   function saveScanItems() {
     try { localStorage.setItem(scanStorageKey, JSON.stringify(scanItems)); } catch (_) { /* 静默 */ }
@@ -491,6 +521,7 @@ Views.files = () => {
       for (const a of (p.apps || [])) {
         const item = { feed_id: p.feed_id, post_title: p.title, text: a.text, url: a.url };
         if (scanItems.some((x) => x.url === item.url)) continue;
+        if (submittedAppUrls.has(item.url)) continue; // 已提交过该作品，不再提示（服务端亦有去重兜底）
         scanItems.push(item);
         added++;
       }
@@ -627,7 +658,114 @@ Views.files = () => {
     if (manualBtn) manualBtn.onclick = manualScan;
   }
 
+  // ---- GitHub 项目外链（2026-08-20）----
+  // 验证指引框（提交后 / 列表「验证指引」按钮复用）：token 随时可找回
+  function showVerifyBox(l) {
+    const box = document.getElementById('lk-verify-box');
+    if (!box || !l) return;
+    box.style.display = '';
+    box.innerHTML = `✅ 等待验证。请完成下面 3 步（1 分钟）：<br>
+      1. 打开仓库 <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.url)}</a>（需已登录 GitHub；<strong>请确认是你自己创建的项目</strong>，Fork 的仓库无法通过验证）；<br>
+      2. 在仓库<strong>根目录新建文件</strong> <code>nanfang-pat.txt</code>，内容填入：<code>${escapeHtml(l.verify_token)}</code>（Commit 提交，push 到默认分支）；<br>
+      3. 点下方「验证」。<span style="color:var(--text-dim);">私有仓库无法验证，请先将仓库设为公开。</span><br>
+      <button class="btn btn-sm btn-primary" id="lk-verify-new" style="margin-top:8px;" data-id="${l.id}">我已添加，验证</button>`;
+    const vb = document.getElementById('lk-verify-new');
+    vb.onclick = async () => {
+      vb.disabled = true;
+      try {
+        const r2 = await API.post('/api/links/' + vb.dataset.id + '/verify', JSON.stringify({}));
+        toast(r2.message || '验证完成');
+        box.innerHTML = `<span style="color:var(--success);">${escapeHtml(r2.message || '验证完成')}</span>`;
+        await loadLinks();
+      } catch (err2) {
+        toast(err2.message);
+        vb.disabled = false;
+      }
+    };
+  }
+
+  async function loadLinks() {
+    const list = document.getElementById('links-list');
+    if (!list) return;
+    let data;
+    try { data = await API.get('/api/links'); }
+    catch (err) { list.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`; return; }
+    const links = data.links || [];
+    if (!links.length) { list.innerHTML = `<div class="empty">还没有提交 GitHub 项目</div>`; return; }
+    list.innerHTML = links.map((l) => `
+      <div class="app-row">
+        <div class="app-info">
+          <div class="app-title">
+            <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.title || l.url)}</a>
+            ${l.verified
+              ? '<span class="title-tag" style="color:var(--success);" title="已通过仓库所有权验证">✓ 已认证</span>'
+              : '<span class="title-tag" style="color:var(--danger);">待验证</span>'}
+          </div>
+          <div class="app-desc">${escapeHtml(l.owner + '/' + l.repo)} · ${formatTime(l.created_at)}${l.description ? ' · ' + escapeHtml(l.description) : ''}</div>
+        </div>
+        <div class="file-actions">
+          ${l.verified ? '' : `<button class="btn btn-sm btn-ghost lk-steps" data-id="${l.id}">验证指引</button><button class="btn btn-sm btn-primary lk-verify-btn" data-id="${l.id}">验证</button>`}
+          <button class="btn btn-sm btn-ghost lk-del" data-id="${l.id}" style="color:var(--danger);">删除</button>
+        </div>
+      </div>`).join('');
+    list.querySelectorAll('.lk-del').forEach((b) => {
+      b.onclick = async () => {
+        const ok = await confirm('删除该 GitHub 项目？（回扣已发提交积分）', { danger: true });
+        if (!ok) return;
+        try { await API.del('/api/links/' + b.dataset.id); toast('已删除'); await loadLinks(); }
+        catch (err) { toast(err.message); }
+      };
+    });
+    list.querySelectorAll('.lk-verify-btn').forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true;
+        try {
+          const r = await API.post('/api/links/' + b.dataset.id + '/verify', JSON.stringify({}));
+          toast(r.message || '验证完成');
+          await loadLinks();
+        } catch (err) {
+          toast(err.message);
+          b.disabled = false;
+        }
+      };
+    });
+    list.querySelectorAll('.lk-steps').forEach((b) => {
+      b.onclick = () => {
+        const l = links.find((x) => String(x.id) === String(b.dataset.id));
+        if (l) showVerifyBox(l);
+      };
+    });
+  }
+
+  const lkSubmitBtn = document.getElementById('lk-submit');
+  if (lkSubmitBtn) {
+    lkSubmitBtn.onclick = async () => {
+      const errEl = document.getElementById('lk-error');
+      errEl.classList.remove('show');
+      const url = document.getElementById('lk-url').value.trim();
+      const title = document.getElementById('lk-title').value.trim();
+      const description = document.getElementById('lk-desc').value.trim();
+      if (!url || !title) { errEl.textContent = '请填写仓库链接和项目名称'; errEl.classList.add('show'); return; }
+      lkSubmitBtn.disabled = true;
+      try {
+        const r = await API.post('/api/links', JSON.stringify({ url, title, description }));
+        const l = r.link;
+        document.getElementById('lk-url').value = '';
+        document.getElementById('lk-title').value = '';
+        document.getElementById('lk-desc').value = '';
+        showVerifyBox(l);
+        await loadLinks();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.add('show');
+      } finally {
+        lkSubmitBtn.disabled = false;
+      }
+    };
+  }
+
   restoreScanItems();
   loadFiles();
   loadApps();
+  loadLinks();
 };

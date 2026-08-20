@@ -229,6 +229,7 @@ Views.learnList = async () => {
           <div class="learn-chapter-sub">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '已通关 · 奖励已到账' : c.articles.length + ' 篇内容 · 通关得 ⭐ 积分'}</div>
         </div>
         <span class="learn-chapter-count">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '✓ 已通关' : c.articles.length + ' 篇'}</span>
+        <span class="learn-done-tag" title="已完成本章学习的同学人数">👥 ${c.completed_count} 人已完成</span>
       </div>
       <div class="learn-list">
         ${c.articles.map((a) => `
@@ -474,12 +475,13 @@ function renderTasks(tasks, articleId) {
             </div>`;
         }
         if (t.type === 'quiz') {
+          // 答案/解析不再下发（服务端判分，防刷题）；答对后由 /api/points/quiz 返回解析
           return `
-            <div class="card learn-task" data-article="${articleId}" data-task="${i}" data-explain="${escapeHtml(t.explain || '')}">
+            <div class="card learn-task" data-article="${articleId}" data-task="${i}">
               <div class="learn-task-badge badge-quiz">单选</div>
               <div class="learn-task-body">
                 <div class="learn-task-head">${escapeHtml(t.question)}</div>
-                <div class="quiz-options" data-answer="${t.answer}">
+                <div class="quiz-options">
                   ${t.options.map((o, oi) => `
                     <button class="quiz-option" data-oi="${oi}"><span class="quiz-opt-label">${String.fromCharCode(65 + oi)}.</span> ${escapeHtml(o)}</button>`).join('')}
                 </div>
@@ -492,10 +494,11 @@ function renderTasks(tasks, articleId) {
     </div>`;
 }
 
-// 上报任务完成：服务端记录；一章全部完成后发整章积分（20 ⭐）
-async function reportTask(articleId, taskIndex) {
+// 上报任务完成：服务端记录（服务端会核验该任务的真实完成条件，需附带核验数据，如选择题答案/tiny_id）；
+// 一章全部完成后发整章积分（20 ⭐）
+async function reportTask(articleId, taskIndex, extra) {
   try {
-    const data = await API.post('/api/points/task', JSON.stringify({ article_id: articleId, task_index: taskIndex }));
+    const data = await API.post('/api/points/task', JSON.stringify({ article_id: articleId, task_index: taskIndex, ...(extra || {}) }));
     updateTaskProgressUI(articleId, data);
     if (data.granted) {
       Utils.toast('🎉 本章任务全部完成 +' + data.granted + ' ⭐');
@@ -538,6 +541,7 @@ async function loadTaskProgress(articleId) {
     const data = await API.get('/api/points/task-progress?article_id=' + articleId);
     updateTaskProgressUI(articleId, data);
     const doneSet = new Set((data.progress || []).filter((p) => p.done).map((p) => p.task_index));
+    const progByIdx = new Map((data.progress || []).map((p) => [p.task_index, p]));
     document.querySelectorAll('.learn-task[data-article="' + articleId + '"]').forEach((task) => {
       const ti = parseInt(task.dataset.task, 10);
       if (!doneSet.has(ti)) return;
@@ -547,16 +551,22 @@ async function loadTaskProgress(articleId) {
       if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = '✓ 已完成'; doneBtn.classList.add('task-done'); }
       const tInput = task.querySelector('.tinyid-input');
       if (tInput) tInput.disabled = true;
-      // 单选：锁定已答对的题（绿色显示）
+      // 单选：锁定已答对的题（绿色显示；正确答案由服务端在已完成时下发）
       const wrap = task.querySelector('.quiz-options');
       if (wrap && !wrap.dataset.locked) {
         wrap.dataset.locked = '1';
-        const answer = parseInt(wrap.dataset.answer, 10);
-        wrap.querySelectorAll('.quiz-option').forEach((o) => {
-          if (parseInt(o.dataset.oi, 10) === answer) o.classList.add('correct');
-        });
+        const prog = progByIdx.get(ti);
+        if (prog && prog.answer != null) {
+          wrap.querySelectorAll('.quiz-option').forEach((o) => {
+            if (parseInt(o.dataset.oi, 10) === Number(prog.answer)) o.classList.add('correct');
+          });
+        }
         const fb = task.querySelector('.quiz-feedback');
-        if (fb) { fb.innerHTML = `<span class="quiz-fb-ok">✓ 已完成</span>`; fb.classList.add('show'); }
+        if (fb) {
+          const explain = (prog && prog.explain) ? `<span class="quiz-explain">${Utils.escapeHtml(prog.explain)}</span>` : '';
+          fb.innerHTML = `<span class="quiz-fb-ok">✓ 已完成</span>${explain}`;
+          fb.classList.add('show');
+        }
       }
     });
   } catch (_) { /* 静默 */ }
@@ -785,7 +795,7 @@ async function checkTinyId(task, btn, input, statusEl) {
       btn.textContent = '✓ 已通过';
       btn.classList.add('task-done');
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">✓ 核验通过！这就是你的频道身份</span>`;
-      reportTask(parseInt(task.dataset.article, 10), parseInt(task.dataset.task, 10));
+      reportTask(parseInt(task.dataset.article, 10), parseInt(task.dataset.task, 10), { tiny_id: value });
     } else {
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">✗ 不一致，让 Agent 再查一次（确认是纯数字 ID）</span>`;
     }
@@ -861,38 +871,51 @@ document.addEventListener('click', (e) => {
   document.body.appendChild(overlay);
 });
 
-// 选择题交互：点击选项反馈对错，答对显示解析并上报任务完成
-document.addEventListener('click', (e) => {
+// 选择题交互（2026-08-21 改版）：判分完全在服务端（/api/points/quiz）——
+// 前端不持有答案，点选即提交；答对锁定并显示解析，答错仅标记该选项并允许重试（服务端有冷却防试错）。
+document.addEventListener('click', async (e) => {
   const opt = e.target.closest('.quiz-option');
   if (!opt) return;
   const wrap = opt.closest('.quiz-options');
   if (!wrap || wrap.dataset.locked) return;
-  const answer = parseInt(wrap.dataset.answer, 10);
   const chosen = parseInt(opt.dataset.oi, 10);
   const task = opt.closest('.learn-task');
   const fb = task ? task.querySelector('.quiz-feedback') : null;
+  const articleId = task ? parseInt(task.dataset.article, 10) : 0;
+  const taskIndex = task ? parseInt(task.dataset.task, 10) : 0;
 
-  const options = [...wrap.querySelectorAll('.quiz-option')];
-  options.forEach((o) => {
-    o.classList.remove('correct', 'wrong');
-    if (parseInt(o.dataset.oi, 10) === answer) o.classList.add('correct');
-  });
+  // 清除上一次反馈态
+  wrap.querySelectorAll('.quiz-option').forEach((o) => o.classList.remove('correct', 'wrong'));
+  if (fb) { fb.classList.remove('show'); fb.innerHTML = ''; }
 
-  if (chosen === answer) {
-    opt.classList.add('correct');
-    wrap.dataset.locked = '1';
+  let data;
+  try {
+    data = await API.post('/api/points/quiz', JSON.stringify({ article_id: articleId, task_index: taskIndex, answer: chosen }));
+  } catch (err) {
     if (fb) {
-      const explain = task.dataset.explain || '';
-      fb.innerHTML = `<span class="quiz-fb-ok">✓ 回答正确！</span>${explain ? `<span class="quiz-explain">${Utils.escapeHtml(explain)}</span>` : ''}`;
+      fb.innerHTML = `<span class="quiz-fb-no">${Utils.escapeHtml((err && err.message) || '提交失败，请重试')}</span>`;
       fb.classList.add('show');
     }
-    // 答对 → 任务完成
-    reportTask(parseInt(task.dataset.article, 10), parseInt(task.dataset.task, 10));
-  } else {
+    return;
+  }
+  if (!data.correct) {
     opt.classList.add('wrong');
     if (fb) {
       fb.innerHTML = `<span class="quiz-fb-no">✗ 不对哦，再想想～</span>`;
       fb.classList.add('show');
     }
+    return;
+  }
+  // 答对：锁定、绿色高亮、显示解析、更新进度
+  opt.classList.add('correct');
+  wrap.dataset.locked = '1';
+  if (fb) {
+    fb.innerHTML = `<span class="quiz-fb-ok">✓ 回答正确！</span>${data.explain ? `<span class="quiz-explain">${Utils.escapeHtml(data.explain)}</span>` : ''}`;
+    fb.classList.add('show');
+  }
+  updateTaskProgressUI(articleId, data);
+  if (data.granted) {
+    Utils.toast('🎉 本章任务全部完成 +' + data.granted + ' ⭐');
+    if (window.__bumpPoints) window.__bumpPoints(data.points);
   }
 });

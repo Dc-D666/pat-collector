@@ -18,6 +18,8 @@ const { runMulter, ensureDiskSpace, runUploadPipeline, sanitizeName, extOf } = r
 
 const router = express.Router();
 
+const ipKey = (req) => req.ip || req.connection.remoteAddress || 'unknown';
+
 function displayNameOf(row) {
   const showReal = row.show_real_name !== 0;
   return {
@@ -92,8 +94,10 @@ router.get(
 );
 
 // 访客上传（multipart：file + token 字段；每次一个文件，前端可循环传多个）
+// IP 限流（2026-08-20）：防未认证请求无限投递 multipart 造成磁盘/CPU 写放大（multer 先落盘后校验 token）
 router.post(
   '/upload',
+  rateLimit({ windowMs: 60 * 1000, max: 10, keyFn: ipKey }),
   asyncHandler(async (req, res) => {
     // 上传前磁盘自检：剩余空间不足时直接拒绝（不落盘任何文件）
     if (!ensureDiskSpace(res)) return;
@@ -138,12 +142,16 @@ router.get(
   })
 );
 
-// HTML 预览（仅限本项目地址下的文件；CSP sandbox 防存储型 XSS）
+// HTML 预览（仅限本项目地址下的文件；2026-08-20 修复：仅接受 x-guest-token 请求头，
+// 禁止 ?token= query——预览 URL 会暴露访客令牌，上传的 HTML 可读取 location.href 外传；
+// 前端经 /preview.html#/guest/<id>/<token> 预览壳 fetch 渲染，令牌在 hash 中、被 sandbox 隔离）
 router.get(
   '/preview/:id',
   asyncHandler(async (req, res) => {
-    const user = await loadActiveGuest(req, res);
-    if (!user) return;
+    const token = String(req.headers['x-guest-token'] || '').trim();
+    const user = await loadGuestByToken(token);
+    if (!user) return res.status(401).json({ error: '项目地址无效或已失效' });
+    if (user.status !== 'active') return res.status(401).json({ error: '账号已停用' });
 
     const rows = await query(
       'SELECT stored_name, original_name FROM files WHERE id = ? AND user_id = ?',

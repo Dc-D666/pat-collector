@@ -522,7 +522,8 @@ span.brand-logo {
   opacity: .85;
 }
 .learn-chapter-head {
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; gap: 14px; row-gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 /* 章号勋章 */
@@ -540,6 +541,12 @@ span.brand-logo {
   font-size: 11px; font-weight: 600; padding: 3px 12px; border-radius: 9999px;
   background: var(--primary-soft); color: var(--primary); white-space: nowrap;
 }
+/* 本章完成人数小标签 */
+.learn-done-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 9999px;
+  background: var(--success-soft); color: var(--success); white-space: nowrap;
+}
 /* 已通关章节：整体置灰（顶条/勋章/标题/箭头变灰，禁用 hover 上浮） */
 .learn-chapter.done { background: var(--bg); }
 .learn-chapter.done::before { background: var(--border); opacity: .6; }
@@ -551,6 +558,10 @@ span.brand-logo {
 .learn-chapter.done .learn-chapter-no { color: var(--text-dim); }
 .learn-chapter.done .learn-chapter-sub { opacity: .75; }
 .learn-chapter.done .learn-chapter-count {
+  background: var(--bg); color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.learn-chapter.done .learn-done-tag {
   background: var(--bg); color: var(--text-dim);
   border: 1px solid var(--border);
 }
@@ -811,6 +822,8 @@ span.brand-logo {
 .lb-points { font-weight: 700; color: var(--accent-strong); flex-shrink: 0; }
 .lb-reason { flex: 1; min-width: 0; }
 .lb-time { font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
+.lb-info { border: none; background: transparent; color: var(--accent-strong); cursor: pointer; font-size: 13px; padding: 0 3px; vertical-align: middle; }
+.lb-info:hover { opacity: 0.7; }
 
 /* ============ 空状态 / 加载 ============ */
 .empty {

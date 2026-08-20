@@ -11,7 +11,7 @@
 | 展示名 | 「是否授权展示真实姓名」设置：授权显示真名，否则显示**昵称=姓名拼音首字母**（方案二，2026-08-16）：pypinyin 生成缩写、多音字展开候选（如 单依纯 → CYC/DYC/SYC）由用户选择，**选定后不可更改**；`GET /api/auth/pinyin-candidates?name=` 供前端动态生成 |
 | 昵称安全 | 昵称永远派生自己的姓名（无法冒充班主任姓名/填违规文本）；存量自由文本昵称在下次编辑展示设置时强制改选缩写；缩写尴尬（如 史冰→SB）可改展示真名 |
 | 令牌 | 系统 HMAC-SHA256 签名 + base64url，24h 过期，`Authorization: Bearer` 携带；**访客项目地址令牌**为 64 位十六进制长随机串（无过期，随地址分享） |
-| 个人文件 | multipart 上传（多文件、拖拽、按文件进度、失败跳过）、上传后填写作品信息（标题/简介/玩法，**AI 审查，R2**，保存按钮「审核中」动画）、列表、下载、删除（二次确认）；**上传前 ClamAV + VirusTotal 双恶意扫描（R3，VT 429 自动降级 ClamAV，每次扫描结论写入 audit_logs 的 file_scan 记录）** + 自检磁盘剩余空间（低于 2GB 拒绝）；每人作品文件总数上限 20 个、总容量 1GB（超限提示联系频道主扩容） |
+| 个人文件 | multipart 上传（多文件、拖拽、按文件进度、失败跳过）、上传后填写作品信息（标题/简介/玩法，**AI 审查，R2**，保存按钮「审核中」动画）、列表、下载、删除（二次确认）；**上传前 VirusTotal 云查杀（R3，2026-08-20 起唯一扫描器：sha256 命中即判、未收录 ≤32MB 上传、429 熔断 12h 降级放行；本地 ClamAV 因内存占用已移除；每次扫描结论写入 audit_logs 的 file_scan 记录）** + 自检磁盘剩余空间（低于 2GB 拒绝）；每人作品文件总数上限 20 个、总容量 1GB（超限提示联系频道主扩容） |
 | 访客直传 | 无 QQ 用户专用：登录页填「年级→班级→姓名→展示名授权→安全密码」后直接上传程序文件，提交后生成**专属项目地址**（`#/p/<token>`），以后凭此地址查看/下载/继续上传/删除；额度：单文件 ≤200MB，每天最多 5 次 |
 | 访客删除保护 | 项目页删除文件需输入**安全密码**（提交时设置，选填；留空用默认密码 `nanfang1958`），防拿到 URL 的人误删/批量删；密码 scrypt 加盐哈希存库、常量时间比较、删除接口限流防爆破 |
 | 管理后台 | 仅 QQ 登录管理员可用（`ADMIN_QQ_TINY_IDS` 白名单引导）：总览 / 用户 / 文件 / 内容审核 / 轻应用 / 积分 / 运营（置顶/称号/商城开关）/ **评审（独立页 `#/admin/judge`：打分表单 + 待评审列表 + 已评审记录）** / 运维（存储/会话）/ 教程在线编辑（**独立全屏编辑页**，双栏实时预览，Ctrl+S 保存）/ 系统设置 / 审计（含**恶意扫描记录**与 AI 审查记录）；支持批量审核；全部操作记 `admin_log` 审计 |
@@ -20,7 +20,7 @@
 | 提交总览 | 统计卡片 + 每班卡片（学生数 / 文件数 / 轻应用数 / 总大小），可展开学生与项目明细 |
 | AI 轻应用 | 自动/手动识别 QQ 频道帖子中的 AI 轻应用并收集（作者硬校验） |
 | 学AI 栏目 | 5 章 AI 教程（Markdown，自研渲染器），每章含 B站视频 / 单选题 / 实操任务 |
-| 积分体系 | 首登 +10、阅读 **+8**、整章任务 **+15**、提交文件 **+25**（最多计 5 个）、提交应用 **+15**（最多计 3 个）、主动点赞 +2（日上限 10）、**被赞 +5（日上限 20，P3）**、毕业 **+40**、彩蛋 +5；幂等发放 + 计数上限 + 排行榜；**访客不进榜（O1）**，排行榜**默认「在校」可切「全部」（2026-08-16）**；人工评委可经后台调积分发放评审分 |
+| 积分体系 | 首登 +10、阅读 **+8**、整章任务 **+15**、提交文件 **+25**（与 GitHub 项目**合计**最多计 5 个，2026-08-20）、提交应用 **+15**（最多计 3 个）、**GitHub 项目外链 +25**（与作品文件**合计**最多计 5 个）、主动点赞 +2（日上限 10）、**被赞 +5（日上限 20，P3）**、毕业 **+40**、彩蛋 +5；幂等发放 + 计数上限 + 排行榜；**访客不进榜（O1）**，排行榜**默认「在校」可切「全部」（2026-08-16）**；人工评委可经后台调积分发放评审分；**限时加成（2026-08-20~23 北京时间）**：窗口内获得的所有正向积分 ×1.2（`utils/points.js` `bonusAmount`，覆盖 grant/grantCapped/评审 applyJudgePoints） |
 | 跨站体验 | 第1章实操任务跳转 NFTI（nfti.weaxi.cn）自动登录（HMAC ticket），完成人格测试自动核验 |
 
 ## 技术栈
@@ -127,13 +127,17 @@ npm run dev            # 或 npm start
 | PATCH | `/api/files/:id` | Bearer | 更新作品信息（标题/简介/玩法，仅本人） |
 | GET | `/api/files/download/:id` | Bearer | 下载（登录即可下载任意作品） |
 | DELETE | `/api/files/:id` | Bearer | 删除（仅本人） |
-| GET | `/api/class/wall` | Bearer | 全校作品展（文件+轻应用平铺，含班级 tag） |
+| GET | `/api/class/wall` | Bearer | 全校作品展（文件+轻应用+已验证 GitHub 外链平铺，含班级 tag） |
 | GET | `/api/class/overview` | Bearer | 全校总览 |
 | POST | `/api/apps/auto-scan` | Bearer | 自动识别 QQ 频道帖子中的 AI 轻应用 |
 | POST | `/api/apps/manual-scan` | Bearer | 手动识别（BID / 分享链接） |
 | POST | `/api/apps` | Bearer | 提交轻应用（+15 ⭐，最多计 3 个；总数上限 20） |
 | GET | `/api/apps` | Bearer | 我的轻应用列表 |
 | DELETE | `/api/apps/:id` | Bearer | 删除轻应用（仅本人） |
+| POST | `/api/links` | Bearer | 提交 GitHub 仓库链接（生成验证 token，待验证） |
+| POST | `/api/links/:id/verify` | Bearer | 验证仓库所有权（读取仓库根目录 nanfang-pat.txt 比对 token），通过后 +25⭐（作品文件 + GitHub 项目合计最多 5 个） |
+| GET | `/api/links` | Bearer | 我的 GitHub 项目列表 |
+| DELETE | `/api/links/:id` | Bearer | 删除 GitHub 项目（回扣积分，仅本人） |
 | GET | `/api/learn` | — | 学AI 章节列表 |
 | GET | `/api/learn/:slug` | — | 文章详情（含 tasks） |
 | GET | `/api/learn/nfti-ticket` | Bearer | 签发 NFTI 跨站体验 ticket（需 QQ 登录） |
@@ -158,13 +162,15 @@ npm run dev            # 或 npm start
 | POST | `/api/admin/audit/batch` | 管理员 | 批量审核（approve/delete，逐条容错） |
 | GET | `/api/admin/apps` | 管理员 | 轻应用列表/搜索 |
 | DELETE | `/api/admin/apps/:id` | 管理员 | 删除轻应用（回扣 +15） |
+| GET | `/api/admin/links` | 管理员 | GitHub 项目外链列表/搜索（含验证状态） |
+| DELETE | `/api/admin/links/:id` | 管理员 | 删除 GitHub 项目外链（回扣已发积分） |
 | GET | `/api/admin/points/leaderboard` | 管理员 | 积分榜 TOP50 |
 | GET | `/api/admin/points/logs` | 管理员 | 积分流水检索（user_id/reason/limit） |
 | GET | `/api/admin/purchases` | 管理员 | 置顶/称号/精华记录 |
 | POST | `/api/admin/purchases/:id/expire` | 管理员 | 手动过期 |
 | POST | `/api/admin/pins` | 管理员 | 免费手动置顶（file/app，小时） |
 | POST | `/api/admin/titles` | 管理员 | 发放专属称号 |
-| GET/POST | `/api/admin/judge` | 管理员 | 评委评审：GET 查单项目/最近列表，POST 打分（4 维度 0-10 加权：创意30%/内容25%/完成25%/价值观20% → `round(综合×30)`，满分 300，综合<6 不兑现；覆盖评审自动补/扣差额积分，reason=`judge_review`） |
+| GET/POST | `/api/admin/judge` | 管理员 | 评委评审：GET 查单项目/最近列表，POST 打分（4 维度 0-10 加权：创意40%/内容30%/完成20%/价值观10%（4:3:2:1） → `round(综合×30)`，满分 300，综合<6 不兑现；覆盖评审自动补/扣差额积分，reason=`judge_review`） |
 | GET/PUT | `/api/admin/settings[/:key]` | 管理员 | 运行时设置（shop_enabled/audit_enabled 等） |
 | GET | `/api/admin/storage` | 管理员 | 按班级存储/大文件/磁盘剩余 |
 | GET | `/api/admin/sessions` | 管理员 | QQ 会话列表 |

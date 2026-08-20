@@ -89,9 +89,10 @@ const config = {
     maxFileChars: 1000000, // 单文件内容达百万级字符 → 直接拒绝上传
     maxFileBytesBeforeRead: 4 * 1024 * 1024, // 字节超此值必超百万字符（UTF-8 中文 3B/字），不读直接拒
   },
-  malwareScan: process.env.MALWARE_SCAN !== '0', // R3：ClamAV 恶意程序扫描（上传时），0 关闭
+  malwareScan: process.env.MALWARE_SCAN !== '0', // R3：上传恶意程序扫描总开关（2026-08-20 起仅 VirusTotal），0 关闭
   virustotal: {
-    // R3 双扫描：ClamAV 必扫 + VirusTotal 辅助（需 VIRUSTOTAL_API_KEY；429 自动熔断 12h 降级为只跑 ClamAV）
+    // R3（2026-08-20 起为唯一扫描器）：哈希命中即判，未收录且 ≤32MB 才上传；429 自动熔断 12h 降级放行。
+    // 本地 ClamAV（clamd/clamscan）因需加载 ~600MB 签名库、2GB 服务器内存吃紧已移除。
     apiKey: process.env.VIRUSTOTAL_API_KEY || '',
     enabled: process.env.VIRUSTOTAL_ENABLED !== '0',
   },
@@ -125,6 +126,10 @@ const config = {
   guildId: process.env.GUILD_ID || '621631744026206738',
   // 跨站体验任务（NFTI）：ticket 签名密钥 + NFTI 库只读连接（判定"已体验"）
   patTicketSecret: process.env.PAT_TICKET_SECRET || '',
+  // GitHub API（GitHub 项目 Fork 检测用）：填 GITHUB_TOKEN 可提升配额（未认证 60 次/时/IP，认证 5000 次/时）
+  github: {
+    token: process.env.GITHUB_TOKEN || '',
+  },
   nftiDb: {
     host: process.env.NFTI_DB_HOST || '127.0.0.1',
     port: parseInt(process.env.NFTI_DB_PORT || '3306', 10),
@@ -141,6 +146,12 @@ const config = {
   isStandardClass,
   allowedExtensions: ALLOWED_EXTENSIONS,
   textFormats: TEXT_FORMATS,
+  // 最高管理员（2026-08-20）：仅此人可设置/取消其他管理员，其余管理员权限不变。
+  // 按 (class_name, real_name) 唯一身份识别，可用 SUPER_ADMIN_CLASS/SUPER_ADMIN_NAME 覆盖。
+  superAdmin: {
+    class_name: process.env.SUPER_ADMIN_CLASS || '2120',
+    real_name: process.env.SUPER_ADMIN_NAME || '戴睿羲',
+  },
 };
 
 // 启动前强校验：生产环境不允许无密钥裸奔

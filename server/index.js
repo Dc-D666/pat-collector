@@ -12,10 +12,17 @@ const appRoutes = require('./routes/apps');
 const learnRoutes = require('./routes/learn');
 const pointsRoutes = require('./routes/points');
 const guestRoutes = require('./routes/guest');
+const linkRoutes = require('./routes/links');
 const adminRoutes = require('./routes/admin');
 const { startJobs } = require('./jobs');
 
 config.assertConfig();
+
+// 兜底：请求周期外的 Promise 拒绝（如遗漏 await 的异步回调）不要静默崩溃进程——
+// 记录堆栈并继续运行（uncaughtException 仍按默认崩溃，由 pm2 autorestart 拉起）。上线前加固（2026-08-20）
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] 未处理的 Promise 拒绝：', reason && reason.stack ? reason.stack : reason);
+});
 
 // 确保存储目录存在
 fs.mkdirSync(config.storageDir, { recursive: true });
@@ -40,6 +47,7 @@ app.use('/api/apps', appRoutes);
 app.use('/api/learn', learnRoutes);
 app.use('/api/points', pointsRoutes);
 app.use('/api/guest', guestRoutes);
+app.use('/api/links', linkRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 未知 API 路径 → 404 JSON

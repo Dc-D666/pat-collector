@@ -11,12 +11,14 @@ Views.admin = (page) => {
     location.hash = '#/files';
     return;
   }
+  // 最高管理员（2026-08-20）：仅此人可设置/取消管理员；与 server/config.js superAdmin 同步
+  const isSuperAdmin = u.class_name === '2120' && u.real_name === '戴睿羲';
   // 评委评审维度与权重（P3）：必须放在 loaders 调用之前（否则 loadJudge 触发 TDZ ReferenceError）
   const JUDGE_DIMS = [
-    { key: 'creativity', label: '创意与创新', weight: 0.30 },
-    { key: 'content', label: '内容质量', weight: 0.25 },
-    { key: 'completeness', label: '完成度与实现', weight: 0.25 },
-    { key: 'values', label: '价值观与合规', weight: 0.20 },
+    { key: 'creativity', label: '创意与创新', weight: 0.40 },
+    { key: 'content', label: '内容质量', weight: 0.30 },
+    { key: 'completeness', label: '完成度与实现', weight: 0.20 },
+    { key: 'values', label: '价值观与合规', weight: 0.10 },
   ];
 
   const current = page || 'overview';
@@ -26,6 +28,7 @@ Views.admin = (page) => {
     { key: 'files', label: '文件', hash: '#/admin/files' },
     { key: 'audit', label: '审核', hash: '#/admin/audit' },
     { key: 'apps', label: '轻应用', hash: '#/admin/apps' },
+    { key: 'links', label: '外链', hash: '#/admin/links' },
     { key: 'points', label: '积分', hash: '#/admin/points' },
     { key: 'ops', label: '运营', hash: '#/admin/ops' },
     { key: 'judge', label: '评审', hash: '#/admin/judge' },
@@ -54,7 +57,7 @@ Views.admin = (page) => {
 
   const content = document.getElementById('admin-content');
   // 各页签的刷新句柄（由 loadX 赋值，供弹窗/操作回调复用，避免闭包作用域问题）
-  let refreshUsers = null, refreshFiles = null, refreshAudit = null, refreshApps = null, refreshOps = null;
+  let refreshUsers = null, refreshFiles = null, refreshAudit = null, refreshApps = null, refreshOps = null, refreshLinks = null;
   // 教程独立编辑页子路由：#/admin/articles/new | #/admin/articles/edit/:id
   if (current === 'articles') {
     const m = (location.hash || '').match(/^#\/admin\/articles\/(edit\/(\d+)|new)$/);
@@ -62,7 +65,7 @@ Views.admin = (page) => {
   }
   const loaders = {
     overview: loadOverview, users: loadUsers, files: loadFiles, audit: loadAudit,
-    apps: loadApps, points: loadPoints, ops: loadOps, judge: loadJudge, storage: loadStorage,
+    apps: loadApps, links: loadLinks, points: loadPoints, ops: loadOps, judge: loadJudge, storage: loadStorage,
     articles: loadArticles, settings: loadSettings, logs: loadLogs,
   };
   (loaders[current] || loadOverview)();
@@ -158,7 +161,7 @@ Views.admin = (page) => {
           </div>
           <div class="file-actions" style="display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-ghost" data-act="points" data-id="${x.id}" data-name="${escapeHtml(x.real_name)}">调积分</button>
-            ${x.qq_tiny_id ? `<button class="btn btn-sm btn-ghost" data-act="admin" data-id="${x.id}" data-on="${x.is_admin ? '1' : '0'}">${x.is_admin ? '取消管理员' : '设为管理员'}</button>` : ''}
+            ${isSuperAdmin && x.qq_tiny_id ? `<button class="btn btn-sm btn-ghost" data-act="admin" data-id="${x.id}" data-on="${x.is_admin ? '1' : '0'}">${x.is_admin ? '取消管理员' : '设为管理员'}</button>` : ''}
             <button class="btn btn-sm btn-ghost" data-act="status" data-id="${x.id}" data-st="${x.status}">${x.status === 'active' ? '停用' : '恢复'}</button>
             ${x.is_guest ? `<button class="btn btn-sm btn-ghost" data-act="pwreset" data-id="${x.id}">重置删除密码</button>` : ''}
             <button class="btn btn-sm btn-ghost" data-act="del" data-id="${x.id}" data-name="${escapeHtml(x.real_name)}" style="color:var(--danger);">删除</button>
@@ -279,7 +282,7 @@ Views.admin = (page) => {
             ${f.audit_reason ? `<div class="file-meta" style="font-size:12px;color:var(--danger);">审核原因：${escapeHtml(f.audit_reason)}</div>` : ''}
           </div>
           <div class="file-actions" style="display:flex;gap:6px;flex-wrap:wrap;">
-            ${/\.(html?|htm)$/i.test(f.original_name) ? `<a class="btn btn-sm btn-ghost" href="/api/files/preview/${f.id}?token=${encodeURIComponent(API.getToken() || '')}" target="_blank" rel="noopener">预览</a>` : ''}
+            ${/\.(html?|htm)$/i.test(f.original_name) ? `<a class="btn btn-sm btn-ghost" href="/preview.html#/file/${f.id}" target="_blank" rel="noopener">预览</a>` : ''}
             <button class="btn btn-sm btn-ghost" data-act="dl" data-id="${f.id}" data-name="${escapeHtml(f.original_name)}">下载</button>
             <button class="btn btn-sm btn-ghost" data-act="edit" data-id="${f.id}" data-name="${escapeHtml(f.original_name)}">编辑</button>
             <button class="btn btn-sm btn-ghost" data-act="del" data-id="${f.id}" data-name="${escapeHtml(f.original_name)}" style="color:var(--danger);">删除</button>
@@ -439,7 +442,7 @@ Views.admin = (page) => {
       <h3 class="modal-title">拒绝收录</h3>
       <div class="form-error" id="adm-rj-error"></div>
       <div class="field"><label>拒绝原因（展示给用户）</label><input id="adm-rj-reason" type="text" maxlength="500" placeholder="如：包含违规内容" /></div>
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">拒绝将回扣该文件的 +50 提交积分。</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">拒绝将回扣该文件的 +25 提交积分。</div>
       <div class="modal-actions">
         <button class="btn" id="adm-rj-cancel">取消</button>
         <button class="btn" id="adm-rj-save" style="background:var(--danger);color:#fff;">拒绝并回扣积分</button>
@@ -503,6 +506,58 @@ Views.admin = (page) => {
         const yes = await confirm(`确定删除轻应用「${b.dataset.name}」吗？（回扣 +25 提交积分）`, { danger: true });
         if (!yes) return;
         try { await API.del('/api/admin/apps/' + b.dataset.del); toast('已删除'); if (refreshApps) refreshApps(); }
+        catch (err) { toast(err.message); }
+      };
+    });
+  }
+
+  // ---------- GitHub 项目外链（2026-08-20）----------
+  async function loadLinks() {
+    content.innerHTML = `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <input id="al-q" type="text" placeholder="搜索项目名/链接/作者/班级" style="flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--border);border-radius:10px;font-size:14px;" />
+        <button class="btn btn-sm" id="al-search">搜索</button>
+      </div>
+      <div id="al-list"><div class="spinner"></div></div>`;
+    const doSearch = () => fetchLinks(document.getElementById('al-q').value.trim());
+    document.getElementById('al-search').onclick = doSearch;
+    document.getElementById('al-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+    refreshLinks = doSearch;
+    doSearch();
+  }
+
+  async function fetchLinks(q) {
+    const list = document.getElementById('al-list');
+    if (!list) return;
+    let data;
+    try { data = await API.get('/api/admin/links' + (q ? '?q=' + encodeURIComponent(q) : '')); }
+    catch (err) { list.innerHTML = `<div class="empty">${escapeHtml(err.message)}</div>`; return; }
+    const rows = data.links || [];
+    if (!rows.length) { list.innerHTML = `<div class="empty">没有匹配的 GitHub 项目外链</div>`; return; }
+    list.innerHTML = rows.map((l) => `
+      <div class="card" style="padding:12px 14px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <div style="min-width:0;">
+            <div class="file-name" style="font-size:15px;"><a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.title || l.url)}</a>
+              ${l.verified
+                ? '<span class="title-tag" style="color:var(--success);">✓ 已认证</span>'
+                : '<span class="title-tag" style="color:var(--danger);">待验证</span>'}
+            </div>
+            <div class="file-meta" style="font-size:12px;color:var(--text-dim);margin-top:4px;">
+              ${l.class_name}班 ${escapeHtml(l.real_name || '')} · ${escapeHtml(l.owner + '/' + l.repo)} · ${formatTime(l.created_at)} · id=${l.id}
+            </div>
+            ${l.description ? `<div class="file-meta" style="font-size:12px;color:var(--text-dim);">${escapeHtml(l.description)}</div>` : ''}
+          </div>
+          <div class="file-actions">
+            <button class="btn btn-sm btn-ghost" data-del="${l.id}" data-name="${escapeHtml(l.title || l.url)}" style="color:var(--danger);">删除</button>
+          </div>
+        </div>
+      </div>`).join('');
+    list.querySelectorAll('[data-del]').forEach((b) => {
+      b.onclick = async () => {
+        const yes = await confirm(`确定删除「${b.dataset.name}」吗？（回扣已发提交积分）`, { danger: true });
+        if (!yes) return;
+        try { await API.del('/api/admin/links/' + b.dataset.del); toast('已删除'); if (refreshLinks) refreshLinks(); }
         catch (err) { toast(err.message); }
       };
     });
@@ -768,7 +823,7 @@ Views.admin = (page) => {
   async function loadJudge() {
     content.innerHTML = `
       <div class="card" style="padding:16px 18px;margin-bottom:14px;">
-        <div class="file-list-head"><span>🧑‍⚖️ 评审打分（创意30% · 内容25% · 完成25% · 价值观20%｜满分 300⭐｜综合 &lt;6 不兑现）</span></div>
+        <div class="file-list-head"><span>🧑‍⚖️ 评审打分（创意40% · 内容30% · 完成20% · 价值观10%｜满分 300⭐｜综合 &lt;6 不兑现）</span></div>
         <div class="form-error" id="aj-error" style="margin-top:6px;"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
           <select id="aj-type" style="padding:9px;border:1px solid var(--border);border-radius:10px;font-size:14px;">

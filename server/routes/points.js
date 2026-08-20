@@ -10,6 +10,7 @@ const { grant, grantCapped, getPoints, spend } = require('../utils/points');
 const { runCli } = require('../qq/proxy');
 const qqSessions = require('../qq/sessions');
 const { checkElapsed } = require('../utils/readTimer');
+const { verifyTaskCompletion } = require('../utils/taskVerify');
 
 const router = express.Router();
 
@@ -56,6 +57,55 @@ const SHOP = [
 ];
 
 const HOUR_MS = 3600 * 1000;
+
+const ipKey = (req) => req.ip || req.connection.remoteAddress || 'unknown';
+
+// ---- 任务完成记录 + 整章积分发放（/task 与 /quiz 共用）----
+// 幂等：task_progress 唯一键防重；整章积分按 article 维度只发一次（grant 幂等）
+async function recordTaskCompletion(userId, articleId, taskIndex, list) {
+  await query(
+    'INSERT IGNORE INTO task_progress (user_id, article_id, task_index) VALUES (?, ?, ?)',
+    [userId, articleId, taskIndex]
+  );
+  const [done] = await query(
+    'SELECT COUNT(*) AS cnt FROM task_progress WHERE user_id = ? AND article_id = ?',
+    [userId, articleId]
+  );
+  const total = list.length;
+  const doneCount = Number(done.cnt);
+  const granted = doneCount >= total ? await grant(userId, 'task', 'article:' + articleId) : null;
+  const points = await getPoints(userId);
+  return { granted, done_count: doneCount, total, chapter_done: doneCount >= total, points: points.points };
+}
+
+// ---- 选择题判分防"试错刷题"（2026-08-21）----
+// 答案与解析不再下发前端，判分完全在服务端。防暴力试错（选项就 2-4 个）：
+// 答错按指数递增冷却 10s → 1min → 5min → 30min → 60min（同一用户同一题），答对即清零。
+const QUIZ_LOCK_STEPS = [10 * 1000, 60 * 1000, 5 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
+const quizWrong = new Map(); // key: `${uid}:${articleId}:${taskIndex}` → { count, lockedUntil }
+function quizLockState(key) {
+  const now = Date.now();
+  const rec = quizWrong.get(key);
+  if (!rec) return { locked: false, retryAfterMs: 0 };
+  if (rec.lockedUntil && now < rec.lockedUntil) return { locked: true, retryAfterMs: rec.lockedUntil - now };
+  return { locked: false, retryAfterMs: 0 };
+}
+function quizRecordWrong(key) {
+  const now = Date.now();
+  const rec = quizWrong.get(key) || { count: 0, lockedUntil: 0 };
+  rec.count += 1;
+  rec.lockedUntil = now + QUIZ_LOCK_STEPS[Math.min(rec.count - 1, QUIZ_LOCK_STEPS.length - 1)];
+  quizWrong.set(key, rec);
+  // 防内存膨胀：条目多时清掉已过冷却期的
+  if (quizWrong.size > 5000) {
+    for (const [k, v] of quizWrong) {
+      if (v.lockedUntil && now >= v.lockedUntil) quizWrong.delete(k);
+    }
+  }
+}
+function quizClearWrong(key) {
+  quizWrong.delete(key);
+}
 
 // 我的积分与流水
 router.get(
@@ -141,7 +191,9 @@ router.post(
   })
 );
 
-// 任务完成上报：记录单个任务完成；一章内所有任务都完成时才发整章积分（20 ⭐）
+// 任务完成上报：记录单个任务完成；一章内所有任务都完成时才发整章积分（20 ⭐）。
+// 2026-08-21 加固：完成条件由服务端核验（verifyTaskCompletion，口径与 /api/learn/*-status 一致），
+// 防直接 POST 绕过前端 UI 校验刷任务。
 router.post(
   '/task',
   requireAuth,
@@ -156,35 +208,56 @@ router.post(
     const tasks = rows[0].tasks;
     let list = [];
     try { list = typeof tasks === 'string' ? JSON.parse(tasks) : tasks; } catch (_) { list = []; }
-    if (!list[taskIndex]) return res.status(400).json({ error: '任务不存在' });
+    const task = list[taskIndex];
+    if (!task) return res.status(400).json({ error: '任务不存在' });
 
-    // 1. 记录该任务完成（幂等：已记录则跳过）
-    await query(
-      'INSERT IGNORE INTO task_progress (user_id, article_id, task_index) VALUES (?, ?, ?)',
-      [req.user.id, articleId, taskIndex]
-    );
+    // 服务端核验该任务的真实完成条件（选择题答案 / NFTI 体验 / 频道发帖 / 项目上传 / tiny_id）
+    const vr = await verifyTaskCompletion(task, req.user, req.body);
+    if (!vr.ok) return res.status(400).json({ error: vr.error });
 
-    // 2. 查该章已完成任务数 vs 总任务数
-    const [done] = await query(
-      'SELECT COUNT(*) AS cnt FROM task_progress WHERE user_id = ? AND article_id = ?',
-      [req.user.id, articleId]
-    );
-    const total = list.length;
-    const doneCount = Number(done.cnt);
+    res.json(await recordTaskCompletion(req.user.id, articleId, taskIndex, list));
+  })
+);
 
-    // 3. 全部完成 → 发整章积分（ref_id 用 article 维度，整章只发一次）
-    const granted = doneCount >= total
-      ? await grant(req.user.id, 'task', 'article:' + articleId)
-      : null;
+// 选择题判分（2026-08-21）：答案与解析不下发前端（/api/learn/:slug 已剥离），
+// 逐题由服务端判分，答对才记录完成；答错返回 correct:false 且不泄露正确答案，
+// 并以指数冷却防试错刷题（见 quizLockState）。
+router.post(
+  '/quiz',
+  requireAuth,
+  rateLimit({ windowMs: 60 * 1000, max: 40, keyFn: ipKey }),
+  asyncHandler(async (req, res) => {
+    const articleId = parseInt(req.body && req.body.article_id, 10);
+    const taskIndex = parseInt(req.body && req.body.task_index, 10);
+    const chosen = parseInt(req.body && req.body.answer, 10);
+    if (!articleId || isNaN(taskIndex) || isNaN(chosen)) {
+      return res.status(400).json({ error: '参数错误' });
+    }
+    const rows = await query('SELECT id, tasks FROM articles WHERE id = ?', [articleId]);
+    if (rows.length === 0) return res.status(404).json({ error: '文章不存在' });
+    const tasks = rows[0].tasks;
+    let list = [];
+    try { list = typeof tasks === 'string' ? JSON.parse(tasks) : tasks; } catch (_) { list = []; }
+    const task = list[taskIndex];
+    if (!task || task.type !== 'quiz') return res.status(400).json({ error: '任务不存在' });
 
-    const points = await getPoints(req.user.id);
-    res.json({
-      granted,
-      done_count: doneCount,
-      total,
-      chapter_done: doneCount >= total,
-      points: points.points,
-    });
+    const lockKey = req.user.id + ':' + articleId + ':' + taskIndex;
+    const lock = quizLockState(lockKey);
+    if (lock.locked) {
+      const s = Math.ceil(lock.retryAfterMs / 1000);
+      return res.status(429).json({
+        error: '尝试次数过多，请 ' + (s >= 60 ? Math.ceil(s / 60) + ' 分钟' : s + ' 秒') + ' 后再试',
+      });
+    }
+
+    const correct = chosen === Number(task.answer);
+    if (!correct) {
+      quizRecordWrong(lockKey);
+      return res.json({ correct: false });
+    }
+    quizClearWrong(lockKey);
+    const result = await recordTaskCompletion(req.user.id, articleId, taskIndex, list);
+    res.json({ correct: true, explain: task.explain || '', ...result });
   })
 );
 
@@ -205,7 +278,15 @@ router.get(
       [req.user.id, articleId]
     );
     const doneSet = new Set(done.map((d) => Number(d.task_index)));
-    const progress = list.map((t, i) => ({ task_index: i, done: doneSet.has(i) }));
+    const progress = list.map((t, i) => {
+      const entry = { task_index: i, done: doneSet.has(i) };
+      // 已完成的选择题：下发正确答案与解析（奖励已发放，无泄露价值；前端用于回填高亮与解析）
+      if (entry.done && t && t.type === 'quiz') {
+        entry.answer = Number(t.answer);
+        entry.explain = t.explain || '';
+      }
+      return entry;
+    });
     // 是否已发整章积分（用于前端展示"已完成"）
     const points = await query(
       "SELECT 1 FROM points_log WHERE user_id = ? AND reason = 'task' AND ref_id = ?",
@@ -229,7 +310,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const targetType = String((req.body && req.body.target_type) || '').trim();
     const targetId = parseInt(req.body && req.body.target_id, 10);
-    if (!['file', 'app'].includes(targetType) || !targetId) {
+    if (!['file', 'app', 'link'].includes(targetType) || !targetId) {
       return res.status(400).json({ error: '参数错误' });
     }
 
@@ -240,8 +321,12 @@ router.post(
       if (rows.length === 0) return res.status(404).json({ error: '作品不存在' });
       if (rows[0].audit_status === 'flagged') return res.status(403).json({ error: '该作品因违规已被下架' });
       owner = rows[0].user_id;
-    } else {
+    } else if (targetType === 'app') {
       const rows = await query('SELECT user_id FROM apps WHERE id = ?', [targetId]);
+      if (rows.length === 0) return res.status(404).json({ error: '作品不存在' });
+      owner = rows[0].user_id;
+    } else {
+      const rows = await query('SELECT user_id FROM links WHERE id = ?', [targetId]);
       if (rows.length === 0) return res.status(404).json({ error: '作品不存在' });
       owner = rows[0].user_id;
     }

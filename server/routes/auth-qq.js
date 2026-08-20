@@ -260,9 +260,10 @@ function identityFailMsg(reason) {
   return '已授权但无法识别你的 QQ 身份（频道成员搜索失败），请确认已加入「南方中学校友频道」后重新扫码，或稍后重试';
 }
 
-// 2. 轮询授权状态（扫码期间高频调用，不设限流）
+// 2. 轮询授权状态（扫码期间高频调用；限流 120 次/10 分钟/IP，防伪造会话刷 CLI 子进程——2026-08-20）
 router.post(
   '/poll',
+  rateLimit({ windowMs: 10 * 60 * 1000, max: 120, keyFn: ipKey }),
   asyncHandler(async (req, res) => {
     const sessionId = String((req.body && req.body.session) || '');
     if (!sessionId) return res.status(400).json({ error: 'Missing session' });
@@ -379,6 +380,10 @@ router.post(
       if (!nickname || !pc.candidates.includes(nickname)) {
         return res.status(400).json({ error: '昵称须为姓名拼音首字母，请从候选中选择' });
       }
+    } else if (!nickname) {
+      // 选「展示真实姓名」也自动生成拼音缩写昵称（非同班查看时的展示兜底，2026-08-20 修排行榜"同学"问题）
+      const pc = await pinyinCandidates(real_name);
+      nickname = (pc.candidates && pc.candidates[0]) || null;
     }
 
     // 该 tiny_id 已绑定 → 直接登录（无需再填班级姓名）
@@ -398,15 +403,27 @@ router.post(
     const isStandard = config.isStandardClass(class_name);
     // 「其他」年级：班级必填，仅接受 4 位班级号（毕业生）或 0（外校）
     if (!isStandard && (class_name !== '0' && !/^\d{4}$/.test(class_name))) {
-      return res.status(400).json({ error: '毕业生请填自己班级（4 位数字），外校请填 0' });
+      return res.status(400).json({ error: '毕业生请填自己班级（4 位数字），外校填 0' });
     }
-    if (isStandard && !real_name) {
+    // 毕业班合法班号（2026-08-20 用户提供）：YYCC（前两位年级、后两位班号）；
+    // 年级 ≤20 → 班号 01-18（2001~2018…）；21 → 01-20（2101~2120）；22 → 01-22（2201~2222）；23 → 01-20（2301~2320）；年级 >26 非法。
+    // 注：在校班号（24xx/25xx/26xx）不会进此分支——后端按标准年级直接接受（本就是合法在校班），
+    // 选「其他」误填在校班号的引导由前端完成（前端才有"选了其他"的显式状态）。
+    if (!isStandard && class_name !== '0') {
+      const grade = parseInt(class_name.slice(0, 2), 10);
+      const cls = parseInt(class_name.slice(2, 4), 10);
+      const maxCls = (grade >= 1 && grade <= 20) ? 18 : (grade === 21 ? 20 : (grade === 22 ? 22 : (grade === 23 ? 20 : -1)));
+      if (maxCls < 0 || cls < 1 || cls > maxCls) {
+        return res.status(400).json({ error: '「' + class_name + '」不是合法的毕业班班级号' });
+      }
+    }
+    // 姓名必填（2026-08-20：所有年级统一，与在校生逻辑一致；不再区分「其他」可留空/回落 QQ 昵称）
+    if (!real_name) {
       return res.status(400).json({ error: '请输入姓名' });
     }
-    if (real_name.length > 32) {
-      return res.status(400).json({ error: '姓名过长' });
+    if (real_name && !/^[\u4e00-\u9fa5]{2,4}$/.test(real_name)) {
+      return res.status(400).json({ error: '姓名需为 2-4 个汉字，且不能包含英文字符、数字或符号' });
     }
-    if (!real_name) real_name = s.nickname || '同学';
 
     const byName = await query(
       'SELECT * FROM users WHERE class_name = ? AND real_name = ?',

@@ -3,6 +3,10 @@
 // 登录视图：QQ 频道扫码登录（主）+ 无 QQ 直通（兜底）
 // 班级采用「年级 → 班级」二级菜单：高一 2601–2624、高二 2501–2524、高三 2401–2425、其他（自由填写）
 window.Views = window.Views || {};
+// QQ 登录链路请求超时：599s（约 10 分钟，覆盖整个扫码授权窗口）。
+// 服务端 poll 内部 runCli 即有 25s 超时，加扫码后 tiny_id 反查多步 CLI，单次请求可合法超 15s；
+// 若用全局 15s 会掐断登录轮询（pollSession catch 会停止轮询），故 QQ 登录专用长超时（2026-08-20）。
+const QQ_LOGIN_TIMEOUT = 599000;
 Views.login = () => {
   const { escapeHtml } = Utils;
   const view = document.getElementById('view');
@@ -59,14 +63,37 @@ Views.login = () => {
     }
     return null;
   }
-  // 「其他」年级的班级校验：毕业生填 4 位班级号（如 2601），外校填 0
+  // 「其他」年级的班级校验（2026-08-20 用户提供规则）：格式 4 位 YYCC（前两位年级、后两位班号）或 0（外校）
   function isValidOtherClass(c) {
     return c === '0' || /^\d{4}$/.test(c);
+  }
+  // 毕业班合法班号：年级 ≤20 → 班号 01-18（2001~2018…）；21 → 01-20（2101~2120）；22 → 01-22（2201~2222）；23 → 01-20；年级 >26 非法
+  function isValidGraduateClass(c) {
+    if (c === '0') return true;
+    if (!/^\d{4}$/.test(c)) return false;
+    const grade = parseInt(c.slice(0, 2), 10);
+    const cls = parseInt(c.slice(2, 4), 10);
+    const maxCls = (grade >= 1 && grade <= 20) ? 18 : (grade === 21 ? 20 : (grade === 22 ? 22 : (grade === 23 ? 20 : -1)));
+    return maxCls >= 0 && cls >= 1 && cls <= maxCls;
+  }
+  // 在校班级范围（与 server/config.js 对齐）：「其他」年级误填在校班级时引导选择对应年级（2026-08-20）
+  const GRADE_RANGES = [
+    { grade: '高一', min: 2601, max: 2624 },
+    { grade: '高二', min: 2501, max: 2524 },
+    { grade: '高三', min: 2401, max: 2425 },
+  ];
+  function inSchoolClassOf(v) {
+    if (!/^\d{4}$/.test(v)) return null;
+    const n = parseInt(v, 10);
+    return GRADE_RANGES.find((r) => n >= r.min && n <= r.max) || null;
   }
   function checkOtherClass(v) {
     if (v.grade !== '其他') return '';
     if (!v.class_name) return '毕业生请填自己班级（4 位数字），外校请填 0';
-    if (!isValidOtherClass(v.class_name)) return '班级格式不正确：毕业生填 4 位班级号（如 2601），外校填 0';
+    if (!isValidOtherClass(v.class_name)) return '班级格式不正确：毕业生填 4 位班级号（如 2001），外校填 0';
+    const m = inSchoolClassOf(v.class_name);
+    if (m) return '「' + v.class_name + '」是在校' + m.grade + '班级，请返回选择「' + m.grade + '」';
+    if (!isValidGraduateClass(v.class_name)) return '「' + v.class_name + '」不是合法的毕业班班级号';
     return '';
   }
 
@@ -134,6 +161,7 @@ Views.login = () => {
           <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="id-show-real" value="1" checked /> 是</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="id-show-real" value="0" /> 否，只展示昵称</label>
         </div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:6px;line-height:1.6;">💡 真实姓名<strong>只对同班同学</strong>展示；其他班级/访客看到的是你的昵称（姓名拼音首字母）</div>
       </div>
       <div class="field" id="id-nickname-field" style="display:none;">
         <label>展示昵称（姓名拼音首字母）</label>
@@ -153,22 +181,57 @@ Views.login = () => {
     const refreshInitials = () => {
       const nameEl = container.querySelector('#id-name');
       const name = nameEl ? nameEl.value.trim() : '';
-      Utils.initialsPicker(initialsOptions, initialsInput, name, '');
+      const showPicker = (container.querySelector('input[name="id-show-real"]:checked') || {}).value === '0';
+      nicknameField.style.display = showPicker ? '' : 'none';
+      // 选「是」也生成昵称（自动取首个候选兜底，供非同班展示用，2026-08-20）；选「否」展示候选区手选
+      Utils.initialsPicker(initialsOptions, initialsInput, name, '', !showPicker);
     };
 
-    // 选「否，只展示昵称」→ 显示缩写候选区；输入姓名后自动生成候选
+    // 输入姓名后总是刷新缩写（无论展示真名还是昵称）；选「否，只展示昵称」时显示候选区
     container.querySelectorAll('input[name="id-show-real"]').forEach((radio) => {
       radio.addEventListener('change', () => {
-        nicknameField.style.display = radio.value === '0' ? '' : 'none';
-        if (radio.value === '0') refreshInitials();
+        refreshInitials();
       });
     });
 
     function update() {
       const g = gradeSel.value;
       if (g === '其他') {
-        classField.innerHTML = `<label>班级（必填）</label><input id="id-class" type="text" inputmode="numeric" maxlength="4" placeholder="毕业生填自己班级，外校填0" />`;
-        nameField.innerHTML = `<label>姓名(或昵称)</label><input id="id-name" type="text" maxlength="32" value="${escapeHtml(nickname || '')}" placeholder="可留空" />`;
+        classField.innerHTML = `<label>班级（必填）</label><input id="id-class" type="text" inputmode="numeric" maxlength="4" placeholder="毕业生填自己班级，外校填0" />
+          <div id="id-other-class-hint" style="display:none;margin-top:6px;padding:8px 10px;border:1px solid var(--accent-strong);border-radius:10px;background:var(--primary-soft);font-size:12.5px;line-height:1.7;color:var(--text);">
+            ⚠️ 检测到这是在校班级（<span id="id-other-class-range"></span>），请在年级中选择：
+            <button type="button" id="id-other-class-switch" style="margin-left:6px;padding:2px 10px;border:none;border-radius:8px;background:var(--primary);color:#fff;font-size:12px;cursor:pointer;">切换到<span id="id-other-class-grade"></span></button>
+          </div>
+          <div id="id-other-class-invalid" style="display:none;margin-top:6px;font-size:12.5px;color:var(--danger);">「<span id="id-other-class-invalid-val"></span>」不是合法的毕业班班级号</div>`;
+        const classEl = container.querySelector('#id-class');
+        if (classEl) {
+          classEl.addEventListener('input', () => {
+            const v = classEl.value.trim();
+            const m = inSchoolClassOf(v);
+            const hint = container.querySelector('#id-other-class-hint');
+            const inv = container.querySelector('#id-other-class-invalid');
+            if (hint) hint.style.display = 'none';
+            if (inv) inv.style.display = 'none';
+            if (m && hint) {
+              container.querySelector('#id-other-class-range').textContent = m.min + '～' + m.max;
+              container.querySelector('#id-other-class-grade').textContent = m.grade;
+              hint.style.display = '';
+              return;
+            }
+            if (inv && /^\d{4}$/.test(v) && !isValidGraduateClass(v)) {
+              container.querySelector('#id-other-class-invalid-val').textContent = v;
+              inv.style.display = '';
+            }
+          });
+        }
+        const switchBtn = container.querySelector('#id-other-class-switch');
+        if (switchBtn) {
+          switchBtn.onclick = () => {
+            gradeSel.value = container.querySelector('#id-other-class-grade').textContent;
+            update();
+          };
+        }
+        nameField.innerHTML = `<label>姓名</label><input id="id-name" type="text" maxlength="4" placeholder="请输入真实姓名（2-4 个汉字）" />`;
       } else if (g) {
         const grade = (gradesCache || []).find((x) => x.name === g);
         const classes = grade ? grade.classes : [];
@@ -176,7 +239,7 @@ Views.login = () => {
           <option value="" disabled selected>请选择班级</option>
           ${classes.map((c) => `<option value="${c}">${c}班</option>`).join('')}
         </select>`;
-        nameField.innerHTML = `<label>姓名</label><input id="id-name" type="text" maxlength="32" placeholder="请输入真实姓名" />`;
+        nameField.innerHTML = `<label>姓名</label><input id="id-name" type="text" maxlength="4" placeholder="请输入真实姓名（2-4 个汉字）" />`;
       } else {
         classField.innerHTML = '';
         nameField.innerHTML = '';
@@ -186,7 +249,7 @@ Views.login = () => {
         nameEl.addEventListener('input', () => {
           clearTimeout(initialsTimer);
           initialsTimer = setTimeout(() => {
-            if ((container.querySelector('input[name="id-show-real"]:checked') || {}).value === '0') refreshInitials();
+            refreshInitials();
           }, 300);
         });
       }
@@ -236,7 +299,7 @@ Views.login = () => {
     const btn = document.getElementById('qq-login-btn');
     if (btn) { btn.disabled = true; btn.textContent = '获取二维码中…'; }
     try {
-      const data = await API.post('/api/auth/qq/init', JSON.stringify({}));
+      const data = await API.post('/api/auth/qq/init', JSON.stringify({}), QQ_LOGIN_TIMEOUT);
       if (data.error || !data.session || !data.qrcode_base64) {
         throw new Error(data.error || '获取二维码失败，请重试');
       }
@@ -303,11 +366,11 @@ Views.login = () => {
   const MAX_POLL_RETRIES = 10;
   async function pollSession(sessionId, statusEl) {
     try {
-      const r = await API.post('/api/auth/qq/poll', JSON.stringify({ session: sessionId }));
+      const r = await API.post('/api/auth/qq/poll', JSON.stringify({ session: sessionId }), QQ_LOGIN_TIMEOUT);
       if (r.status === 'authorized') {
         clearPoll();
         if (r.bound && r.user) {
-          const bindRes = await API.post('/api/auth/qq/bind', JSON.stringify({ session: sessionId }));
+          const bindRes = await API.post('/api/auth/qq/bind', JSON.stringify({ session: sessionId }), QQ_LOGIN_TIMEOUT);
           enterSystem(bindRes);
         } else {
           renderBindForm(sessionId, r.nickname || '');
@@ -394,13 +457,14 @@ Views.login = () => {
       if (v.grade !== '其他' && !v.class_name) return showError('请选择班级');
       const otherErr = checkOtherClass(v);
       if (otherErr) return showError(otherErr);
-      if (v.grade !== '其他' && !v.real_name) return showError('请输入姓名');
-      if (!v.show_real_name && !v.nickname) return showError('选择只展示昵称后，请填写昵称');
+      if (!v.real_name) return showError('请输入姓名');
+      if (v.real_name && !/^[\u4e00-\u9fa5]{2,4}$/.test(v.real_name)) return showError('姓名需为 2-4 个汉字，不能包含英文字符、数字或符号');
+      if (!v.show_real_name && !v.nickname) return showError('选择只展示昵称后，请填写姓名以生成展示昵称');
       try {
         const data = await API.post('/api/auth/qq/bind', JSON.stringify({
           session, class_name: v.class_name, real_name: v.real_name,
           show_real_name: v.show_real_name, nickname: v.nickname,
-        }));
+        }), QQ_LOGIN_TIMEOUT);
         enterSystem(data);
       } catch (err) {
         showError(err.message);
@@ -513,8 +577,9 @@ Views.login = () => {
         if (v.grade !== '其他' && !v.class_name) return showError('请选择班级');
         const otherErr = checkOtherClass(v);
         if (otherErr) return showError(otherErr);
-        if (v.grade !== '其他' && !v.real_name) return showError('请输入姓名');
-        if (!v.show_real_name && !v.nickname) return showError('选择只展示昵称后，请填写昵称');
+        if (!v.real_name) return showError('请输入姓名');
+        if (v.real_name && !/^[\u4e00-\u9fa5]{2,4}$/.test(v.real_name)) return showError('姓名需为 2-4 个汉字，不能包含英文字符、数字或符号');
+        if (!v.show_real_name && !v.nickname) return showError('选择只展示昵称后，请填写姓名以生成展示昵称');
         if (!selectedFiles.length) return showError('请先选择要上传的程序文件');
 
         // 提交前兜底校验（与选文件时一致）：任何文件不通过都不进入登记/上传流程

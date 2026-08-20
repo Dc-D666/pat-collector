@@ -18,7 +18,7 @@ window.API = (() => {
     location.hash = '#/login';
   }
 
-  async function request(path, opts = {}) {
+  async function request(path, opts = {}, timeoutMs = 15000) {
     const headers = { ...(opts.headers || {}) };
     const token = getToken();
     const hadToken = !!token;
@@ -26,9 +26,10 @@ window.API = (() => {
     if (opts.body && !(opts.body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
     }
-    // 请求超时（15s）：网络挂起时给出明确错误，避免界面无限等待（如我的积分页 spinner 一直转）
+    // 请求超时（默认 15s）：网络挂起时给出明确错误，避免界面无限等待（如我的积分页 spinner 一直转）。
+    // 扫码登录轮询（init/poll/bind）传长超时（QQ CLI 处理可超 15s），见 auth.js。
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res;
     try {
       res = await fetch(path, { ...opts, headers, signal: controller.signal });
@@ -58,10 +59,10 @@ window.API = (() => {
     return data;
   }
 
-  const get = (path, opts = {}) => request(path, opts);
-  const post = (path, body) => request(path, { method: 'POST', body });
-  const patch = (path, body) => request(path, { method: 'PATCH', body });
-  const del = (path, opts = {}) => request(path, { method: 'DELETE', ...opts });
+  const get = (path, opts = {}, timeoutMs) => request(path, opts, timeoutMs);
+  const post = (path, body, timeoutMs) => request(path, { method: 'POST', body }, timeoutMs);
+  const patch = (path, body, timeoutMs) => request(path, { method: 'PATCH', body }, timeoutMs);
+  const del = (path, opts = {}, timeoutMs) => request(path, { method: 'DELETE', ...opts }, timeoutMs);
 
   // 下载：fetch → blob → 触发浏览器保存；统一走 Authorization 头
   async function download(fileId, filename) {

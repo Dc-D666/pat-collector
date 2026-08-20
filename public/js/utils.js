@@ -123,7 +123,8 @@ window.Utils = (() => {
 
   // 姓名拼音缩写候选选择器（昵称方案二）：输入姓名 → 后端返回多音字候选 → 渲染胶囊按钮。
   // existing：已有昵称（若在候选中则默认选中锁定）。
-  async function initialsPicker(optionsEl, hiddenEl, name, existing) {
+  // autoFirst（2026-08-20）：选「展示真实姓名」时也自动生成昵称兜底——自动选中第一个候选（不展示候选区）。
+  async function initialsPicker(optionsEl, hiddenEl, name, existing, autoFirst) {
     optionsEl.innerHTML = '';
     hiddenEl.value = '';
     if (!name) return;
@@ -149,6 +150,9 @@ window.Utils = (() => {
     if (existing && cands.includes(existing)) {
       const hit = optionsEl.querySelector('[data-initial="' + existing + '"]');
       if (hit) pick(hit, existing);
+    } else if (autoFirst && cands.length) {
+      const first = optionsEl.querySelector('[data-initial="' + cands[0] + '"]');
+      if (first) pick(first, cands[0]);
     }
   }
 

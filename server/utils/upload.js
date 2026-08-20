@@ -11,7 +11,6 @@ const config = require('../config');
 const { query, pool } = require('../db');
 const { grant, revoke } = require('./points');
 const { reviewContent } = require('./audit');
-const { scanFile } = require('./clamav');
 const { scanWithVirusTotal } = require('./virustotal');
 const { freeDiskBytes } = require('./disk');
 const { getSetting } = require('./settings');
@@ -44,7 +43,8 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: config.maxUploadBytes, files: 1 },
+  // limits.parts/fields/fieldSize：防 multipart 海量字段/超大字段导致内存 OOM DoS（2026-08-20）
+  limits: { fileSize: config.maxUploadBytes, files: 1, parts: 20, fields: 20, fieldSize: 64 * 1024 },
   fileFilter: (req, file, cb) => {
     const ext = extOf(decodeName(file.originalname));
     if (!config.allowedExtensions.has(ext)) {
@@ -85,9 +85,11 @@ async function runUploadPipeline(req, res, user, opts) {
   const ext = extOf(originalName);
   const isText = config.textFormats.has(ext); // 文本/代码类：需 AI 审查 + 超长限制
 
-  // ---- R3 恶意程序扫描（2026-08-16）：在落库/发分前执行，命中病毒直接删盘拒收，
-  // 无任何 DB 记录与积分副作用。扫描不可用/超时/异常 → 降级放行（不阻断正常上传）。
-  // 扫描结论写入 audit_logs（kind='file_scan'），管理后台「审计」页可查每次上传的扫描记录。
+  // ---- R3 恶意程序扫描（2026-08-16；2026-08-20 起改为纯 VirusTotal 云查杀）：在落库/发分前执行，
+  // 命中病毒直接删盘拒收，无任何 DB 记录与积分副作用。扫描不可用/超时/异常/429 额度耗尽 → 降级放行
+  // （不阻断正常上传）。扫描结论写入 audit_logs（kind='file_scan'），管理后台「审计」页可查。
+  // 说明：原本地 ClamAV（clamd 常驻 / 按需 clamscan）需加载 ~600MB 签名库，2GB 小服务器内存吃紧，
+  // 已移除依赖，仅保留 VirusTotal（哈希命中即判；未收录且 ≤32MB 才上传）。
   const scanNotes = [];
   const logScan = (result, reason) => {
     try {
@@ -97,29 +99,17 @@ async function runUploadPipeline(req, res, user, opts) {
       );
     } catch (_) { /* 记录失败不影响主流程 */ }
   };
-  if (config.malwareScan) {
+  if (config.malwareScan && config.virustotal.enabled) {
     try {
-      const scan = await scanFile(req.file.path);
-      if (scan.available && !scan.clean) {
-        await logScan('rejected', 'ClamAV: ' + (scan.virus || '检出恶意程序'));
+      const vt = await scanWithVirusTotal(req.file.path);
+      if (vt.status === 'infected') {
+        await logScan('rejected', 'VirusTotal: ' + (vt.virus || '检出恶意程序'));
         fs.promises.unlink(req.file.path).catch(() => {});
         return res.status(400).json({
-          error: '安全扫描发现恶意程序（' + (scan.virus || '未知') + '），文件已拒绝收录',
+          error: '安全扫描发现恶意程序（' + (vt.virus || '未知') + '），文件已拒绝收录',
         });
       }
-      scanNotes.push(scan.available ? 'ClamAV 通过' : 'ClamAV 不可用(降级)');
-      // 双扫描：ClamAV 通过后再跑 VirusTotal（哈希查询命中即判；429 额度耗尽自动降级只跑 ClamAV）
-      if (config.virustotal.enabled) {
-        const vt = await scanWithVirusTotal(req.file.path);
-        if (vt.status === 'infected') {
-          await logScan('rejected', 'VirusTotal: ' + (vt.virus || '检出恶意程序'));
-          fs.promises.unlink(req.file.path).catch(() => {});
-          return res.status(400).json({
-            error: '安全扫描发现恶意程序（' + (vt.virus || '未知') + '），文件已拒绝收录',
-          });
-        }
-        scanNotes.push(vt.status === 'clean' ? 'VT 安全' : (vt.status === 'skip' ? 'VT ' + (vt.reason || '跳过') : 'VT ' + (vt.reason || '待复核')));
-      }
+      scanNotes.push(vt.status === 'clean' ? 'VT 安全' : (vt.status === 'skip' ? 'VT ' + (vt.reason || '跳过') : 'VT ' + (vt.reason || '待复核')));
     } catch (_) { /* 扫描异常降级放行 */ }
   }
 
@@ -194,7 +184,13 @@ async function runUploadPipeline(req, res, user, opts) {
       } catch (_) { /* ignore */ }
     }
     // 提交作品文件奖励（每个文件一次）
-    await grant(user.id, 'file_submit', 'file:' + result.insertId);
+    // 容错（2026-08-20）：发分失败不应让已入库的上传整体 500（否则用户重试会重复建文件）；
+    // 记录日志，积分缺失可经管理后台补发
+    try {
+      await grant(user.id, 'file_submit', 'file:' + result.insertId);
+    } catch (grantErr) {
+      console.error('[upload] 发放 file_submit 积分失败（文件已入库）：', grantErr && grantErr.message);
+    }
 
     // 文本/代码类文件：先做超长限制（单文件达百万级字符直接拒绝），再同步 AI 内容审查
     let auditStatus = isText ? 'pending' : 'reviewed';

@@ -37,7 +37,7 @@
 | **超长限制** | 文本/代码类单文件内容达**百万级字符**直接拒绝上传，提示联系频道主/QQ：3303188265（字节 >4MB 兜底不读文件） | files.js |
 | 超 200MB 提示 | 413 及前端预检文案均附「请联系频道主或 QQ：3303188265」 | files.js / api.js / dashboard.js |
 | 扩展名白名单 | **代码/文本 15 种 + 压缩包 5 种**：html/htm/py/js/ts/c/cpp/java/css/json/ipynb/md/txt/csv/svg + zip/rar/7z/tar/gz；图片/视频/音频/Office/3D 已关闭 | config.js |
-| 上传限制 | 一次最多 **5 个文件**（更多提示打包压缩包）；每人每天最多 **20 次上传**（含删除，`upload_log` 表计数）；**额度/配额原子化（2026-08-15）**：每日次数/作品数/存储配额检查与写入同事务 + 用户行锁，并发不会突破上限；**ClamAV 恶意程序扫描（R3，2026-08-16）**：落库前扫描，命中病毒删盘拒收（utils/clamav.js，clamd 127.0.0.1:3310，`MALWARE_SCAN` 开关，不可用降级放行） | dashboard.js / files.js / utils/upload.js |
+| 上传限制 | 一次最多 **5 个文件**（更多提示打包压缩包）；每人每天最多 **20 次上传**（含删除，`upload_log` 表计数）；**额度/配额原子化（2026-08-15）**：每日次数/作品数/存储配额检查与写入同事务 + 用户行锁，并发不会突破上限；**VirusTotal 云查杀（R3，2026-08-20 起唯一扫描器）**：落库前扫描，命中病毒删盘拒收（utils/virustotal.js：sha256 命中即判、未收录 ≤32MB 上传、429 熔断 12h 降级放行；`MALWARE_SCAN`+`VIRUSTOTAL_ENABLED` 开关；本地 ClamAV 因 2GB 内存吃紧已移除） | dashboard.js / files.js / utils/upload.js |
 | 大小限制 | 单文件默认 **200MB**（`MAX_UPLOAD_MB`）；每人总容量默认 **1GB**（`MAX_USER_STORAGE_MB`，超限提示联系频道主扩容）；每人作品文件总数上限 **20**（`MAX_FILES_PER_USER`）、轻应用总数上限 **20**（`MAX_APPS_PER_USER`，删除可释放名额） | config.js / utils/upload.js / apps.js |
 | 文件列表 | 仅列本人文件（含标题/简介/玩法） | files.js:123 |
 | 作品信息 | `PATCH /api/files/:id` 补标题/简介/玩法（标题必填） | files.js:136 |
@@ -55,9 +55,18 @@
 | 列表/删除 | `GET /`（仅本人）、`DELETE /:id` | apps.js:168/181 |
 | 前置条件 | 需 QQ 频道登录会话（token 持久化于 `storage/qq-sessions`，30 天闲置回收） | qq/sessions.js |
 
+## 三·五、GitHub 项目外链（server/routes/links.js + dashboard.js「🔗 GitHub 项目」tab，2026-08-20）
+
+- **定位**：解决"频繁更新"痛点——提交 GitHub 仓库链接，push 即更新，无需重新上传；**仅支持 `github.com/{owner}/{repo}` 公开仓库**
+- **防冒充（Token 文件验证）**：提交后平台生成 `PAT-xxx` token，要求用户在仓库根目录新建 `nanfang-pat.txt` 写入（GitHub 网页端可建），平台经 **jsDelivr CDN**（`cdn.jsdelivr.net/gh/{owner}/{repo}@HEAD/nanfang-pat.txt`，境内可达）为主源、`raw.githubusercontent.com` 兜底比对（本服务器实测 raw 间歇超时，勿单独用 raw） → 通过才标记 ✓ 已认证并**发分**（`link_submit` +25⭐，**与 `file_submit` 合计最多 5 个**（2026-08-20 用户拍板：项目文件+GitHub 项目共同上限，走 REASON_CAPS+CAP_GROUPS）；删除回扣 `link_submit_revoke`）；只有仓库 owner 能 push 文件，冒充零成本问题被堵死
+- 去重：同用户同 url 唯一（`uq_link_user_url`）；展示文本过 R2 AI 审查；点赞支持 `link` 类型（与被赞积分联动）
+- 作品展：已验证外链混排入墙（🔗 图标 + ✓ 已认证徽标 + owner/repo + 「前往 GitHub」），总览统计 link_count
+- 管理后台「外链」页签：搜索/删除（回扣积分，记 admin_log）
+- 已知取舍：只对编程向同学友好（需 GitHub 账号）；私有仓库无法验证（正好保证公开可见） | links.js / class.js / admin.js
+
 ## 四、全校作品展（server/routes/class.js:77 + public/js/class-wall.js）
 
-- 全校**文件 + 轻应用**项目平铺展示（**访客作品不参展，R1**：仅 QQ 用户作品入墙；访客 QQ 合并后自动转正），按时间倒序混排，带班级 tag + 年级归属
+- 全校**文件 + 轻应用 + 已验证 GitHub 外链**项目平铺展示（**访客作品不参展，R1**：仅 QQ 用户作品入墙；访客 QQ 合并后自动转正），按时间倒序混排，带班级 tag + 年级归属
 - **违规下架（2026-08-15）**：`audit_status='flagged'` 的作品不进入作品展/总览，下载/预览/点赞一律 403「该作品因违规已被下架」
 - 展示名遵循授权（`show_real_name=0` 用昵称/频道名）；生效中的**专属称号**以小徽章展示
 - 每项标注 `is_mine` / `same_class`；文件可下载（登录即可，全校公开），应用可跳转
@@ -159,7 +168,7 @@
 
 - **hash 路由 SPA**：`#/activity`（活动简介）、`#/files`（我的项目）、`#/class-wall`（全校作品展）、`#/overview`（提交总览，路由保留但导航不展示）、`#/learn` + `#/learn/:slug`（学AI）、`#/points`（我的积分） | app.js:5
 - **导航**：桌面左 rail + 移动端底部 app bar + 顶栏；入口顺序：活动简介 → AI 小学堂 → 全校作品展 → 我的项目 → 我的积分；显示班级+展示名+积分徽章；退出登录 | nav.js
-- **顶部内测横幅**：全站 sticky 顶部「删档内测中，感谢各位参与」（高度 32px，rail/topbar/QQ 失效横幅均下移避让） | index.html + style.css
+- **顶部横幅**：全站 sticky 顶部「🚀 系统上线，限时可得 1.2 倍积分」（2026-08-20 起；高度 32px，rail/topbar/QQ 失效横幅均下移避让） | index.html + style.css
 - **底部备案号**：全站 footer 挂 `湘ICP备2026024339号-1`（链工信部备案查询；移动端避开底部 appbar） | index.html + style.css
 - **401 处理**：仅携带 Bearer 的请求 401 才跳登录（扫码流程的 401 是业务态错误原样抛） | api.js:42
 - 请求封装：15s 超时中断、fetch+blob 下载、413 固定中文文案（nginx 拦截返回 HTML 时兜底） | api.js:21
