@@ -63,6 +63,8 @@ public/
   index.html        SPA 壳
   css/style.css
   js/               app/api/utils/nav/auth/dashboard/class-wall/overview/learn/points/project/admin（管理后台）
+  js/icons.js      TDesign 图标库（64 个内联 SVG，Icons.icon(name,size)，替代部分 emoji）
+  gh-oauth-result.html  GitHub OAuth 回调结果页（桌面弹窗/手机整页双模式）
 seed-articles.js    学AI 教程入库脚本（node seed-articles.js；管理后台可在线编辑，库为准）
 ADMIN-DESIGN.md     管理后台设计文档（P0/P1/P2 已实现）
 storage/uploads/    上传文件（已 gitignore）
@@ -155,6 +157,7 @@ npm run dev            # 或 npm start
 | GET | `/api/learn/nfti-status` | Bearer | 是否已在 NFTI 完成人格测试 |
 | GET | `/api/points` | Bearer | 我的积分与流水 |
 | GET | `/api/points/leaderboard` | Bearer | 积分排行榜（top20 + 我的排名） |
+| GET | `/api/points/class-stats` | Bearer | 年级/班级积分统计榜（年级 3 个 + 班级 TOP5，仅在校 QQ 用户，2026-08-22） |
 | POST | `/api/points/read` | Bearer | 阅读课程上报（≥60s，+10 ⭐/篇） |
 | POST | `/api/points/task` | Bearer | 任务完成上报（整章全完成才 +20 ⭐） |
 | GET | `/api/points/task-progress` | Bearer | 章节任务进度（回填用） |

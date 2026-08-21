@@ -532,3 +532,76 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 - 活动简介页新增社团引导横幅（芥末金，链接 itex.zznfzx.com），**仅 `#/activity` 显示**（body.route-activity 标记 + 条件布局偏移），移除站内「👋 社团简介」卡片。
 - 我的积分页：顶栏积分徽章与页面余额同步（徽章读 localStorage 缓存，页面读服务端，被赞/后台调分后曾不一致）。
 - QQ 授权绑定表单：修复慢网络下偶现「年级选不了」——表单渲染原被 `await loadGrades()` 阻塞，改为**立即渲染（兜底年级数据）+ 后台刷新班级选项**（`renderIdentity` 返回 `{getValues, refresh}`）；访客直传表单同款修复。
+
+## 14. 2026-08-21/22 移动端兼容与 UI 升级（本 session）
+
+> 本 session 主题：**QQ 内置浏览器（MQQBrowser/X5·TBS）全链路兼容修复 + TDesign 图标替换 + 若干功能增强**。全部改动已提交：`cfd77fb`（表单兼容+排行+作品墙）→ `d26891e`（TDesign 图标）→ `b473f95`（竖排）→ `cd5228f`（积分统一）→ `de3197a`（GitHub OAuth 移动端）→ `cce0df6`（漏斗图标）→ `8b65147`（选做章）→ `0390764`（过滤停用用户）。
+
+### 14.1 QQ 登录表单兼容：自研下拉 + 聚焦增强（重要，勿再走原生 select 老路）
+
+- **现象**：用户「好累啊」（荣耀 CMA-AN00 / Android 11 / QQ 内置浏览器）反馈**年级下拉点不动**；日志还原：5 次扫码 4 次授权成功（poll authorized），但**从不 bind**（0 次 bind 请求、0 次 pinyin-candidates 请求）→ 卡在绑定表单。
+- **根因排查（三轮修正，勿再犯）**：
+  1. ❌ 「QQ 内置浏览器整体兼容问题」——**推翻**：28 个成功绑定会话里 16 个就是 MQQBrowser（`index.json` 反查 init UA 验证）。
+  2. ❌ 「QQ 9.2.66 特定版本 bug」——**推翻**：用户升级到 9.3.35 后（nginx 日志 UA 确认 `QQ/9.3.35.39800`）姓名 input 依然填不了。
+  3. ✅ **结论：特定设备（荣耀 Magic UI / Android 11）的 QQ 内置浏览器里，原生表单控件（select/input/radio）无法获得输入焦点**（点击/触摸事件正常——纯 div/button 可点，见 customSelect 能用），而 16 个成功 QQ 内置用户用的是其他机型/系统版本。这是 webview 层焦点/键盘 bug，**页面代码无法根治，只能规避 + 引导**。
+- **修复（已上线）**：
+  - `Utils.customSelect(wrap, opts)`（utils.js）：**纯 div 下拉组件**替代原生 `<select>`（年级/班级），任何 webview 可用；API：`getValue/setValue/setOptions/close`，实例挂 `wrap.__cs`；互斥展开 + 点击外部收起 + 列表 max-height 滚动。**教训：QQ/微信内置浏览器一律不要再依赖原生 select**。
+  - `ensureInputFocusable(inputEl)`（auth.js）：姓名/班级 input 绑定 touchstart/click 强制 focus（blur→focus 重激活技巧），尽力唤醒输入法；`IS_QQ_WEBVIEW` 检测到 MQQBrowser 时表单顶部显示黄色提示条「点右上角 ··· 选『在浏览器中打开』」。
+  - **注意**：聚焦增强只是尽力而为，该设备可能仍无法输入——终极兜底是引导换系统浏览器。
+
+### 14.2 HTML 预览兼容：blob URL → srcdoc（X5 内核限制）
+
+- **现象**：预览在电脑正常，QQ 内置浏览器打不开（空白）。
+- **根因**：preview.html 原用 `iframe.src = URL.createObjectURL(blob)` 注入上传 HTML；**Android X5/TBS 内核对 iframe 加载 blob: URL 支持不佳**。
+- **修复**：改 **`iframe.srcdoc = html`**（HTML5 标准，不依赖 blob；DOM property 赋值**不要做实体转义**，字符串原样按 HTML 解析——转义反而会把 `&` 显示成 `&amp;`）；sandbox="allow-scripts"（无 allow-same-origin）语义不变，上传内容仍 unique origin，令牌无外传路径；极老内核回退 blob。三处预览链接（class-wall/project/admin）加 `?v=2` 防 webview 缓存旧版。
+
+### 14.3 GitHub OAuth 移动端：整页跳转替代弹窗 + postMessage
+
+- **现象**：GitHub 授权电脑能完成，手机（QQ/微信内置浏览器）完不成。
+- **根因**：OAuth 流程依赖「弹窗 + `window.opener.postMessage`」——移动 webview 无可靠弹窗模型（`window.open` 返回 null/异常），整页跳转后回调无 opener → 主页面收不到结果。
+- **修复**：① 前端 `connectGithub()` 检测移动端 UA（Android/iPhone/MQQBrowser/MicroMessenger/Mobile）→ **整页跳转** GitHub；② 后端 callback 统一 302 到**新结果页 `public/gh-oauth-result.html`**（ok/msg 参数）；③ 结果页**双模式**：有 opener（桌面弹窗）→ postMessage 通知 + 自动关闭（行为不变）；无 opener（手机整页）→ 显示结果 + 自动跳回 `/#/files`（我的项目页加载自动刷新连接状态）。msg 用 textContent 防 XSS。
+
+### 14.4 积分年级/班级统计榜（新接口）
+
+- `GET /api/points/class-stats`（requireAuth）：**在校口径**（`qq_tiny_id IS NOT NULL AND status='active' AND class_name IN (config.classes)`，外校/毕业生天然排除）→ 年级榜固定 3 个（高一/高二/高三，按总积分排序，含人数/人均/班级数）+ 班级榜按总积分 **TOP5**。
+- 前端「我的积分」页新增「🏅 年级 · 班级排行」卡片（全校排行榜卡片下方）。
+- **注意 mysql2 返回类型**：`SUM()` 可能是字符串，统一 `Number()` 转换。
+
+### 14.5 作品墙增强 + 布局修复
+
+- **「仅看本班」筛选**（class-wall.js）：`onlyMyClass` 状态 + `.wall-filter-btn`（TDesign filter 漏斗图标，`margin-left:auto` 靠右），与搜索/排序/置顶叠加；副标题切换计数。
+- **布局修复（窄容器溢出）**：`.proj-foot` 加 `flex-wrap: wrap` + `.proj-time` 加 `min-width:0; word-break:break-all` + `.file-actions` 加 `margin-left:auto`（按钮固定右下角）；`.wall-grid` 改 `minmax(min(320px,100%), 1fr)` 防窄视口横向溢出。
+- **文件列表按钮竖排**（我的项目页）：`#file-list .file-row > .file-actions { flex-direction: column }`——**只作用于文件列表**，不影响作品墙等其他 `.file-actions`。
+
+### 14.6 TDesign 图标替换（emoji → 内联 SVG，零依赖）
+
+- 新增 **`public/js/icons.js`**：从 `@iconify-icons/tdesign` 提取 **64 个 TDesign 图标 SVG**（MIT，`stroke="currentColor"` 可随文字着色），`Icons.icon(name, size)` 返回 `<svg>`；index.html 在 utils.js 后引入。
+- 替换 **~110 处结构性 UI 图标**：导航栏、各页页头、按钮（下载/预览/点赞/上传/核验/复制…）、文件类型图标（getFileIcon 改返回 `{icon, color}`，image/video/music/file/chart-bar/book/folder/code/app）。
+- **toast 支持 HTML**：`toast(msg, {html:true})` 渲染受信 HTML（默认仍 textContent 防注入）——积分/状态 toast 可带图标。
+- **积分单位统一**：全站 ⭐ emoji 清除 → star-filled SVG；**纯文本场景（select option、title 属性）无法渲染 SVG，用「积分」文字**。
+- **保留 emoji（合理）**：`✓/✅/❌` 任务状态文本、`🥇🥈🥉` 奖牌（TDesign 无 trophy/medal）、`→` 文本箭头、正文内容 emoji。
+- **新增图标流程**：`npm pack @iconify-icons/tdesign` → `/tmp/tds/package/data/<首字母>/<name>.js`（`const data = {...}` 提取 body）→ 插入 icons.js `BODIES`。**改完必须复查**：所有 `Icons.icon('...')` 引用在 BODIES 中都有定义（脚本核对），否则渲染空白。
+
+### 14.7 其他改动
+
+- **AI 小学堂第 4 章选做**：`learn.js` 模块级 `OPTIONAL_CHAPTERS = new Set([4])`（与 seed 章节结构对应，改章节需同步），章节列表 + 文章页显示琥珀色「选做」标签（`.optional-tag`）；seed-articles.js 第 4 章 content 开头加「不要求实际操作，阅读了解即可」+ summary 前缀【选做】（已重跑入库，id/进度保留）。**注意**：选做=实操选做，quiz 仍须完成 → 毕业判定不受影响。
+- **排行榜/统计榜过滤停用用户**：`leaderboard`（list + 我的排名）与 `class-stats` SQL 加 `AND status='active'`（用户「NKT」停用后仍在榜的问题）；管理后台 TOP50 保留停用用户（管理视角）。
+- **点赞积分上限排查结论**（like:15 无 like_give 记录）：`grantCapped` like_give 每日 10⭐ 上限（5 次赞满），超限**静默跳过不写流水**（返回 0）——「看不到记录」是设计行为非 bug；like_receive 独立上限 20⭐/天不受影响。
+- **管理后台调分确认**：加分走 `grant()` ×1.2（窗口内），**扣分走独立事务直扣不乘**（`bonusAmount` 负数返回原值）；扣分不低于 0（`Math.min(balance, -amount)`）。
+
+### 14.8 本 session 新踩的坑（务必看）
+
+54. **QQ/微信内置浏览器不要用原生 `<select>` 和依赖 focus 的表单控件**：X5 内核上可能点不动/无法聚焦（具体见 §14.1）；自研 div 下拉 + 强制 focus workaround 是通用解法。
+55. **iframe 加载 blob: URL 在 X5 内核不可靠** → 用 `srcdoc`（DOM property 赋值**不要**实体转义）。
+56. **移动 webview 无弹窗模型**：`window.open` 返回值不可靠，OAuth 用整页跳转 + 回调回跳；结果页按 `window.opener` 是否存在分派双模式。
+57. **批量替换模板字符串里的 emoji 时小心引号**：单引号字符串（`'...'`）内不能嵌 `Icons.icon('x', n)` 的单引号——用双引号或拆成 `+ Icons.icon(...) +` 拼接（本 session 在 points.js 踩过一次，`node --check` 抓出）。
+58. **`.top-badge` 等非 flex 徽标放 SVG**：inline SVG 与文字会贴紧，需 `display:inline-flex; gap:4px`。
+59. **CSS 作用域**：`.file-actions` 被多处复用（作品墙/文件列表/app/links）——改局部布局用 `#file-list .file-row >` 前缀限定，勿全局改。
+60. **`SUM()` 在 mysql2 下可能返回字符串**：聚合后统一 `Number()`。
+
+### 14.9 待办 / 风险更新
+
+- **「好累啊」设备（荣耀 CMA-AN00/Android 11 + QQ 内置浏览器）焦点 bug 未根治**：customSelect/聚焦增强已尽力，需真机复测；不行则引导换系统浏览器（提示条已加）。
+- **GitHub OAuth 移动端链路需真人验证一次**：手机整页授权 → 回调结果页 → 自动回 /#/files → 状态刷新。
+- **emoji→TDesign 替换后有约 140 处 emoji 保留**（⭐ 已清除；✓/✅/❌/🥇🥈🥉/→/toast 部分）——如需继续替换，注意 toast/option/title 不支持 SVG。
+- **第 4 章选做标记是前端硬编码 `OPTIONAL_CHAPTERS=[4]`**：将来新增/调整选做章需同步 learn.js + seed-articles.js 两处。
