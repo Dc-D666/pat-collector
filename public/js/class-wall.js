@@ -14,13 +14,13 @@ Views.classWall = async () => {
         <div class="page-sub" id="wall-sub">全校同学的作品与轻应用</div>
       </div>
       <div class="search-box">
-        <span class="search-icon">🔍</span>
+        <span class="search-icon">${Icons.icon('search', 16)}</span>
         <input id="wall-search" placeholder="搜索项目标题 / 作者 / 班级" />
       </div>
       <div class="wall-sort">
-        <button class="sort-btn active" data-sort="time">🕐 最新发表</button>
-        <button class="sort-btn" data-sort="likes">❤️ 点赞最多</button>
-        <button class="wall-filter-btn" id="wall-mine-btn" ${myClass ? '' : 'disabled'} title="${myClass ? '只看自己班级同学的作品' : '仅 QQ 登录用户可查看班级'}">🏫 仅看本班</button>
+        <button class="sort-btn active" data-sort="time">${Icons.icon('time', 15)} 最新发表</button>
+        <button class="sort-btn" data-sort="likes">${Icons.icon('heart', 15)} 点赞最多</button>
+        <button class="wall-filter-btn" id="wall-mine-btn" ${myClass ? '' : 'disabled'} title="${myClass ? '只看自己班级同学的作品' : '仅 QQ 登录用户可查看班级'}">${Icons.icon('view-module', 15)} 仅看本班</button>
       </div>
       <div id="wall-content"><div class="spinner"></div></div>
     </div>`;
@@ -36,7 +36,7 @@ Views.classWall = async () => {
       `全校共 ${projects.length} 个项目 · 文件与 AI 轻应用混排展示`;
   } catch (err) {
     document.getElementById('wall-content').innerHTML =
-      `<div class="empty"><div class="empty-icon">⚠️</div>${escapeHtml(err.message)}</div>`;
+      `<div class="empty"><div class="empty-icon">${Icons.icon('error-circle', 26)}</div>${escapeHtml(err.message)}</div>`;
     return;
   }
 
@@ -71,7 +71,7 @@ Views.classWall = async () => {
     });
 
     if (!visible.length) {
-      content.innerHTML = `<div class="empty"><div class="empty-icon">🔍</div>没有匹配的项目</div>`;
+      content.innerHTML = `<div class="empty"><div class="empty-icon">${Icons.icon('search', 26)}</div>没有匹配的项目</div>`;
       return;
     }
 
@@ -80,7 +80,7 @@ Views.classWall = async () => {
       const isLink = p.type === 'link';
       const icon = isFile
         ? getFileIcon(p.original_name || '')
-        : (isLink ? { emoji: '🔗', color: '#E3E8F5' } : { emoji: '🤖', color: '#EDE6D6' });
+        : (isLink ? { icon: 'link', color: '#E3E8F5' } : { icon: 'robot', color: '#EDE6D6' });
       // 全校公开：所有文件都可下载/预览（不再限同班）
       const canDl = isFile;
       // HTML 文件额外提供「预览」：新窗口直接打开（CSP sandbox 隔离）
@@ -88,9 +88,9 @@ Views.classWall = async () => {
       const likeDisabled = p.is_mine || p.liked_by_me;
       return `
         <div class="card project-card${p.topped ? ' topped' : ''}">
-          ${p.topped ? '<div class="top-badge">🔥 置顶 24h</div>' : ''}
+          ${p.topped ? '<div class="top-badge">' + Icons.icon('pin', 13) + ' 置顶 24h</div>' : ''}
           <div class="proj-head">
-            <div class="proj-icon" style="background:${icon.color};">${icon.emoji}</div>
+            <div class="proj-icon" style="background:${icon.color};">${Icons.icon(icon.icon, 20)}</div>
             <div class="proj-main">
               <div class="proj-title">${escapeHtml(p.title || (isFile ? p.original_name : (isLink ? 'GitHub 项目' : 'AI 轻应用')))}</div>
               <div class="proj-meta">${classTag(p)}<span class="proj-author">${escapeHtml(p.display_name)}</span>${p.title_tag ? `<span class="title-tag">${escapeHtml(p.title_tag)}</span>` : ''}</div>
@@ -107,7 +107,7 @@ Views.classWall = async () => {
             <div class="file-actions">
               <button class="like-btn${p.liked_by_me ? ' liked' : ''}" data-like="${p.type}:${p.id}"
                 ${likeDisabled ? 'disabled' : ''} title="${p.is_mine ? '不能给自己点赞' : (p.liked_by_me ? '已点赞' : '点赞支持一下（+2⭐）')}">
-                ${p.liked_by_me ? '❤️' : '🤍'}<span>${p.like_count || 0}</span>
+                ${p.liked_by_me ? Icons.icon('heart-filled', 15) : Icons.icon('heart', 15)}<span>${p.like_count || 0}</span>
               </button>
               ${isFile
                 ? (canDl
@@ -142,7 +142,7 @@ Views.classWall = async () => {
             b.classList.add('liked');
             const num = b.querySelector('span');
             num.textContent = (Number(num.textContent) || 0) + 1;
-            b.innerHTML = `❤️<span>${num.textContent}</span>`;
+            b.innerHTML = Icons.icon('heart-filled', 15) + `<span>${num.textContent}</span>`;
             b.title = '已点赞';
             toast(r.author_gained ? '点赞成功 ❤️ 作者 +2⭐' : '点赞成功 ❤️');
           } else {

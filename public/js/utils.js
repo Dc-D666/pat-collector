@@ -37,18 +37,19 @@ window.Utils = (() => {
   }
 
   // 扩展名 → 图标类别
+  // 扩展名 → 图标类别（2026-08-22：emoji 改 TDesign 图标名，经 Icons.icon() 渲染）
   const ICON_RULES = [
-    [/^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?|heic)$/, { emoji: '🖼️', color: '#F3ECDD' }],
-    [/^(mp4|mov|avi|mkv|webm|flv|wmv|m4v)$/, { emoji: '🎬', color: '#FBE7E2' }],
-    [/^(mp3|wav|flac|aac|ogg|m4a|wma)$/, { emoji: '🎵', color: '#F3E8DC' }],
-    [/^(doc|docx)$/, { emoji: '📄', color: '#F0E6D6' }],
-    [/^(xls|xlsx|csv)$/, { emoji: '📊', color: '#E7EFDC' }],
-    [/^(ppt|pptx)$/, { emoji: '📽️', color: '#F9E8D8' }],
-    [/^pdf$/, { emoji: '📕', color: '#FCE8E4' }],
-    [/^(zip|rar|7z|tar|gz)$/, { emoji: '🗜️', color: '#F7EFD8' }],
-    [/^(py|js|ts|c|cpp|java|html|css|json|ipynb)$/, { emoji: '💻', color: '#E4EFE4' }],
-    [/^(stl|obj|glb|gltf|fbx|blend)$/, { emoji: '📦', color: '#EFE7DE' }],
-    [/^(txt|md)$/, { emoji: '📝', color: '#F2EDE4' }],
+    [/^(jpe?g|png|gif|bmp|webp|svg|ico|tiff?|heic)$/, { icon: 'image', color: '#F3ECDD' }],
+    [/^(mp4|mov|avi|mkv|webm|flv|wmv|m4v)$/, { icon: 'video', color: '#FBE7E2' }],
+    [/^(mp3|wav|flac|aac|ogg|m4a|wma)$/, { icon: 'music', color: '#F3E8DC' }],
+    [/^(doc|docx)$/, { icon: 'file', color: '#F0E6D6' }],
+    [/^(xls|xlsx|csv)$/, { icon: 'chart-bar', color: '#E7EFDC' }],
+    [/^(ppt|pptx)$/, { icon: 'file', color: '#F9E8D8' }],
+    [/^pdf$/, { icon: 'book', color: '#FCE8E4' }],
+    [/^(zip|rar|7z|tar|gz)$/, { icon: 'folder', color: '#F7EFD8' }],
+    [/^(py|js|ts|c|cpp|java|html|css|json|ipynb)$/, { icon: 'code', color: '#E4EFE4' }],
+    [/^(stl|obj|glb|gltf|fbx|blend)$/, { icon: 'app', color: '#EFE7DE' }],
+    [/^(txt|md)$/, { icon: 'file', color: '#F2EDE4' }],
   ];
 
   function getFileIcon(name) {
@@ -56,7 +57,7 @@ window.Utils = (() => {
     for (const [re, icon] of ICON_RULES) {
       if (re.test(ext)) return icon;
     }
-    return { emoji: '📎', color: '#F2EDE4' };
+    return { icon: 'file', color: '#F2EDE4' };
   }
 
   // ---- 弹窗 ----

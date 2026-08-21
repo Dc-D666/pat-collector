@@ -178,6 +178,11 @@ span.brand-logo {
 }
 .nav-icon { font-size: 18px; width: 22px; text-align: center; }
 
+/* TDesign 图标（2026-08-22）：内联 SVG，随文字 currentColor 着色，垂直对齐微调 */
+.t-icon { display: inline-block; vertical-align: -0.15em; flex-shrink: 0; }
+.nav-icon .t-icon { vertical-align: -0.2em; }
+.points-badge .t-icon { vertical-align: -0.18em; margin-right: 2px; }
+
 .rail-user {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 10px; border-top: 1px solid var(--border);

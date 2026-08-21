@@ -162,7 +162,7 @@ Views.login = () => {
   // nickname：旧昵称（仅用于预填；方案二后昵称=姓名拼音缩写，不再自由填写）
   function renderIdentity(container, nickname) {
     container.innerHTML = `
-      ${IS_QQ_WEBVIEW ? `<div style="margin-bottom:12px;padding:10px 12px;border:1px solid #f0c36d;border-radius:12px;background:#fdf8e8;font-size:12.5px;color:#7a5b00;line-height:1.7;">💡 如果输入框点不动或弹不出键盘，请点右上角 <b>···</b> 选「在浏览器中打开」后重试</div>` : ''}
+      ${IS_QQ_WEBVIEW ? `<div style="margin-bottom:12px;padding:10px 12px;border:1px solid #f0c36d;border-radius:12px;background:#fdf8e8;font-size:12.5px;color:#7a5b00;line-height:1.7;">${Icons.icon('info-circle', 14)} 如果输入框点不动或弹不出键盘，请点右上角 <b>···</b> 选「在浏览器中打开」后重试</div>` : ''}
       <div class="field">
         <label>年级</label>
         <div id="id-grade-sel"></div>
@@ -175,7 +175,7 @@ Views.login = () => {
           <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="id-show-real" value="1" checked /> 是</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="id-show-real" value="0" /> 否，只展示昵称</label>
         </div>
-        <div style="font-size:12px;color:var(--text-dim);margin-top:6px;line-height:1.6;">💡 真实姓名<strong>只对同班同学</strong>展示；其他班级/访客看到的是你的昵称（姓名拼音首字母）</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:6px;line-height:1.6;">${Icons.icon('info-circle', 14)} 真实姓名<strong>只对同班同学</strong>展示；其他班级/访客看到的是你的昵称（姓名拼音首字母）</div>
       </div>
       <div class="field" id="id-nickname-field" style="display:none;">
         <label>展示昵称（姓名拼音首字母）</label>
@@ -224,7 +224,7 @@ Views.login = () => {
       if (g === '其他') {
         classField.innerHTML = `<label>班级（必填）</label><input id="id-class" type="text" inputmode="numeric" maxlength="4" placeholder="毕业生填自己班级，外校填0" />
           <div id="id-other-class-hint" style="display:none;margin-top:6px;padding:8px 10px;border:1px solid var(--accent-strong);border-radius:10px;background:var(--primary-soft);font-size:12.5px;line-height:1.7;color:var(--text);">
-            ⚠️ 检测到这是在校班级（<span id="id-other-class-range"></span>），请在年级中选择：
+            ${Icons.icon('error-circle', 14)} 检测到这是在校班级（<span id="id-other-class-range"></span>），请在年级中选择：
             <button type="button" id="id-other-class-switch" style="margin-left:6px;padding:2px 10px;border:none;border-radius:8px;background:var(--primary);color:#fff;font-size:12px;cursor:pointer;">切换到<span id="id-other-class-grade"></span></button>
           </div>
           <div id="id-other-class-invalid" style="display:none;margin-top:6px;font-size:12.5px;color:var(--danger);">「<span id="id-other-class-invalid-val"></span>」不是合法的毕业班班级号</div>`;
@@ -319,7 +319,7 @@ Views.login = () => {
                 <p>信息素养体验活动平台</p>
               </div>
             </div>
-            <button class="btn btn-primary" id="qq-login-btn" style="width:100%;justify-content:center;padding:13px;font-size:15px;">🐧 QQ 频道登录</button>
+            <button class="btn btn-primary" id="qq-login-btn" style="width:100%;justify-content:center;padding:13px;font-size:15px;">${Icons.icon('chat', 17)} QQ 频道登录</button>
             <div style="text-align:center;margin:14px 0;color:var(--text-dim);font-size:13px;">— 或 —</div>
             <button class="btn" id="guest-btn" style="width:100%;justify-content:center;">我没有QQ，或直接提交我的程序文件</button>
           </div>
@@ -344,7 +344,7 @@ Views.login = () => {
       renderQr(data);
     } catch (err) {
       showError(err.message);
-      if (btn) { btn.disabled = false; btn.textContent = '🐧 QQ 频道登录'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = Icons.icon('chat', 17) + ' QQ 频道登录'; }
     }
   }
 
@@ -373,7 +373,7 @@ Views.login = () => {
 
           <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin:12px 0;">等待授权…</div>
           <div id="channel-join" style="display:none;margin-top:6px;padding:14px 12px;border:1px solid var(--border);border-radius:16px;background:var(--bg);">
-            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤔 没找到你的频道身份？</div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">${Icons.icon('questionnaire', 15)} 没找到你的频道身份？</div>
             <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:auto;border-radius:12px;border:1px solid var(--border);" />
             <div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7;">可能是还没加入频道。扫一扫加入「南方中学校友频道」后，重新扫码授权即可。</div>
           </div>
@@ -457,7 +457,7 @@ Views.login = () => {
           <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>QQ 频道登录</h1></div>
           <div id="qr-status" style="font-size:13px;color:var(--text-dim);margin:16px 0;">等待授权…</div>
           <div id="channel-join" style="display:none;margin-top:6px;padding:14px 12px;border:1px solid var(--border);border-radius:16px;background:var(--bg);">
-            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤔 没找到你的频道身份？</div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">${Icons.icon('questionnaire', 15)} 没找到你的频道身份？</div>
             <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:auto;border-radius:12px;border:1px solid var(--border);" />
             <div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7;">可能是还没加入频道。扫一扫加入「南方中学校友频道」后，重新扫码授权即可。</div>
           </div>
@@ -482,7 +482,7 @@ Views.login = () => {
           <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>完善信息</h1><p>QQ 登录成功，请确认你的班级与姓名</p></div>
           <div class="form-error" id="auth-error"></div>
           <div id="channel-join" style="display:none;margin-bottom:14px;padding:14px 12px;border:1px solid var(--border);border-radius:16px;background:var(--bg);text-align:center;">
-            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">🤔 没找到你的频道身份？</div>
+            <div style="font-size:13px;font-weight:600;margin-bottom:8px;">${Icons.icon('questionnaire', 15)} 没找到你的频道身份？</div>
             <img src="/img/qq-channel.jpg" alt="南方中学校友频道二维码" style="width:150px;height:auto;border-radius:12px;border:1px solid var(--border);" />
             <div style="font-size:12px;color:var(--text-dim);margin-top:8px;line-height:1.7;">可能是还没加入频道。扫一扫加入「南方中学校友频道」后，重新扫码授权即可。</div>
           </div>
@@ -541,7 +541,7 @@ Views.login = () => {
           <div class="field" style="margin-top:12px;">
             <label>上传程序文件</label>
             <div class="guest-dropzone" id="guest-dropzone">
-              <div class="dz-icon">📤</div>
+              <div class="dz-icon">${Icons.icon('upload', 26)}</div>
               <div class="dz-title">点击选择 或 拖拽文件到此处</div>
               <div class="dz-hint">仅支持代码 / 文本文件（.html .py .js .md 等）或压缩包；单次单个文件不超过 200MB，每天最多上传 5 次</div>
               <input type="file" id="guest-file-input" multiple style="display:none;" />
@@ -714,8 +714,8 @@ Views.login = () => {
     const okCount = results.filter((r) => r.ok).length;
     const failCount = results.length - okCount;
     const heading = failCount
-      ? `⚠️ 部分文件上传失败（成功 ${okCount} 个）`
-      : `🎉 提交成功${okCount ? `（${okCount} 个文件）` : ''}`;
+      ? `${Icons.icon('error-circle', 15)} 部分文件上传失败（成功 ${okCount} 个）`
+      : `${Icons.icon('check-circle', 15)} 提交成功${okCount ? `（${okCount} 个文件）` : ''}`;
     view.innerHTML = `
       <div class="auth-wrap">
         <div class="auth-card card" style="text-align:center;">

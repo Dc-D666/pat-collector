@@ -18,19 +18,19 @@ Views.files = () => {
       <div class="page-head">
         <h1 class="page-title">我的项目</h1>
         <div class="page-sub">${isQqBound ? '上传项目文件，或自动收集你的 AI 轻应用' : '拖拽或点击上传，仅本人可见'}</div>
-        <button class="btn btn-sm btn-ghost" id="display-settings-btn" style="margin-top:10px;">👤 展示设置</button>
+        <button class="btn btn-sm btn-ghost" id="display-settings-btn" style="margin-top:10px;">${Icons.icon('user', 15)} 展示设置</button>
       </div>
 
       <div class="tabs" id="files-tabs">
-        <button class="tab-btn ${isQqBound ? 'active' : ''}" data-tab="apps">🤖 AI 轻应用</button>
-        <button class="tab-btn ${isQqBound ? '' : 'active'}" data-tab="files">📁 项目文件</button>
-        <button class="tab-btn" data-tab="links">🔗 GitHub 项目</button>
+        <button class="tab-btn ${isQqBound ? 'active' : ''}" data-tab="apps">${Icons.icon('robot', 15)} AI 轻应用</button>
+        <button class="tab-btn ${isQqBound ? '' : 'active'}" data-tab="files">${Icons.icon('folder', 15)} 项目文件</button>
+        <button class="tab-btn" data-tab="links">${Icons.icon('link', 15)} GitHub 项目</button>
       </div>
 
       <!-- Tab 1：项目文件 -->
       <div id="panel-files" style="display:${isQqBound ? 'none' : ''};">
         <div class="dropzone" id="dropzone">
-          <div class="dz-icon">📤</div>
+          <div class="dz-icon">${Icons.icon('upload', 26)}</div>
           <div class="dz-title">点击选择 或 拖拽文件到此处</div>
           <div class="dz-hint">仅支持代码 / 文本文件（.html .py .js .md 等），多文件可一次上传</div>
           <input type="file" id="file-input" multiple style="display:none;" />
@@ -60,7 +60,7 @@ Views.files = () => {
       <div id="panel-links" style="display:none;">
         <div class="card">
           <div style="margin-bottom:12px;">
-            <h2 style="margin:0;font-size:17px;">🔗 GitHub 项目</h2>
+            <h2 style="margin:0;font-size:17px;">${Icons.icon('link', 18)} GitHub 项目</h2>
             <div style="font-size:12px;color:var(--text-dim);margin-top:4px;line-height:1.7;">从你的 GitHub 仓库选择公开项目提交，验证通过 +25⭐（作品文件 + GitHub 项目合计最多 5 个）；Fork 无法通过验证。</div>
             <div id="lk-gh-status" style="margin-top:10px;"></div>
           </div>
@@ -273,7 +273,7 @@ Views.files = () => {
       const data = await API.get('/api/files');
       files = data.files;
     } catch (err) {
-      list.innerHTML = `<div class="empty"><div class="empty-icon">⚠️</div>${escapeHtml(err.message)}</div>`;
+      list.innerHTML = `<div class="empty"><div class="empty-icon">${Icons.icon('error-circle', 26)}</div>${escapeHtml(err.message)}</div>`;
       return;
     }
     if (!files.length) {
@@ -284,14 +284,14 @@ Views.files = () => {
     list.innerHTML = `
       <div class="file-list-head">
         <span>共 ${files.length} 个项目${pendingCount ? `，${pendingCount} 个待完善` : ''}</span>
-        ${pendingCount ? `<button class="btn btn-sm btn-ghost" id="batch-fill-btn">📝 补齐作品信息（${pendingCount}）</button>` : ''}
+        ${pendingCount ? `<button class="btn btn-sm btn-ghost" id="batch-fill-btn">${Icons.icon('edit', 14)} 补齐作品信息（${pendingCount}）</button>` : ''}
       </div>
       <div class="file-list">${files.map((f) => {
       const icon = getFileIcon(f.original_name);
       const hasTitle = !!(f.title && f.title.trim());
       return `
         <div class="file-row">
-          <div class="file-icon" style="background:${icon.color};">${icon.emoji}</div>
+          <div class="file-icon" style="background:${icon.color};">${Icons.icon(icon.icon, 20)}</div>
           <div class="file-info">
             <div class="file-name">${escapeHtml(hasTitle ? f.title : f.original_name)}${hasTitle ? '' : `<span class="badge-pending">待完善</span>`}</div>
             <div class="file-meta">${hasTitle ? escapeHtml(f.original_name) + ' · ' : ''}${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>
@@ -399,7 +399,7 @@ Views.files = () => {
           <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="ds-show-real" value="1" ${notShowReal ? '' : 'checked'} /> 是，展示真实姓名</label>
           <label style="display:flex;align-items:center;gap:6px;font-size:14px;white-space:nowrap;"><input type="radio" name="ds-show-real" value="0" ${notShowReal ? 'checked' : ''} /> 否，只展示昵称</label>
         </div>
-        <div style="font-size:12px;color:var(--text-dim);margin-top:6px;text-align:center;line-height:1.6;">💡 真实姓名<strong>只对同班同学</strong>展示；其他班级/访客看到的是你的昵称（姓名拼音首字母）</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:6px;text-align:center;line-height:1.6;">${Icons.icon('info-circle', 14)} 真实姓名<strong>只对同班同学</strong>展示；其他班级/访客看到的是你的昵称（姓名拼音首字母）</div>
       </div>
       <div class="field" id="ds-nickname-field" style="display:${notShowReal ? '' : 'none'};">
         <label>展示昵称（姓名拼音首字母）</label>
@@ -750,7 +750,7 @@ Views.files = () => {
       sel.innerHTML = '<option value="">— 选择仓库 —</option>'
         + repos.map((r) => {
           const label = r.private
-            ? `🔒 ${escapeHtml(r.full_name)}（私密，不可选）`
+            ? `${Icons.icon('lock-on', 14)} ${escapeHtml(r.full_name)}（私密，不可选）`
             : `${escapeHtml(r.full_name)}${r.description ? ' — ' + escapeHtml(r.description.slice(0, 40)) : ''}`;
           return `<option value="${escapeHtml(r.html_url)}" data-owner="${escapeHtml(r.owner)}" data-repo="${escapeHtml(r.name)}" data-name="${escapeHtml(r.name)}"${r.private ? ' disabled' : ''}>${label}</option>`;
         }).join('')

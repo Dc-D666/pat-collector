@@ -50,7 +50,7 @@ Views.activity = () => {
       <div class="card" style="padding:20px;margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
           <div>
-            <div class="activity-title">🎉 信息素养体验活动</div>
+            <div class="activity-title">${Icons.icon('activity', 20)} 信息素养体验活动</div>
             <div class="activity-sub">用 AI 做出你的第一个作品，零基础也能参加</div>
           </div>
           <a class="btn btn-primary" href="https://365.kdocs.cn/l/cvXvUaSc6iNY" target="_blank" rel="noopener">📄 查看完整活动通知</a>
@@ -113,7 +113,7 @@ Views.activity = () => {
       </div>
 
       <div class="card" style="padding:20px;margin-bottom:16px;">
-        <div class="activity-title" style="margin-bottom:10px;">🏆 奖项</div>
+        <div class="activity-title" style="margin-bottom:10px;">${Icons.icon('flag', 18)} 奖项</div>
         <div class="activity-body">
           <table class="activity-table">
             <thead>
@@ -138,7 +138,7 @@ Views.activity = () => {
               </tr>
             </tbody>
           </table>
-          <p>🏆 评奖规则：个人积分排行榜名次，积分相同时优先达成者的排名靠前</p>
+          <p>${Icons.icon('flag', 14)} 评奖规则：个人积分排行榜名次，积分相同时优先达成者的排名靠前</p>
         </div>
       </div>
     </div>`;

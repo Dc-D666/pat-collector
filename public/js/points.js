@@ -30,7 +30,7 @@ Views.points = async () => {
     ]);
   } catch (err) {
     document.getElementById('points-content').innerHTML =
-      `<div class="empty"><div class="empty-icon">⚠️</div>${escapeHtml(err.message)}</div>`;
+      `<div class="empty"><div class="empty-icon">${Icons.icon('error-circle', 26)}</div>${escapeHtml(err.message)}</div>`;
     return;
   }
 
@@ -74,13 +74,13 @@ Views.points = async () => {
 
   content.innerHTML = `
     <div class="stat-grid" style="margin-bottom:18px;">
-      <div class="card stat-card"><div class="stat-label">我的积分</div><div class="stat-value" id="my-points-val">⭐ ${myPoints}</div></div>
+      <div class="card stat-card"><div class="stat-label">我的积分</div><div class="stat-value" id="my-points-val">${Icons.icon('star-filled', 20)} ${myPoints}</div></div>
       <div class="card stat-card"><div class="stat-label">我的排名</div><div class="stat-value" id="my-rank-val">#${myRank}</div></div>
     </div>
 
     <div class="card" style="padding:16px 18px;margin-bottom:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
-        <h2 style="margin:0;font-size:17px;">🎓 课程毕业奖励</h2>
+        <h2 style="margin:0;font-size:17px;">${Icons.icon('education', 18)} 课程毕业奖励</h2>
         ${graduate.has_claimed
           ? '<button class="btn btn-sm" disabled>已领取 +40 ⭐</button>'
           : `<button class="btn btn-sm btn-primary" id="grad-btn" ${graduate.eligible ? '' : 'disabled'}>领取 +40 ⭐</button>`}
@@ -93,7 +93,7 @@ Views.points = async () => {
     </div>
 
     <div class="card" style="padding:16px 18px;margin-bottom:16px;">
-      <h2 style="margin:0 0 8px;font-size:17px;">💡 怎么赚积分</h2>
+      <h2 style="margin:0 0 8px;font-size:17px;">${Icons.icon('info-circle', 18)} 怎么赚积分</h2>
       <div style="font-size:13px;color:var(--text-dim);line-height:2;">
         1. 提交作品文件 +25⭐（最多计 5 个）/ 提交 AI 轻应用 +15⭐（最多计 3 个）<br>
         2. 主动点赞他人 +2⭐/次（每天上限 10⭐，票数不限）<br>
@@ -105,7 +105,7 @@ Views.points = async () => {
 
     <div class="card" style="padding:16px 18px;margin-bottom:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
-        <h2 style="margin:0;font-size:17px;">🏆 全校排行榜</h2>
+        <h2 style="margin:0;font-size:17px;">${Icons.icon('flag', 18)} 全校排行榜</h2>
         <div style="display:flex;border:1px solid var(--border);border-radius:9999px;overflow:hidden;">
           <button type="button" class="lb-scope-btn ${lbScope === 'in_school' ? 'active' : ''}" data-scope="in_school" style="border:none;background:${lbScope === 'in_school' ? 'var(--primary)' : 'transparent'};color:${lbScope === 'in_school' ? '#fff' : 'var(--text-dim)'};padding:5px 14px;font-size:13px;font-weight:600;cursor:pointer;">在校</button>
           <button type="button" class="lb-scope-btn ${lbScope === 'all' ? 'active' : ''}" data-scope="all" style="border:none;background:${lbScope === 'all' ? 'var(--primary)' : 'transparent'};color:${lbScope === 'all' ? '#fff' : 'var(--text-dim)'};padding:5px 14px;font-size:13px;font-weight:600;cursor:pointer;">全部</button>
@@ -124,10 +124,10 @@ Views.points = async () => {
     </div>
 
     <div class="card" style="padding:16px 18px;margin-bottom:16px;">
-      <h2 style="margin:0 0 4px;font-size:17px;">🏅 年级 · 班级排行</h2>
+      <h2 style="margin:0 0 4px;font-size:17px;">${Icons.icon('chart-bar', 18)} 年级 · 班级排行</h2>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">按在校同学总积分统计（不含毕业生 / 外校）</div>
 
-      <div style="font-size:13px;font-weight:600;margin:10px 0 6px;">📊 年级总积分</div>
+      <div style="font-size:13px;font-weight:600;margin:10px 0 6px;">${Icons.icon('chart-bar', 15)} 年级总积分</div>
       <div class="lb-list">
         ${(cs.grades || []).map((g) => `
           <div class="lb-row">
@@ -138,7 +138,7 @@ Views.points = async () => {
           </div>`).join('')}
       </div>
 
-      <div style="font-size:13px;font-weight:600;margin:14px 0 6px;">🏫 班级总积分 TOP5</div>
+      <div style="font-size:13px;font-weight:600;margin:14px 0 6px;">${Icons.icon('view-module', 15)} 班级总积分 TOP5</div>
       <div class="lb-list">
         ${(cs.classes || []).length ? (cs.classes || []).map((c) => `
           <div class="lb-row">
@@ -152,7 +152,7 @@ Views.points = async () => {
 
     <div class="card" style="padding:16px 18px;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <h2 style="margin:0;font-size:17px;">📜 我的积分记录</h2>
+        <h2 style="margin:0;font-size:17px;">${Icons.icon('history', 18)} 我的积分记录</h2>
         <span style="font-size:12px;color:var(--text-dim);">最近 ${logs.length} 条</span>
       </div>
       ${logs.length ? `<div class="lb-list">
@@ -161,7 +161,7 @@ Views.points = async () => {
           const zeroHint = zero ? (ZERO_REASON_HINTS[l.reason] || '超出计分规则，该次未计入积分') : '';
           return `
           <div class="lb-row">
-            <span class="lb-reason">${escapeHtml(l.reason_text)}${zero ? `<button class="lb-info" type="button" data-hint="${zeroHint}" title="${zeroHint}" aria-label="${zeroHint}">ⓘ</button>` : ''}</span>
+            <span class="lb-reason">${escapeHtml(l.reason_text)}${zero ? `<button class="lb-info" type="button" data-hint="${zeroHint}" title="${zeroHint}" aria-label="${zeroHint}">${Icons.icon('info-circle', 14)}</button>` : ''}</span>
             <span class="lb-time">${formatTime(l.created_at)}</span>
             <span class="lb-points" style="color:${l.amount > 0 ? 'var(--success)' : (l.amount < 0 ? 'var(--danger)' : 'var(--text-dim)')};">${l.amount > 0 ? '+' : ''}${l.amount} ⭐</span>
           </div>`;
@@ -216,7 +216,7 @@ Views.points = async () => {
       try {
         const r = await API.post('/api/points/graduate', '{}');
         if (r.granted) {
-          toast('毕业奖励 +40 ⭐ 🎓');
+          toast('毕业奖励 +40 ⭐');
           refreshPoints();
           setTimeout(() => Views.points(), 600);
         } else {

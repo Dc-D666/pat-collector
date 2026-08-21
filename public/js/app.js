@@ -96,7 +96,7 @@ window.App = (() => {
         if (root && !root.querySelector('.qq-expired-banner')) {
           root.innerHTML = `
             <div class="qq-expired-banner">
-              <span>⚠️ QQ 频道登录已失效（可能在其他设备登录了），AI 轻应用识别功能暂不可用。</span>
+              <span>${Icons.icon('error-circle', 15)} QQ 频道登录已失效（可能在其他设备登录了），AI 轻应用识别功能暂不可用。</span>
               <button id="qq-relogin-btn">重新登录</button>
             </div>`;
           const btn = document.getElementById('qq-relogin-btn');

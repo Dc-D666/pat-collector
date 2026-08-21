@@ -849,11 +849,11 @@ Views.admin = (page) => {
         </div>
       </div>
       <div class="card" style="padding:14px 16px;margin-bottom:14px;">
-        <div class="file-list-head"><span>📋 待评审作品（近期未评审）</span></div>
+        <div class="file-list-head"><span>${Icons.icon('assignment', 16)} 待评审作品（近期未评审）</span></div>
         <div id="aj-pending"><div class="spinner"></div></div>
       </div>
       <div class="card" style="padding:14px 16px;">
-        <div class="file-list-head"><span>✅ 已评审记录（可重新评审，自动补/扣差额积分）</span></div>
+        <div class="file-list-head"><span>${Icons.icon('check-circle', 16)} 已评审记录（可重新评审，自动补/扣差额积分）</span></div>
         <div id="aj-done"><div class="spinner"></div></div>
       </div>`;
 
@@ -1348,7 +1348,7 @@ Views.admin = (page) => {
   async function loadLogs() {
     content.innerHTML = `
       <div class="card" style="padding:14px 16px;margin-bottom:14px;">
-        <div class="file-list-head"><span>📋 内容审查记录（AI 拒绝的展示文本，O3）</span></div>
+        <div class="file-list-head"><span>${Icons.icon('assignment', 16)} 内容审查记录（AI 拒绝的展示文本，O3）</span></div>
         <div id="al-audit-list"><div class="spinner"></div></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">

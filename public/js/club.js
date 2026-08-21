@@ -52,7 +52,7 @@ Ciallo～(∠・ω<)⌒☆
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
         <a class="btn btn-ghost" href="#/activity">← 返回活动简介</a>
-        <a class="btn btn-primary" href="#/learn">🎓 前往 AI 小学堂 →</a>
+        <a class="btn btn-primary" href="#/learn">${Icons.icon('education', 17)} 前往 AI 小学堂 →</a>
       </div>
     </div>`;
 };

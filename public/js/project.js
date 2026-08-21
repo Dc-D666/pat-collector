@@ -82,11 +82,11 @@ Views.project = (token) => {
       <div class="auth-brand"><img class="brand-logo" src="/img/logo.png" alt="南中科创局" onerror="this.outerHTML='<span class=&quot;brand-logo&quot; style=&quot;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;&quot;>南</span>'" /><h1>我的项目</h1><p>${escapeHtml((u.class_name || '') + '班 ' + (u.display_name || ''))}</p></div>
 
       <a href="#/login" style="display:block;margin:0 0 14px;padding:11px 12px;border:1px dashed var(--primary);border-radius:12px;background:var(--primary-soft);text-decoration:none;color:var(--primary);font-size:13px;line-height:1.6;">
-        <span style="font-weight:700;">💡 想享受完整平台体验？</span>用 QQ 扫码登录并绑定你的姓名班级，当前作品与积分将合并到 QQ 账号，可参与全校作品展、AI 小学堂与积分排行榜。
+        <span style="font-weight:700;">${Icons.icon('info-circle', 15)} 想享受完整平台体验？</span>用 QQ 扫码登录并绑定你的姓名班级，当前作品与积分将合并到 QQ 账号，可参与全校作品展、AI 小学堂与积分排行榜。
       </a>
 
       <div class="guest-dropzone" id="p-dropzone">
-        <div class="dz-icon">📤</div>
+        <div class="dz-icon">${Icons.icon('upload', 26)}</div>
         <div class="dz-title">继续上传作品</div>
         <div class="dz-hint">单个文件不超过 ${q.max_upload_mb || 200}MB；今天还能上传 ${remaining} 次（每天最多 ${q.max_uploads_per_day || 5} 次）</div>
         <input type="file" id="p-file-input" multiple style="display:none;" />
@@ -100,7 +100,7 @@ Views.project = (token) => {
           const hasTitle = !!(f.title && f.title.trim());
           return `
             <div class="file-row">
-              <div class="file-icon" style="background:${icon.color};">${icon.emoji}</div>
+              <div class="file-icon" style="background:${icon.color};">${Icons.icon(icon.icon, 20)}</div>
               <div class="file-info">
                 <div class="file-name">${escapeHtml(hasTitle ? f.title : f.original_name)}</div>
                 <div class="file-meta">${escapeHtml(f.original_name)} · ${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>

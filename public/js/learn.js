@@ -60,7 +60,7 @@ function renderMarkdown(md) {
     // 代码块：``` 开关
     if (/^\s*```/.test(raw)) {
       if (inCode) {
-        out.push(`<pre class="learn-pre"><code>${esc(codeBuf.join('\n'))}</code><button class="learn-copy-btn" type="button" title="复制">📋 复制</button></pre>`);
+        out.push(`<pre class="learn-pre"><code>${esc(codeBuf.join('\n'))}</code><button class="learn-copy-btn" type="button" title="复制">${Icons.icon('file', 14)} 复制</button></pre>`);
         codeBuf = [];
         inCode = false;
       } else {
@@ -197,13 +197,13 @@ Views.learnList = async () => {
     chapters = data.chapters;
   } catch (err) {
     document.getElementById('learn-content').innerHTML =
-      `<div class="empty"><div class="empty-icon">⚠️</div>${escapeHtml(err.message)}</div>`;
+      `<div class="empty"><div class="empty-icon">${Icons.icon('error-circle', 26)}</div>${escapeHtml(err.message)}</div>`;
     return;
   }
 
   const content = document.getElementById('learn-content');
   if (!chapters.length) {
-    content.innerHTML = `<div class="empty"><div class="empty-icon">📚</div>教程整理中，敬请期待</div>`;
+    content.innerHTML = `<div class="empty"><div class="empty-icon">${Icons.icon('book', 26)}</div>教程整理中，敬请期待</div>`;
     return;
   }
 
@@ -229,7 +229,7 @@ Views.learnList = async () => {
           <div class="learn-chapter-sub">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '已通关 · 奖励已到账' : c.articles.length + ' 篇内容 · 通关得 ⭐ 积分'}</div>
         </div>
         <span class="learn-chapter-count">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '✓ 已通关' : c.articles.length + ' 篇'}</span>
-        <span class="learn-done-tag" title="已完成本章学习的同学人数">👥 ${c.completed_count} 人已完成</span>
+        <span class="learn-done-tag" title="已完成本章学习的同学人数">${Icons.icon('user', 13)} ${c.completed_count} 人已完成</span>
       </div>
       <div class="learn-list">
         ${c.articles.map((a) => `
@@ -285,7 +285,7 @@ Views.learnArticle = async (slug) => {
     article = data.article;
   } catch (err) {
     document.getElementById('learn-article').innerHTML =
-      `<div class="empty"><div class="empty-icon">⚠️</div>${escapeHtml(err.message)}</div>`;
+      `<div class="empty"><div class="empty-icon">${Icons.icon('error-circle', 26)}</div>${escapeHtml(err.message)}</div>`;
     return;
   }
 
@@ -382,7 +382,7 @@ function renderTasks(tasks, articleId) {
   return `
     <div class="learn-tasks">
       <div class="learn-tasks-head">
-        <h2 class="learn-tasks-title">📋 本章任务</h2>
+        <h2 class="learn-tasks-title">${Icons.icon('assignment', 18)} 本章任务</h2>
         <span class="learn-tasks-progress" id="learn-tasks-progress">0 / ${tasks.length}</span>
       </div>
       <div class="learn-tasks-bar"><div class="learn-tasks-bar-fill" id="learn-tasks-bar-fill" style="width:0%"></div></div>
@@ -398,8 +398,8 @@ function renderTasks(tasks, articleId) {
                   <div class="learn-task-head">${escapeHtml(t.title || '实操任务')}</div>
                   ${t.desc ? `<p class="learn-task-desc">${escapeHtml(t.desc)}</p>` : ''}
                   <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button class="btn btn-sm btn-primary nfti-go-btn">🚀 去体验 NFTI</button>
-                    <button class="btn btn-sm btn-ghost task-done-btn nfti-done-btn">✅ 我已体验完成</button>
+                    <button class="btn btn-sm btn-primary nfti-go-btn">${Icons.icon('send', 15)} 去体验 NFTI</button>
+                    <button class="btn btn-sm btn-ghost task-done-btn nfti-done-btn">${Icons.icon('check-circle', 15)} 我已体验完成</button>
                   </div>
                   <div class="nfti-status" style="margin-top:8px;font-size:13px;"></div>
                 </div>
@@ -428,7 +428,7 @@ function renderTasks(tasks, articleId) {
                   ${t.desc ? `<p class="learn-task-desc">${escapeHtml(t.desc)}</p>` : ''}
                   <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <a class="btn btn-sm btn-primary" href="#/files">📦 去「我的项目」上传</a>
-                    <button class="btn btn-sm btn-primary project-done-btn">✅ 我已上传</button>
+                    <button class="btn btn-sm btn-primary project-done-btn">${Icons.icon('check-circle', 15)} 我已上传</button>
                   </div>
                   <div class="project-status" style="margin-top:8px;font-size:13px;"></div>
                 </div>
@@ -444,7 +444,7 @@ function renderTasks(tasks, articleId) {
                   ${t.desc ? `<p class="learn-task-desc">${escapeHtml(t.desc)}</p>` : ''}
                   <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <input class="tinyid-input" type="text" inputmode="numeric" autocomplete="off" placeholder="粘贴 Agent 查到的用户 ID（纯数字）" />
-                    <button class="btn btn-sm btn-primary tinyid-check-btn">🔍 核验</button>
+                    <button class="btn btn-sm btn-primary tinyid-check-btn">${Icons.icon('search', 15)} 核验</button>
                   </div>
                   <div class="tinyid-status" style="margin-top:8px;font-size:13px;"></div>
                 </div>
@@ -456,7 +456,7 @@ function renderTasks(tasks, articleId) {
               <div class="learn-task-body">
                 <div class="learn-task-head">${escapeHtml(t.title || '实操任务')}</div>
                 ${t.desc ? `<p class="learn-task-desc">${escapeHtml(t.desc)}</p>` : ''}
-                <button class="btn btn-sm btn-primary task-done-btn">✅ 我完成了</button>
+                <button class="btn btn-sm btn-primary task-done-btn">${Icons.icon('check-circle', 15)} 我完成了</button>
               </div>
             </div>`;
         }
@@ -468,8 +468,8 @@ function renderTasks(tasks, articleId) {
                 <div class="learn-task-head">${escapeHtml(t.title || '观看视频')}</div>
                 ${t.note ? `<p class="learn-task-desc">${escapeHtml(t.note)}</p>` : ''}
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <a class="btn btn-sm btn-primary" href="${escapeHtml(t.url)}" target="_blank" rel="noopener">▶ 去 B 站观看</a>
-                  <button class="btn btn-sm btn-ghost task-done-btn">✅ 看完了</button>
+                  <a class="btn btn-sm btn-primary" href="${escapeHtml(t.url)}" target="_blank" rel="noopener">${Icons.icon('play', 15)} 去 B 站观看</a>
+                  <button class="btn btn-sm btn-ghost task-done-btn">${Icons.icon('check-circle', 15)} 看完了</button>
                 </div>
               </div>
             </div>`;
@@ -515,7 +515,7 @@ async function reportTask(articleId, taskIndex, extra) {
     if (task) {
       task.dataset.done = '';
       const btn = task.querySelector('.task-done-btn, .app-done-btn, .project-done-btn, .tinyid-check-btn');
-      if (btn) { btn.disabled = false; btn.textContent = '✅ 重试'; btn.classList.remove('task-done'); }
+      if (btn) { btn.disabled = false; btn.innerHTML = Icons.icon('check-circle', 14) + ' 重试'; btn.classList.remove('task-done'); }
       const tInput = task.querySelector('.tinyid-input');
       if (tInput) tInput.disabled = false;
       const wrap = task.querySelector('.quiz-options');
@@ -532,7 +532,7 @@ function updateTaskProgressUI(articleId, data) {
   const hint = document.querySelector('.learn-tasks-hint');
   if (bar) bar.style.width = Math.round((data.done_count / data.total) * 100) + '%';
   if (label) label.textContent = data.done_count + ' / ' + data.total;
-  if (hint && data.chapter_done) hint.textContent = '🎉 本章全部任务已完成，积分已到账';
+  if (hint && data.chapter_done) hint.innerHTML = Icons.icon('check-circle', 14) + ' 本章全部任务已完成，积分已到账';
 }
 
 // 文章加载：拉取本章任务进度，回填已完成状态
@@ -580,11 +580,11 @@ async function initNftiTask(task) {
   // 未 QQ 登录：提示必须登录
   if (!user.is_qq_bound) {
     if (statusEl) {
-      statusEl.innerHTML = `<span style="color:var(--danger);">⚠️ 该任务需要 QQ 频道登录后才能体验，请先登录</span>`;
+      statusEl.innerHTML = `<span style="color:var(--danger);">${Icons.icon('error-circle', 14)} 该任务需要 QQ 频道登录后才能体验，请先登录</span>`;
     }
     const goBtn = task.querySelector('.nfti-go-btn');
     if (goBtn) {
-      goBtn.textContent = '🔑 先登录 QQ 频道';
+      goBtn.innerHTML = Icons.icon('lock-on', 15) + ' 先登录 QQ 频道';
       goBtn.onclick = () => { API.clearToken(); location.hash = '#/login'; };
     }
     return;
@@ -658,10 +658,10 @@ async function initAppTask(task) {
   // 未 QQ 登录：提示必须登录
   if (!user.is_qq_bound) {
     if (statusEl) {
-      statusEl.innerHTML = `<span style="color:var(--danger);">⚠️ 需要 QQ 频道登录后发表应用才能检测，请先登录</span>`;
+      statusEl.innerHTML = `<span style="color:var(--danger);">${Icons.icon('error-circle', 14)} 需要 QQ 频道登录后发表应用才能检测，请先登录</span>`;
     }
     const btn = task.querySelector('.app-done-btn');
-    if (btn) { btn.textContent = '🔑 先登录 QQ 频道'; btn.onclick = () => { API.clearToken(); location.hash = '#/login'; }; }
+    if (btn) { btn.innerHTML = Icons.icon('lock-on', 15) + ' 先登录 QQ 频道'; btn.onclick = () => { API.clearToken(); location.hash = '#/login'; }; }
     return;
   }
   try {
@@ -776,7 +776,7 @@ function initTinyidTask(task) {
   const statusEl = task.querySelector('.tinyid-status');
   const btn = task.querySelector('.tinyid-check-btn');
   const input = task.querySelector('.tinyid-input');
-  if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">⚠️ 需要 QQ 频道登录后才能核验你的身份，请先登录</span>`;
+  if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">${Icons.icon('error-circle', 14)} 需要 QQ 频道登录后才能核验你的身份，请先登录</span>`;
   if (btn) btn.disabled = true;
   if (input) input.disabled = true;
 }
@@ -837,7 +837,7 @@ document.addEventListener('click', async (e) => {
   const done = () => {
     Utils.toast('📋 提示词已复制');
     btn.textContent = '✓ 已复制';
-    setTimeout(() => { btn.textContent = '📋 复制'; }, 1600);
+    setTimeout(() => { btn.innerHTML = Icons.icon('file', 14) + ' 复制'; }, 1600);
   };
   try {
     if (navigator.clipboard && window.isSecureContext) {

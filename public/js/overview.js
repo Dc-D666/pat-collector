@@ -20,7 +20,7 @@ Views.overview = async () => {
     data = await API.get('/api/class/overview');
   } catch (err) {
     document.getElementById('overview-content').innerHTML =
-      `<div class="empty"><div class="empty-icon">⚠️</div>${escapeHtml(err.message)}</div>`;
+      `<div class="empty"><div class="empty-icon">${Icons.icon('error-circle', 26)}</div>${escapeHtml(err.message)}</div>`;
     return;
   }
 
@@ -64,7 +64,7 @@ Views.overview = async () => {
                 <div class="student-files">
                   ${(s.apps || []).map((a) => `
                     <div class="file-row">
-                      <div class="file-icon" style="width:32px;height:32px;font-size:16px;background:#EDE6D6;">🤖</div>
+                      <div class="file-icon" style="width:32px;height:32px;font-size:16px;background:#EDE6D6;">${Icons.icon('robot', 16)}</div>
                       <div class="file-info">
                         <div class="file-name">${escapeHtml(a.title || 'AI 轻应用')}</div>
                         <div class="file-meta">${escapeHtml(a.description || '')}${a.gameplay ? ' · ' + escapeHtml(a.gameplay) : ''}</div>
@@ -78,7 +78,7 @@ Views.overview = async () => {
                     // 全校公开：登录即可下载（与作品展/服务端行为一致）
                     return `
                       <div class="file-row">
-                        <div class="file-icon" style="width:32px;height:32px;font-size:16px;background:${icon.color};">${icon.emoji}</div>
+                        <div class="file-icon" style="width:32px;height:32px;font-size:16px;background:${icon.color};">${Icons.icon(icon.icon, 16)}</div>
                         <div class="file-info">
                           <div class="file-name">${escapeHtml(f.title && f.title.trim() ? f.title : f.original_name)}</div>
                           <div class="file-meta">${escapeHtml(f.title && f.title.trim() ? f.original_name + ' · ' : '')}${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>
@@ -94,7 +94,7 @@ Views.overview = async () => {
 
   if (!classes.length) {
     document.getElementById('class-list').innerHTML =
-      `<div class="empty"><div class="empty-icon">📊</div>暂无提交记录</div>`;
+      `<div class="empty"><div class="empty-icon">${Icons.icon('chart-bar', 26)}</div>暂无提交记录</div>`;
   }
 
   // 展开/收起
