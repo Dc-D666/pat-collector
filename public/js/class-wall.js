@@ -20,12 +20,14 @@ Views.classWall = async () => {
       <div class="wall-sort">
         <button class="sort-btn active" data-sort="time">🕐 最新发表</button>
         <button class="sort-btn" data-sort="likes">❤️ 点赞最多</button>
+        <button class="wall-filter-btn" id="wall-mine-btn" ${myClass ? '' : 'disabled'} title="${myClass ? '只看自己班级同学的作品' : '仅 QQ 登录用户可查看班级'}">🏫 仅看本班</button>
       </div>
       <div id="wall-content"><div class="spinner"></div></div>
     </div>`;
 
   let projects = [];
   let sortMode = 'time'; // time = 发表时间从新到旧（默认）；likes = 点赞数从多到少
+  let onlyMyClass = false; // 「仅看本班」筛选（2026-08-22）
 
   try {
     const data = await API.get('/api/class/wall');
@@ -48,6 +50,7 @@ Views.classWall = async () => {
     const content = document.getElementById('wall-content');
 
     const visible = projects.filter((p) => {
+      if (onlyMyClass && p.class_name !== myClass) return false; // 仅看本班
       if (!q) return true;
       const hay = [
         p.title,
@@ -109,7 +112,7 @@ Views.classWall = async () => {
               ${isFile
                 ? (canDl
                     ? `<button class="btn btn-sm btn-ghost" data-dl="${p.id}" data-name="${escapeHtml(p.original_name)}">下载</button>${isHtml
-                        ? `<a class="btn btn-sm btn-primary" href="/preview.html#/file/${p.id}" target="_blank" rel="noopener">预览</a>`
+                        ? `<a class="btn btn-sm btn-primary" href="/preview.html?v=2#/file/${p.id}" target="_blank" rel="noopener">预览</a>`
                         : ''}`
                     : `<span class="proj-lock" title="仅同班可下载">🔒</span>`)
                 : (isLink
@@ -163,6 +166,23 @@ Views.classWall = async () => {
       render(document.getElementById('wall-search').value);
     };
   });
+
+  // 「仅看本班」筛选（2026-08-22）：切换本地筛选 + 副标题计数
+  const mineBtn = document.getElementById('wall-mine-btn');
+  if (mineBtn && myClass) {
+    mineBtn.onclick = () => {
+      onlyMyClass = !onlyMyClass;
+      mineBtn.classList.toggle('active', onlyMyClass);
+      render(document.getElementById('wall-search').value);
+      const sub = document.getElementById('wall-sub');
+      if (sub) {
+        const n = projects.filter((p) => !onlyMyClass || p.class_name === myClass).length;
+        sub.textContent = onlyMyClass
+          ? `本班共 ${n} 个项目`
+          : `全校共 ${projects.length} 个项目 · 文件与 AI 轻应用混排展示`;
+      }
+    };
+  }
 
   render('');
 };

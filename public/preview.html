@@ -14,8 +14,10 @@
 // 旧实现把登录令牌放在预览 URL（/api/files/preview/:id?token=...），CSP sandbox 阻止不了上传的
 // HTML 读取自身 location.href 外传令牌 → 任意登录用户（含管理员）账号可被窃取（存储型 XSS 链）。
 // 现在：令牌只经请求头传递（登录用户从 localStorage 读，访客令牌经本页 hash 传入——访客令牌本就是
-// 随项目地址分享的 URL 凭据）；上传内容经 blob URL 注入 sandbox iframe（allow-scripts、无 allow-same-origin，
-// unique origin），上传页面读不到父壳的任何信息，也读不到自己的 URL（blob:...），令牌无外传路径。
+// 随项目地址分享的 URL 凭据）；上传内容注入 sandbox iframe（allow-scripts、无 allow-same-origin，
+// unique origin），上传页面读不到父壳的任何信息，也读不到自己的 URL，令牌无外传路径。
+// 2026-08-22 兼容修复：QQ 内置浏览器（X5/TBS 内核）对 iframe 加载 blob: URL 支持不佳（打开空白），
+// 改用 HTML5 标准 srcdoc 注入（不依赖 blob URL）；sandbox 语义不变（unique origin 隔离令牌）。
 (function () {
   var m = (location.hash || '').match(/^#\/(file|guest)\/(\d+)(?:\/([A-Za-z0-9]+))?/);
   if (!m) { document.body.textContent = '预览参数错误'; return; }
@@ -44,8 +46,14 @@
     .then(function (html) {
       var f = document.getElementById('pv');
       if (!f) return;
-      var blob = new Blob([html], { type: 'text/html' });
-      f.src = URL.createObjectURL(blob);
+      if ('srcdoc' in document.createElement('iframe')) {
+        // DOM property 直接赋值：字符串原样按 HTML 解析（无需实体转义，转义反而会破坏用户内容里的 & 等）
+        f.srcdoc = html;
+      } else {
+        // 极老内核回退 blob URL
+        var blob = new Blob([html], { type: 'text/html' });
+        f.src = URL.createObjectURL(blob);
+      }
     })
     .catch(function (e) { document.body.textContent = e.message || '预览失败'; });
 })();

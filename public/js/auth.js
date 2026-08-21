@@ -143,19 +143,29 @@ Views.login = () => {
     location.hash = '#/activity';
   }
 
+  // QQ 内置浏览器（MQQBrowser / X5·TBS 内核）部分设备上原生表单控件交互异常
+  // （2026-08-22「好累啊」反馈：年级下拉可点，但姓名 input 填不了；QQ 9.2.66→9.3.35 均复现）。
+  // 点击/触摸事件正常、input 无法聚焦/不弹键盘 → 用强制 focus workaround + 引导换浏览器兜底。
+  const IS_QQ_WEBVIEW = /MQQBrowser/.test(navigator.userAgent || '');
+  function ensureInputFocusable(inputEl) {
+    if (!inputEl) return;
+    const force = () => {
+      try { inputEl.focus(); } catch (_) {}
+      try { inputEl.blur(); } catch (_) {} // 部分内核需 blur→focus 重新激活输入法
+      setTimeout(() => { try { inputEl.focus(); } catch (_) {} }, 60);
+    };
+    inputEl.addEventListener('touchstart', force, { passive: true });
+    inputEl.addEventListener('click', force);
+  }
+
   // 渲染「年级 → 班级」二级菜单 + 姓名字段 + 展示名授权；返回取值函数
   // nickname：旧昵称（仅用于预填；方案二后昵称=姓名拼音缩写，不再自由填写）
   function renderIdentity(container, nickname) {
     container.innerHTML = `
+      ${IS_QQ_WEBVIEW ? `<div style="margin-bottom:12px;padding:10px 12px;border:1px solid #f0c36d;border-radius:12px;background:#fdf8e8;font-size:12.5px;color:#7a5b00;line-height:1.7;">💡 如果输入框点不动或弹不出键盘，请点右上角 <b>···</b> 选「在浏览器中打开」后重试</div>` : ''}
       <div class="field">
         <label>年级</label>
-        <select id="id-grade">
-          <option value="" disabled selected>请选择年级</option>
-          <option value="高一">高一</option>
-          <option value="高二">高二</option>
-          <option value="高三">高三</option>
-          <option value="其他">其他</option>
-        </select>
+        <div id="id-grade-sel"></div>
       </div>
       <div class="field" id="id-class-field"></div>
       <div class="field" id="id-name-field"></div>
@@ -174,7 +184,18 @@ Views.login = () => {
         <input id="id-nickname" type="hidden" value="" />
       </div>`;
 
-    const gradeSel = container.querySelector('#id-grade');
+    // QQ 内置浏览器（TBS 内核）原生 <select> 点不动（2026-08-21 用户反馈），
+    // 年级/班级下拉改用自研组件 Utils.customSelect（纯 div 实现，任何 webview 可用）。
+    const gradeSel = Utils.customSelect(container.querySelector('#id-grade-sel'), {
+      placeholder: '请选择年级',
+      options: [
+        { value: '高一', label: '高一' },
+        { value: '高二', label: '高二' },
+        { value: '高三', label: '高三' },
+        { value: '其他', label: '其他' },
+      ],
+      onChange: () => update(),
+    });
     const classField = container.querySelector('#id-class-field');
     const nameField = container.querySelector('#id-name-field');
     const nicknameField = container.querySelector('#id-nickname-field');
@@ -199,7 +220,7 @@ Views.login = () => {
     });
 
     function update() {
-      const g = gradeSel.value;
+      const g = gradeSel.getValue();
       if (g === '其他') {
         classField.innerHTML = `<label>班级（必填）</label><input id="id-class" type="text" inputmode="numeric" maxlength="4" placeholder="毕业生填自己班级，外校填0" />
           <div id="id-other-class-hint" style="display:none;margin-top:6px;padding:8px 10px;border:1px solid var(--accent-strong);border-radius:10px;background:var(--primary-soft);font-size:12.5px;line-height:1.7;color:var(--text);">
@@ -231,7 +252,7 @@ Views.login = () => {
         const switchBtn = container.querySelector('#id-other-class-switch');
         if (switchBtn) {
           switchBtn.onclick = () => {
-            gradeSel.value = container.querySelector('#id-other-class-grade').textContent;
+            gradeSel.setValue(container.querySelector('#id-other-class-grade').textContent);
             update();
           };
         }
@@ -239,10 +260,12 @@ Views.login = () => {
       } else if (g) {
         const grade = (gradesCache || []).find((x) => x.name === g);
         const classes = grade ? grade.classes : [];
-        classField.innerHTML = `<label>班级</label><select id="id-class">
-          <option value="" disabled selected>请选择班级</option>
-          ${classes.map((c) => `<option value="${c}">${c}班</option>`).join('')}
-        </select>`;
+        classField.innerHTML = `<label>班级</label><div id="id-class-sel"></div>`;
+        Utils.customSelect(classField.querySelector('#id-class-sel'), {
+          placeholder: '请选择班级',
+          options: classes.map((c) => ({ value: c, label: c + '班' })),
+          onChange: () => {},
+        });
         nameField.innerHTML = `<label>姓名</label><input id="id-name" type="text" maxlength="4" placeholder="请输入真实姓名（2-4 个汉字）" />`;
       } else {
         classField.innerHTML = '';
@@ -250,6 +273,7 @@ Views.login = () => {
       }
       const nameEl = container.querySelector('#id-name');
       if (nameEl) {
+        ensureInputFocusable(nameEl);
         nameEl.addEventListener('input', () => {
           clearTimeout(initialsTimer);
           initialsTimer = setTimeout(() => {
@@ -257,19 +281,24 @@ Views.login = () => {
           }, 300);
         });
       }
+      const otherClassEl = container.querySelector('#id-class');
+      if (otherClassEl) ensureInputFocusable(otherClassEl);
     }
-    gradeSel.addEventListener('change', update);
-    update();
+    update(); // 初始渲染（年级未选，班级/姓名为空）
 
     return {
       // 取值（提交时调用）
-      getValues: () => ({
-        grade: gradeSel.value,
-        class_name: (container.querySelector('#id-class') ? container.querySelector('#id-class').value : '').trim(),
-        real_name: (container.querySelector('#id-name') ? container.querySelector('#id-name').value : '').trim(),
-        show_real_name: (container.querySelector('input[name="id-show-real"]:checked') || {}).value !== '0',
-        nickname: initialsInput ? initialsInput.value.trim() : '',
-      }),
+      getValues: () => {
+        const classSelEl = container.querySelector('#id-class-sel');
+        const classSel = classSelEl && classSelEl.__cs;
+        return {
+          grade: gradeSel.getValue(),
+          class_name: (classSel ? classSel.getValue() : '').trim(),
+          real_name: (container.querySelector('#id-name') ? container.querySelector('#id-name').value : '').trim(),
+          show_real_name: (container.querySelector('input[name="id-show-real"]:checked') || {}).value !== '0',
+          nickname: initialsInput ? initialsInput.value.trim() : '',
+        };
+      },
       // 重新渲染班级/姓名字段（服务端班级数据到达后刷新用，2026-08-21）
       refresh: update,
     };

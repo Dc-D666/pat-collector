@@ -156,5 +156,90 @@ window.Utils = (() => {
     }
   }
 
-  return { formatSize, formatTime, escapeHtml, extOf, getFileIcon, openModal, closeModal, confirm, toast, createSpeedTracker, formatProgress, initialsPicker };
+  // ── 自研下拉组件（2026-08-21）──
+  // 背景：QQ 内置浏览器（MQQBrowser/TBS 内核）对原生 <select> 支持不佳（点击不弹系统选择器，
+  // 用户反馈「年级下拉点不动」）。用纯 div 列表实现下拉，任何 webview 都能用。
+  // 用法：Utils.customSelect(wrapEl, { options, placeholder, value, onChange })
+  //   options: [{value,label}] 或字符串数组；返回 { getValue, setValue, setOptions, close, destroy }
+  //   实例同时挂到 wrapEl.__cs，便于外部（如 getValues）读取。
+  let activeSelect = null; // 模块级：当前展开的实例（互斥：开一个收一个）
+  function customSelect(wrap, opts) {
+    const options = (opts.options || []).map((o) =>
+      typeof o === 'string' ? { value: o, label: o } : o
+    );
+    let current = opts.value != null && opts.value !== '' ? String(opts.value) : '';
+    let btn, list;
+    wrap.classList.add('cs');
+    wrap.innerHTML = `
+      <button type="button" class="cs-btn" role="listbox" aria-haspopup="listbox">
+        <span class="cs-label"></span>
+        <span class="cs-arrow">▼</span>
+      </button>
+      <div class="cs-list" role="listbox"></div>`;
+    btn = wrap.querySelector('.cs-btn');
+    list = wrap.querySelector('.cs-list');
+
+    function renderLabel() {
+      const labelEl = wrap.querySelector('.cs-label');
+      const hit = options.find((o) => String(o.value) === current);
+      labelEl.textContent = hit ? hit.label : (opts.placeholder || '请选择');
+      labelEl.classList.toggle('cs-placeholder', !hit);
+    }
+    function renderList() {
+      list.innerHTML = options.map((o) =>
+        `<div class="cs-item${String(o.value) === current ? ' cs-selected' : ''}" data-v="${String(o.value).replace(/"/g, '&quot;')}">${Utils.escapeHtml(o.label)}</div>`
+      ).join('');
+    }
+    function close() {
+      if (activeSelect === api) activeSelect = null;
+      wrap.classList.remove('cs-open');
+    }
+    function toggle() {
+      if (wrap.classList.contains('cs-open')) { close(); return; }
+      if (activeSelect && activeSelect !== api) activeSelect.close();
+      activeSelect = api;
+      renderList();
+      wrap.classList.add('cs-open');
+      // 展开后把按钮滚动进可视区（移动端小屏列表可能溢出视口底部）
+      const r = btn.getBoundingClientRect();
+      if (r.top < 0 || r.bottom > (window.innerHeight || document.documentElement.clientHeight)) {
+        btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+    btn.addEventListener('click', (e) => { e.stopPropagation(); toggle(); });
+    list.addEventListener('click', (e) => {
+      const item = e.target.closest('.cs-item');
+      if (!item) return;
+      const v = item.dataset.v;
+      current = v;
+      renderLabel();
+      close();
+      if (opts.onChange) opts.onChange(v);
+    });
+    // 全局点击收起（只注册一次；点击组件内部由 stopPropagation/contains 放行）
+    if (!customSelect._bound) {
+      document.addEventListener('click', (e) => {
+        if (activeSelect && !activeSelect._wrap.contains(e.target)) activeSelect.close();
+      });
+      customSelect._bound = true;
+    }
+    const api = {
+      getValue: () => current,
+      setValue(v) { current = v != null ? String(v) : ''; renderLabel(); },
+      setOptions(o) {
+        options.length = 0;
+        (o || []).forEach((x) => options.push(typeof x === 'string' ? { value: x, label: x } : x));
+        if (options.length && !options.some((x) => String(x.value) === current)) current = '';
+        renderLabel(); renderList();
+      },
+      close,
+      destroy: close,
+      _wrap: wrap,
+    };
+    wrap.__cs = api;
+    renderLabel();
+    return api;
+  }
+
+  return { formatSize, formatTime, escapeHtml, extOf, getFileIcon, openModal, closeModal, confirm, toast, createSpeedTracker, formatProgress, initialsPicker, customSelect };
 })();

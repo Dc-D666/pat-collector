@@ -280,6 +280,34 @@ span.brand-logo {
 }
 .field textarea { resize: vertical; min-height: 84px; line-height: 1.6; }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+
+/* 自研下拉组件（QQ 内置浏览器原生 select 兼容修复，2026-08-21） */
+.cs { position: relative; }
+.cs-btn {
+  width: 100%; padding: 10px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius-md); font-size: 14px; background: var(--surface);
+  color: var(--text); outline: none; font-family: inherit;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  text-align: left; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+  -webkit-appearance: none; appearance: none;
+}
+.cs-open .cs-btn { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.cs-arrow { font-size: 10px; color: var(--text-dim); transition: transform .15s; }
+.cs-open .cs-arrow { transform: rotate(180deg); }
+.cs-label.cs-placeholder { color: var(--text-dim); }
+.cs-list {
+  position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.16);
+  max-height: 240px; overflow-y: auto; overscroll-behavior: contain;
+  display: none;
+  -webkit-overflow-scrolling: touch;
+}
+.cs-open .cs-list { display: block; }
+.cs-item { padding: 10px 14px; font-size: 14px; color: var(--text); cursor: pointer; }
+.cs-item:active { background: var(--primary-soft); }
+.cs-item.cs-selected { color: var(--primary); font-weight: 600; background: var(--primary-soft); }
 .field .hint { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 .form-error {
   background: var(--danger-soft); color: var(--danger);
@@ -383,7 +411,11 @@ span.brand-logo {
 .file-info { flex: 1; min-width: 0; }
 .file-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .file-meta { font-size: 12px; color: var(--text-dim); }
-.file-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.file-actions {
+  display: flex; gap: 6px; flex-shrink: 0;
+  /* 按钮组固定贴容器右下角：同行时靠右（space-between），换行（窄容器）时第二行也靠右（2026-08-22） */
+  margin-left: auto;
+}
 
 /* AI 轻应用列表 */
 .app-row {
@@ -410,16 +442,18 @@ span.brand-logo {
 
 /* 作品展排序切换 */
 .wall-sort { display: flex; gap: 8px; margin-bottom: 14px; }
-.sort-btn {
+.sort-btn, .wall-filter-btn {
   border: 1px solid var(--border); background: var(--surface);
   color: var(--text-dim); font-size: 13px; font-weight: 600;
   padding: 6px 14px; border-radius: 9999px; cursor: pointer;
   transition: all .15s;
 }
-.sort-btn:hover { color: var(--primary); border-color: var(--accent-strong); }
-.sort-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.sort-btn:hover, .wall-filter-btn:hover { color: var(--primary); border-color: var(--accent-strong); }
+.sort-btn.active, .wall-filter-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.wall-filter-btn { margin-left: auto; flex-shrink: 0; } /* 「仅看本班」靠右分隔（2026-08-22） */
+.wall-filter-btn:disabled { opacity: .5; cursor: not-allowed; }
 
-.wall-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.wall-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 16px; }
 
 /* 项目卡片（按项目平铺） */
 .project-card {
@@ -451,10 +485,12 @@ span.brand-logo {
 }
 .proj-desc { font-size: 13px; color: var(--text-dim); word-break: break-all; }
 .proj-foot {
-  display: flex; align-items: flex-end; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   gap: 10px; margin-top: auto; padding-top: 6px; border-top: 1px solid var(--border);
+  /* 窄容器（列宽接近 320px 下限）时按钮组换行到下一行，避免挤出卡片（2026-08-22） */
+  flex-wrap: wrap;
 }
-.proj-time { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+.proj-time { font-size: 12px; color: var(--text-dim); line-height: 1.5; min-width: 0; word-break: break-all; }
 .proj-lock { font-size: 15px; color: var(--text-dim); }
 
 /* ============ 总览 ============ */

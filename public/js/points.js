@@ -18,13 +18,15 @@ Views.points = async () => {
       <div id="points-content"><div class="spinner"></div></div>
     </div>`;
 
-  let data, mine, graduate;
+  let data, mine, graduate, cs;
   try {
-    [data, mine, graduate] = await Promise.all([
+    [data, mine, graduate, cs] = await Promise.all([
       API.get('/api/points/leaderboard?scope=' + lbScope),
       API.get('/api/points'),
       // 只读查询毕业资格（GET）：页面加载不自动发放，点击「领取」按钮才 POST 发放
       API.get('/api/points/graduate'),
+      // 年级/班级积分统计榜（2026-08-21）：在校口径，班级 TOP5
+      API.get('/api/points/class-stats'),
     ]);
   } catch (err) {
     document.getElementById('points-content').innerHTML =
@@ -118,6 +120,33 @@ Views.points = async () => {
             <span class="lb-points">⭐ ${u.points}</span>
           </div>`).join('')
         : `<div class="empty" style="padding:20px;">还没有人获得积分，快来抢第一！</div>`}
+      </div>
+    </div>
+
+    <div class="card" style="padding:16px 18px;margin-bottom:16px;">
+      <h2 style="margin:0 0 4px;font-size:17px;">🏅 年级 · 班级排行</h2>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">按在校同学总积分统计（不含毕业生 / 外校）</div>
+
+      <div style="font-size:13px;font-weight:600;margin:10px 0 6px;">📊 年级总积分</div>
+      <div class="lb-list">
+        ${(cs.grades || []).map((g) => `
+          <div class="lb-row">
+            <span class="lb-rank">${g.rank <= 3 ? medal[g.rank - 1] : '#' + g.rank}</span>
+            <span class="lb-name">${escapeHtml(g.grade)}</span>
+            <span class="lb-class">${g.student_count} 人 · 人均 ${g.avg_points}</span>
+            <span class="lb-points">⭐ ${g.total_points}</span>
+          </div>`).join('')}
+      </div>
+
+      <div style="font-size:13px;font-weight:600;margin:14px 0 6px;">🏫 班级总积分 TOP5</div>
+      <div class="lb-list">
+        ${(cs.classes || []).length ? (cs.classes || []).map((c) => `
+          <div class="lb-row">
+            <span class="lb-rank">${c.rank <= 3 ? medal[c.rank - 1] : '#' + c.rank}</span>
+            <span class="lb-name">${escapeHtml(c.class_name)}班</span>
+            <span class="lb-class">${c.student_count} 人 · 人均 ${c.avg_points}</span>
+            <span class="lb-points">⭐ ${c.total_points}</span>
+          </div>`).join('') : `<div class="empty" style="padding:20px;">还没有班级获得积分，快来拉高班级总分！</div>`}
       </div>
     </div>
 

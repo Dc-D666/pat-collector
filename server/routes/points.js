@@ -178,6 +178,55 @@ router.get(
   })
 );
 
+// 年级/班级积分统计榜（2026-08-21）：只统计在校 QQ 用户（标准班级；外校/毕业生天然排除）。
+// 年级榜固定 3 个（高一/高二/高三，按总积分排序）；班级榜按总积分取 TOP5。
+router.get(
+  '/class-stats',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const rows = await query(
+      `SELECT class_name, COUNT(*) AS cnt, SUM(points) AS total
+       FROM users
+       WHERE qq_tiny_id IS NOT NULL AND class_name IN (${config.classes.map(() => '?').join(',')})
+       GROUP BY class_name`,
+      config.classes
+    );
+    // 年级聚合（SUM/COUNT 在 mysql2 下可能返回字符串，统一 Number）
+    const gradeAgg = {};
+    for (const r of rows) {
+      const g = config.gradeOf(r.class_name);
+      if (!gradeAgg[g]) gradeAgg[g] = { cnt: 0, total: 0 };
+      gradeAgg[g].cnt += Number(r.cnt);
+      gradeAgg[g].total += Number(r.total);
+    }
+    const grades = ['高一', '高二', '高三']
+      .map((g) => {
+        const agg = gradeAgg[g] || { cnt: 0, total: 0 };
+        return {
+          grade: g,
+          class_count: (config.classesByGrade[g] || []).length, // 该年级标准班级总数
+          student_count: agg.cnt,
+          total_points: agg.total,
+          avg_points: agg.cnt ? Math.round((agg.total / agg.cnt) * 10) / 10 : 0,
+        };
+      })
+      .sort((a, b) => b.total_points - a.total_points || a.grade.localeCompare(b.grade))
+      .map((x, i) => ({ ...x, rank: i + 1 }));
+    // 班级 TOP5
+    const classes = rows
+      .map((r) => ({
+        class_name: r.class_name,
+        student_count: Number(r.cnt),
+        total_points: Number(r.total),
+        avg_points: Math.round((Number(r.total) / Number(r.cnt)) * 10) / 10,
+      }))
+      .sort((a, b) => b.total_points - a.total_points || a.class_name.localeCompare(b.class_name))
+      .slice(0, 5)
+      .map((x, i) => ({ ...x, rank: i + 1 }));
+    res.json({ grades, classes });
+  })
+);
+
 // 阅读完成上报（前端计时 ≥60s 后调用）；每篇文章只发一次
 router.post(
   '/read',

@@ -282,7 +282,7 @@ Views.admin = (page) => {
             ${f.audit_reason ? `<div class="file-meta" style="font-size:12px;color:var(--danger);">审核原因：${escapeHtml(f.audit_reason)}</div>` : ''}
           </div>
           <div class="file-actions" style="display:flex;gap:6px;flex-wrap:wrap;">
-            ${/\.(html?|htm)$/i.test(f.original_name) ? `<a class="btn btn-sm btn-ghost" href="/preview.html#/file/${f.id}" target="_blank" rel="noopener">预览</a>` : ''}
+            ${/\.(html?|htm)$/i.test(f.original_name) ? `<a class="btn btn-sm btn-ghost" href="/preview.html?v=2#/file/${f.id}" target="_blank" rel="noopener">预览</a>` : ''}
             <button class="btn btn-sm btn-ghost" data-act="dl" data-id="${f.id}" data-name="${escapeHtml(f.original_name)}">下载</button>
             <button class="btn btn-sm btn-ghost" data-act="edit" data-id="${f.id}" data-name="${escapeHtml(f.original_name)}">编辑</button>
             <button class="btn btn-sm btn-ghost" data-act="del" data-id="${f.id}" data-name="${escapeHtml(f.original_name)}" style="color:var(--danger);">删除</button>

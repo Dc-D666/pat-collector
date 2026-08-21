@@ -107,7 +107,7 @@ Views.project = (token) => {
                 ${f.description ? `<div class="file-meta">${escapeHtml(f.description)}</div>` : ''}
               </div>
               <div class="file-actions">
-                ${isHtml(f.original_name) ? `<a class="btn btn-sm btn-ghost" href="/preview.html#/guest/${f.id}/${tk}" target="_blank" rel="noopener">预览</a>` : ''}
+                ${isHtml(f.original_name) ? `<a class="btn btn-sm btn-ghost" href="/preview.html?v=2#/guest/${f.id}/${tk}" target="_blank" rel="noopener">预览</a>` : ''}
                 <button class="btn btn-sm btn-ghost" data-dl="${f.id}" data-name="${escapeHtml(f.original_name)}">下载</button>
                 <button class="btn btn-sm btn-ghost" data-del="${f.id}" data-name="${escapeHtml(f.original_name)}" style="color:var(--danger);">删除</button>
               </div>
