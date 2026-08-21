@@ -56,18 +56,30 @@ Views.files = () => {
         </div>
       </div>
 
-      <!-- Tab 3：GitHub 项目外链（2026-08-20：Token 文件验证防冒充，验证通过 +25⭐） -->
+      <!-- Tab 3：GitHub 项目外链（2026-08-21：OAuth 授权验证所有权，验证通过 +25⭐） -->
       <div id="panel-links" style="display:none;">
         <div class="card">
           <div style="margin-bottom:12px;">
             <h2 style="margin:0;font-size:17px;">🔗 GitHub 项目</h2>
-            <div style="font-size:12px;color:var(--text-dim);margin-top:4px;line-height:1.7;">提交你的 GitHub 仓库链接，push 即更新，无需重新上传。需通过<strong>所有权验证</strong>（在仓库里放一个验证文件，防止冒充他人作品；<strong>Fork 的仓库无法通过验证</strong>），验证通过 +25⭐（作品文件 + GitHub 项目合计最多计 5 个）</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:4px;line-height:1.7;">从你的 GitHub 仓库选择公开项目提交，验证通过 +25⭐（作品文件 + GitHub 项目合计最多 5 个）；Fork 无法通过验证。</div>
+            <div id="lk-gh-status" style="margin-top:10px;"></div>
           </div>
-          <div class="field"><label>仓库链接（必填）</label><input id="lk-url" type="text" placeholder="https://github.com/用户名/仓库名" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
-          <div class="field"><label>项目名称（必填）</label><input id="lk-title" type="text" maxlength="255" placeholder="例如：错题本小工具" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
-          <div class="field"><label>简介（选填）</label><input id="lk-desc" type="text" maxlength="2000" placeholder="一句话介绍这个项目" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
-          <div class="form-error" id="lk-error"></div>
-          <button class="btn btn-primary" id="lk-submit">提交链接</button>
+          <div id="lk-fields" style="opacity:.5;">
+            <div class="field">
+              <label>选择项目仓库（仅公开可选）</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <select id="lk-repo-select" disabled style="flex:1;min-width:220px;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:var(--surface);">
+                  <option value="">— 选择仓库 —</option>
+                </select>
+                <button class="btn btn-sm btn-ghost" id="lk-repo-load" type="button" disabled>🔄 刷新</button>
+              </div>
+              <div id="lk-gh-scope-hint" style="display:none;margin-top:6px;font-size:12px;color:#8A6226;"></div>
+            </div>
+            <div class="field"><label>项目名称（必填）</label><input id="lk-title" type="text" maxlength="255" placeholder="选择仓库后自动生成，可修改" disabled style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
+            <div class="field"><label>简介（选填，自动生成）</label><textarea id="lk-desc" rows="3" maxlength="2000" placeholder="一句话介绍这个项目" disabled style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;"></textarea></div>
+            <div class="form-error" id="lk-error"></div>
+            <button class="btn btn-primary" id="lk-submit" type="button" disabled>提交链接</button>
+          </div>
           <div id="lk-verify-box" style="display:none;margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg);font-size:13px;line-height:1.9;"></div>
         </div>
         <div class="card">
@@ -658,17 +670,178 @@ Views.files = () => {
     if (manualBtn) manualBtn.onclick = manualScan;
   }
 
-  // ---- GitHub 项目外链（2026-08-20）----
-  // 验证指引框（提交后 / 列表「验证指引」按钮复用）：token 随时可找回
+  // ---- GitHub 项目外链（2026-08-20 起；2026-08-21 改为 OAuth 授权验证）----
+  // GitHub OAuth 连接状态：一键授权后验证仓库归属，取代"仓库放 nanfang-pat.txt 文件"流程
+  let ghConnected = false;
+  let selectedRepoUrl = ''; // 下拉选中的仓库链接（唯一提交来源；2026-08-21 起不再允许手填）
+  // 整个 GitHub 提交表单启用/禁用（未连接 GitHub 时置灰不可点，2026-08-21）
+  function setFormDisabled(disabled) {
+    const wrap = document.getElementById('lk-fields');
+    if (wrap) wrap.style.opacity = disabled ? '0.5' : '';
+    ['lk-repo-select', 'lk-repo-load', 'lk-title', 'lk-desc', 'lk-submit'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = disabled;
+    });
+  }
+
+  async function loadGithubStatus() {
+    const el = document.getElementById('lk-gh-status');
+    if (!el) return;
+    try {
+      const data = await API.get('/api/github/status');
+      ghConnected = !!data.connected;
+      if (ghConnected) {
+        setFormDisabled(false); // 已连接：解锁表单并拉取仓库下拉列表
+        loadMyRepos();
+      } else {
+        setFormDisabled(true);
+        resetRepoSelect();
+      }
+      el.innerHTML = ghConnected
+        ? `<span style="font-size:12.5px;color:var(--success);">✅ 已连接 GitHub：<strong>${escapeHtml(data.login || '')}</strong>
+             <button class="btn btn-sm btn-ghost" id="lk-gh-disconnect" style="margin-left:8px;">断开</button></span>`
+        : `<span style="font-size:12.5px;color:var(--text-dim);">未连接 GitHub
+             <button class="btn btn-sm btn-primary" id="lk-gh-connect" style="margin-left:8px;">🔑 用 GitHub 授权</button></span>`;
+      const cb = document.getElementById('lk-gh-connect');
+      if (cb) cb.onclick = connectGithub;
+      const db = document.getElementById('lk-gh-disconnect');
+      if (db) db.onclick = async () => {
+        const yes = await confirm('断开 GitHub 连接？已认证的项目不受影响，新项目需重新授权验证', { danger: true });
+        if (!yes) return;
+        try {
+          await API.post('/api/github/disconnect', '{}');
+          toast('已断开 GitHub');
+          ghConnected = false;
+          await loadGithubStatus();
+          await loadLinks();
+        } catch (err) { toast(err.message); }
+      };
+    } catch (_) { /* 静默 */ }
+  }
+
+  async function connectGithub() {
+    // 先开空窗口（保持用户手势，防弹窗拦截），再请求授权链接并跳转
+    const win = window.open('', '_blank', 'width=640,height=760');
+    let data;
+    try { data = await API.get('/api/github/oauth/start'); }
+    catch (err) {
+      try { if (win) win.close(); } catch (_) { /* ignore */ }
+      toast(err.message);
+      return;
+    }
+    if (win) { win.location.href = data.url; }
+    else { location.href = data.url; }
+  }
+
+  // 拉取已连接用户的全部仓库（本人创建、非 Fork）填入下拉选择器：
+  // 公开项目可选；私有项目置灰带 🔒、不可选择（需设为公开后才能提交）。
+  // 选中后自动填名称，并调用 README → GLM 生成名称/简介
+  async function loadMyRepos() {
+    const sel = document.getElementById('lk-repo-select');
+    const btn = document.getElementById('lk-repo-load');
+    if (!sel) return;
+    if (btn) btn.disabled = true;
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">正在加载仓库…</option>';
+    try {
+      const data = await API.get('/api/github/repos');
+      const repos = data.repos || [];
+      const publicCount = repos.filter((r) => !r.private).length;
+      sel.innerHTML = '<option value="">— 选择仓库 —</option>'
+        + repos.map((r) => {
+          const label = r.private
+            ? `🔒 ${escapeHtml(r.full_name)}（私密，不可选）`
+            : `${escapeHtml(r.full_name)}${r.description ? ' — ' + escapeHtml(r.description.slice(0, 40)) : ''}`;
+          return `<option value="${escapeHtml(r.html_url)}" data-owner="${escapeHtml(r.owner)}" data-repo="${escapeHtml(r.name)}" data-name="${escapeHtml(r.name)}"${r.private ? ' disabled' : ''}>${label}</option>`;
+        }).join('')
+        + (repos.length === 0 ? '<option value="">没有可选的仓库（需自己创建、非 Fork）</option>'
+          : publicCount === 0 ? '<option value="" disabled>没有公开项目，设为公开后刷新即可提交</option>' : '');
+      // 授权范围不足时提示重新授权（看不到私有项目列表）
+      const hintEl = document.getElementById('lk-gh-scope-hint');
+      if (hintEl) {
+        if (data.scope_limited) {
+          hintEl.style.display = '';
+          hintEl.innerHTML = '当前授权看不到私有项目，断开后重新授权即可展示';
+        } else {
+          hintEl.style.display = 'none';
+          hintEl.innerHTML = '';
+        }
+      }
+      sel.onchange = () => {
+        if (!sel.value) return;
+        const opt = sel.options[sel.selectedIndex];
+        selectedRepoUrl = sel.value;
+        // 立即用仓库名占位，随后由自动生成覆盖
+        const titleInput = document.getElementById('lk-title');
+        if (titleInput) titleInput.value = (opt.dataset.name || '').trim();
+        const descInput = document.getElementById('lk-desc');
+        if (descInput) descInput.value = '⏳ 正在读 README 生成简介…';
+        autoDescribe((opt.dataset.owner || '').trim(), (opt.dataset.repo || '').trim(), opt);
+      };
+    } catch (err) {
+      sel.innerHTML = '<option value="">加载仓库失败，请稍后重试（' + escapeHtml(err.message) + '）</option>';
+    } finally {
+      sel.disabled = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  // 选仓库后自动生成名称与简介（README → GLM）；未配置 GLM / 无 README 时服务端降级返回仓库信息
+  let describeSeq = 0;
+  async function autoDescribe(owner, repoName, opt) {
+    if (!owner || !repoName) return;
+    const seq = ++describeSeq; // 防竞态：快速切换仓库时丢弃过期结果
+    try {
+      const r = await API.post('/api/github/describe', JSON.stringify({ owner, repo: repoName }), 45000);
+      if (seq !== describeSeq) return;
+      const titleInput = document.getElementById('lk-title');
+      const descInput = document.getElementById('lk-desc');
+      if (r.title && titleInput) titleInput.value = r.title;
+      if (descInput) descInput.value = r.description || '';
+      if (r.note) toast(r.note);
+    } catch (err) {
+      if (seq !== describeSeq) return;
+      const titleInput = document.getElementById('lk-title');
+      const descInput = document.getElementById('lk-desc');
+      if (opt && titleInput && !titleInput.value.trim()) titleInput.value = (opt.dataset.name || repoName || '').trim();
+      if (descInput) descInput.value = '';
+      toast('自动生成简介失败：' + (err.message || '请重试'));
+    }
+  }
+
+  // 未连接时把选择器复位为占位
+  function resetRepoSelect() {
+    const sel = document.getElementById('lk-repo-select');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— 选择仓库 —</option>';
+    selectedRepoUrl = '';
+  }
+
+  // OAuth 弹窗结果（postMessage）→ 刷新连接状态（监听只装一次，指向当前渲染的处理函数）
+  if (!window.__ghOauthListenerInstalled) {
+    window.__ghOauthListenerInstalled = true;
+    window.addEventListener('message', (e) => {
+      if (!e.data || e.data.type !== 'github-oauth') return;
+      toast(e.data.message || (e.data.ok ? 'GitHub 连接成功' : 'GitHub 连接失败'));
+      if (typeof window.__refreshGhStatus === 'function') window.__refreshGhStatus();
+    });
+  }
+  window.__refreshGhStatus = loadGithubStatus;
+
+  // 验证指引框（OAuth 版）：连接 GitHub 后一键验证，无需放文件
   function showVerifyBox(l) {
     const box = document.getElementById('lk-verify-box');
     if (!box || !l) return;
     box.style.display = '';
-    box.innerHTML = `✅ 等待验证。请完成下面 3 步（1 分钟）：<br>
-      1. 打开仓库 <a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.url)}</a>（需已登录 GitHub；<strong>请确认是你自己创建的项目</strong>，Fork 的仓库无法通过验证）；<br>
-      2. 在仓库<strong>根目录新建文件</strong> <code>nanfang-pat.txt</code>，内容填入：<code>${escapeHtml(l.verify_token)}</code>（Commit 提交，push 到默认分支）；<br>
-      3. 点下方「验证」。<span style="color:var(--text-dim);">私有仓库无法验证，请先将仓库设为公开。</span><br>
-      <button class="btn btn-sm btn-primary" id="lk-verify-new" style="margin-top:8px;" data-id="${l.id}">我已添加，验证</button>`;
+    if (!ghConnected) {
+      box.innerHTML = `🔑 连接 GitHub 后，从下拉选择你的公开项目点「验证」即可（需为自己创建、非 Fork 的项目）。<br>
+        <button class="btn btn-sm btn-primary" id="lk-gh-connect2" style="margin-top:8px;">🔑 用 GitHub 授权</button>`;
+      const cb = document.getElementById('lk-gh-connect2');
+      if (cb) cb.onclick = connectGithub;
+      return;
+    }
+    box.innerHTML = `✅ 已连接 GitHub。确认是你自己创建的公开项目（Fork 无法通过验证）后点「验证」，+25⭐ 自动发放。<br>
+      <button class="btn btn-sm btn-primary" id="lk-verify-new" style="margin-top:8px;" data-id="${l.id}">立即验证</button>`;
     const vb = document.getElementById('lk-verify-new');
     vb.onclick = async () => {
       vb.disabled = true;
@@ -742,15 +915,22 @@ Views.files = () => {
     lkSubmitBtn.onclick = async () => {
       const errEl = document.getElementById('lk-error');
       errEl.classList.remove('show');
-      const url = document.getElementById('lk-url').value.trim();
+      const url = selectedRepoUrl; // 只能来自下拉选择（2026-08-21：不允许手填链接）
       const title = document.getElementById('lk-title').value.trim();
       const description = document.getElementById('lk-desc').value.trim();
-      if (!url || !title) { errEl.textContent = '请填写仓库链接和项目名称'; errEl.classList.add('show'); return; }
+      if (!url || !title) {
+        errEl.textContent = '请选择项目仓库并填写名称';
+        errEl.classList.add('show');
+        return;
+      }
       lkSubmitBtn.disabled = true;
       try {
         const r = await API.post('/api/links', JSON.stringify({ url, title, description }));
         const l = r.link;
-        document.getElementById('lk-url').value = '';
+        // 清空表单：选择器复位 + 清名称/简介
+        const sel = document.getElementById('lk-repo-select');
+        if (sel) sel.value = '';
+        selectedRepoUrl = '';
         document.getElementById('lk-title').value = '';
         document.getElementById('lk-desc').value = '';
         showVerifyBox(l);
@@ -768,4 +948,7 @@ Views.files = () => {
   loadFiles();
   loadApps();
   loadLinks();
+  loadGithubStatus();
+  const repoLoadBtn = document.getElementById('lk-repo-load');
+  if (repoLoadBtn) repoLoadBtn.onclick = loadMyRepos;
 };

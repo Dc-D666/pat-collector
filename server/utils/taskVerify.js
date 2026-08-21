@@ -33,10 +33,13 @@ async function verifyTaskCompletion(task, user, payload) {
     return { ok: true };
   }
   if (task.appcheck) {
-    // 第2章：频道发帖（已导入视为已发帖）
+    // 第2章：须「频道发帖 + 本站轻应用投稿记录」双条件（2026-08-21 修复）——
+    // 仅在频道发过帖（posted）不算完成，必须已自动识别/手动识别投稿到本站（submitted）。
+    // 注意：submitted 只统计带来源帖（source_feed_id）的投稿，导入阶段已核验归属，
+    // 故 submitted 蕴含 posted；双条件判断是为了与 /api/learn/app-status 口径一致、防误判。
     const st = await getAppPostedStatus(user.id, user);
-    if (!st.posted) {
-      return { ok: false, error: '未检测到频道发帖或已投稿的 AI 轻应用，请先发表并识别导入' };
+    if (!st.posted || !st.submitted) {
+      return { ok: false, error: '未检测到频道发帖或本站轻应用投稿记录，请先在频道发表 AI 应用，再到「我的项目」→「AI 轻应用」自动识别投稿' };
     }
     return { ok: true };
   }

@@ -60,13 +60,6 @@ Views.activity = () => {
         </div>
       </div>
 
-      <div class="card" style="padding:12px 20px;margin-bottom:16px;">
-        <a href="#/club" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-decoration:none;color:var(--text);font-size:13px;line-height:1.6;">
-          <strong>👋 社团简介</strong>
-          <span style="color:var(--accent-strong);white-space:nowrap;">查看完整介绍 →</span>
-        </a>
-      </div>
-
       <div class="card" style="padding:20px;margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
           <div class="activity-title">📌 怎么从 0 开始</div>

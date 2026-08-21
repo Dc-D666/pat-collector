@@ -12,6 +12,7 @@ Views.login = () => {
   const view = document.getElementById('view');
   let pollTimer = null;
   let gradesCache = null;
+  let gradesLoaded = false; // 是否已尝试拉取服务端班级数据（2026-08-21：区分"兜底"与"已加载"，保证表单立即可用）
 
   // 兜底结构（与 server/config.js 保持一致，仅当后端接口不可用时使用）
   function range(a, b) { const r = []; for (let i = a; i <= b; i++) r.push(String(i)); return r; }
@@ -21,12 +22,15 @@ Views.login = () => {
     { name: '高三', classes: range(2401, 2425) },
   ];
 
+  // 拉取班级数据（只尝试一次；失败/未配置用兜底）。gradesCache 可能已预置兜底，
+  // 这里仍会去请求一次真实数据并在成功后覆盖——表单渲染不依赖本次请求完成。
   async function loadGrades() {
-    if (gradesCache) return gradesCache;
+    if (gradesLoaded) return gradesCache;
     try {
       const data = await API.get('/api/auth/classes');
       if (data && data.grades && data.grades.length) gradesCache = data.grades;
     } catch (_) { /* 用兜底 */ }
+    gradesLoaded = true;
     if (!gradesCache) gradesCache = FALLBACK_GRADES;
     return gradesCache;
   }
@@ -257,13 +261,18 @@ Views.login = () => {
     gradeSel.addEventListener('change', update);
     update();
 
-    return () => ({
-      grade: gradeSel.value,
-      class_name: (container.querySelector('#id-class') ? container.querySelector('#id-class').value : '').trim(),
-      real_name: (container.querySelector('#id-name') ? container.querySelector('#id-name').value : '').trim(),
-      show_real_name: (container.querySelector('input[name="id-show-real"]:checked') || {}).value !== '0',
-      nickname: initialsInput ? initialsInput.value.trim() : '',
-    });
+    return {
+      // 取值（提交时调用）
+      getValues: () => ({
+        grade: gradeSel.value,
+        class_name: (container.querySelector('#id-class') ? container.querySelector('#id-class').value : '').trim(),
+        real_name: (container.querySelector('#id-name') ? container.querySelector('#id-name').value : '').trim(),
+        show_real_name: (container.querySelector('input[name="id-show-real"]:checked') || {}).value !== '0',
+        nickname: initialsInput ? initialsInput.value.trim() : '',
+      }),
+      // 重新渲染班级/姓名字段（服务端班级数据到达后刷新用，2026-08-21）
+      refresh: update,
+    };
   }
 
   // 主界面：两个入口
@@ -454,10 +463,13 @@ Views.login = () => {
         </div>
       </div>`;
     document.getElementById('bind-back').onclick = renderHome;
-    await loadGrades();
-    const getValues = renderIdentity(document.getElementById('id-container'), nickname);
+    // 立即渲染身份表单（先预置兜底年级数据），后台再拉真实班级数据刷新——
+    // 修复慢网络下偶现"年级选不了"：此前表单渲染被 await loadGrades() 阻塞（2026-08-21）
+    if (!gradesCache) gradesCache = FALLBACK_GRADES;
+    const identity = renderIdentity(document.getElementById('id-container'), nickname);
+    loadGrades().then(() => { try { identity.refresh(); } catch (_) { /* ignore */ } });
     document.getElementById('bind-submit').onclick = async () => {
-      const v = getValues();
+      const v = identity.getValues();
       if (!v.grade) return showError('请选择年级');
       if (v.grade !== '其他' && !v.class_name) return showError('请选择班级');
       const otherErr = checkOtherClass(v);
@@ -572,12 +584,14 @@ Views.login = () => {
       dropzone.addEventListener('drop', (e) => addPickedFiles([...e.dataTransfer.files]));
     }
 
-    loadGrades().then(async () => {
-      const getValues = renderIdentity(document.getElementById('id-container'), '');
-      document.getElementById('guest-submit').onclick = async () => {
-        const errEl = document.getElementById('auth-error');
-        errEl.classList.remove('show');
-        const v = getValues();
+    // 立即渲染身份表单（预置兜底年级数据），后台刷新班级数据（2026-08-21，与 QQ 绑定表单同款修复）
+    if (!gradesCache) gradesCache = FALLBACK_GRADES;
+    const identity = renderIdentity(document.getElementById('id-container'), '');
+    loadGrades().then(() => { try { identity.refresh(); } catch (_) { /* ignore */ } });
+    document.getElementById('guest-submit').onclick = async () => {
+      const errEl = document.getElementById('auth-error');
+      errEl.classList.remove('show');
+      const v = identity.getValues();
         if (!v.grade) return showError('请选择年级');
         if (v.grade !== '其他' && !v.class_name) return showError('请选择班级');
         const otherErr = checkOtherClass(v);
@@ -661,7 +675,6 @@ Views.login = () => {
           showError(err.message);
         }
       };
-    });
   }
 
   // 提交完成：展示项目地址（以后用它查看/下载提交的作品）。

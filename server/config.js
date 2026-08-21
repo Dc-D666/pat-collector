@@ -129,6 +129,18 @@ const config = {
   // GitHub API（GitHub 项目 Fork 检测用）：填 GITHUB_TOKEN 可提升配额（未认证 60 次/时/IP，认证 5000 次/时）
   github: {
     token: process.env.GITHUB_TOKEN || '',
+    // GitHub OAuth（2026-08-21）：所有权验证改为用户授权（取代仓库放 nanfang-pat.txt 文件校验）。
+    // 需在 GitHub → Settings → Developer settings → OAuth Apps 注册一个 OAuth App：
+    //   Homepage URL = https://pat.weaxi.cn，Authorization callback URL = https://pat.weaxi.cn/api/github/oauth/callback
+    // scope 默认 repo：需要看到用户「全部」项目（含私有）才能做置灰展示；
+    // 私有项目仅展示（前端置灰带锁、不可选择），只有公开项目可选、可验证。
+    oauth: {
+      clientId: process.env.GITHUB_OAUTH_CLIENT_ID || '',
+      clientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET || '',
+      callbackUrl:
+        process.env.GITHUB_OAUTH_CALLBACK_URL || 'https://pat.weaxi.cn/api/github/oauth/callback',
+      scope: process.env.GITHUB_OAUTH_SCOPE || 'repo',
+    },
   },
   nftiDb: {
     host: process.env.NFTI_DB_HOST || '127.0.0.1',
@@ -136,6 +148,15 @@ const config = {
     database: process.env.NFTI_DB_NAME || 'nfti',
     user: process.env.NFTI_DB_USER || 'pat',
     password: process.env.NFTI_DB_PASSWORD || '',
+  },
+  // 智谱 GLM 免费模型（2026-08-21）：GitHub 仓库 README → 自动生成项目名称/简介。
+  // 默认 glm-4.7-flash（最新免费档）；繁忙/限流时接口层自动回退 glm-4-flash。
+  glm: {
+    apiKey: process.env.GLM_API_KEY || '',
+    baseUrl: process.env.GLM_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
+    model: process.env.GLM_MODEL || 'glm-4.7-flash',
+    fallbackModel: process.env.GLM_FALLBACK_MODEL || 'glm-4-flash',
+    timeoutMs: 30000,
   },
   projectRoot: PROJECT_ROOT,
   classes: CLASSES,

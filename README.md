@@ -19,6 +19,7 @@
 | 全校作品展 | 全校所有项目平铺展示（文件 + AI 轻应用混排），班级 tag 标识（本班高亮），按标题/作者/班级实时搜索；下载全校公开（登录即可）；**访客作品不参展（R1，2026-08-16）**——访客作品只在自己的项目地址页展示，QQ 合并后自动转正参展 |
 | 提交总览 | 统计卡片 + 每班卡片（学生数 / 文件数 / 轻应用数 / 总大小），可展开学生与项目明细 |
 | AI 轻应用 | 自动/手动识别 QQ 频道帖子中的 AI 轻应用并收集（作者硬校验） |
+| GitHub 项目 | 连接 GitHub 账号后从下拉选择本人项目提交（**仅公开项目可选，私有项目置灰展示**；不再手填链接）；选完自动读 README 调**智谱 GLM（glm-4.7-flash）**生成名称与简介；OAuth 一键核验所有权（owner 是本人 + 非 Fork）→ +25⭐ |
 | 学AI 栏目 | 5 章 AI 教程（Markdown，自研渲染器），每章含 B站视频 / 单选题 / 实操任务 |
 | 积分体系 | 首登 +10、阅读 **+8**、整章任务 **+15**、提交文件 **+25**（与 GitHub 项目**合计**最多计 5 个，2026-08-20）、提交应用 **+15**（最多计 3 个）、**GitHub 项目外链 +25**（与作品文件**合计**最多计 5 个）、主动点赞 +2（日上限 10）、**被赞 +5（日上限 20，P3）**、毕业 **+40**、彩蛋 +5；幂等发放 + 计数上限 + 排行榜；**访客不进榜（O1）**，排行榜**默认「在校」可切「全部」（2026-08-16）**；人工评委可经后台调积分发放评审分；**限时加成（2026-08-20~23 北京时间）**：窗口内获得的所有正向积分 ×1.2（`utils/points.js` `bonusAmount`，覆盖 grant/grantCapped/评审 applyJudgePoints） |
 | 跨站体验 | 第1章实操任务跳转 NFTI（nfti.weaxi.cn）自动登录（HMAC ticket），完成人格测试自动核验 |
@@ -105,6 +106,10 @@ npm run dev            # 或 npm start
 | `GUILD_ID` | 可选：限定 QQ 登录到某频道（空 = 不校验） | — |
 | `PAT_TICKET_SECRET` | NFTI 跨站体验 ticket 签名密钥（与 NFTI 侧一致） | — |
 | `NFTI_DB_HOST/PORT/NAME/USER/PASSWORD` | NFTI 库只读连接（判定"已体验"） | `127.0.0.1`/`3306`/`nfti`/`nfti`/— |
+| `GITHUB_TOKEN` | GitHub API 个人令牌（提升 Fork 检测等配额至 5000 次/时，可选） | — |
+| `GITHUB_OAUTH_CLIENT_ID/SECRET` | GitHub OAuth App 凭据（所有权验证用，2026-08-21 起取代放文件校验） | — |
+| `GITHUB_OAUTH_CALLBACK_URL` | OAuth 回调地址（需与 GitHub OAuth App 注册一致） | `https://pat.weaxi.cn/api/github/oauth/callback` |
+| `GITHUB_OAUTH_SCOPE` | OAuth 授权范围：`repo`（默认，可列出全部项目；私有项目仅展示置灰不可选）/ `public_repo`（只列公开项目） | `repo` |
 
 ## API
 
@@ -134,8 +139,14 @@ npm run dev            # 或 npm start
 | POST | `/api/apps` | Bearer | 提交轻应用（+15 ⭐，最多计 3 个；总数上限 20） |
 | GET | `/api/apps` | Bearer | 我的轻应用列表 |
 | DELETE | `/api/apps/:id` | Bearer | 删除轻应用（仅本人） |
-| POST | `/api/links` | Bearer | 提交 GitHub 仓库链接（生成验证 token，待验证） |
-| POST | `/api/links/:id/verify` | Bearer | 验证仓库所有权（读取仓库根目录 nanfang-pat.txt 比对 token），通过后 +25⭐（作品文件 + GitHub 项目合计最多 5 个） |
+| POST | `/api/links` | Bearer | 提交 GitHub 项目（仓库来自前端下拉选择，仅公开可选；生成验证 token，待验证） |
+| POST | `/api/links/:id/verify` | Bearer | 验证仓库所有权（GitHub OAuth 授权后一键核验：owner 是本人 + 非 Fork），通过后 +25⭐（作品文件 + GitHub 项目合计最多 5 个） |
+| GET | `/api/github/oauth/start` | Bearer | 发起 GitHub OAuth 授权，返回授权 URL（弹窗打开） |
+| GET | `/api/github/oauth/callback` | — | GitHub 回调：code 换 token → 绑定身份（access_token AES-256-GCM 加密落库，不下发前端） |
+| GET | `/api/github/status` | Bearer | 当前用户 GitHub 连接状态（login） |
+| GET | `/api/github/repos` | Bearer | 已连接用户的本人非 Fork 仓库列表（提交页下拉选择器用） |
+| POST | `/api/github/describe` | Bearer | 选仓库后自动生成：拉 README → 智谱 GLM（默认 glm-4.7-flash，繁忙自动回退 glm-4-flash）生成项目名称 + ~100 字简介（未配置 GLM 时降级返回仓库信息） |
+| POST | `/api/github/disconnect` | Bearer | 断开 GitHub 连接（清除 token） |
 | GET | `/api/links` | Bearer | 我的 GitHub 项目列表 |
 | DELETE | `/api/links/:id` | Bearer | 删除 GitHub 项目（回扣积分，仅本人） |
 | GET | `/api/learn` | — | 学AI 章节列表 |

@@ -38,6 +38,20 @@ Views.points = async () => {
   const myRank = me.rank || '-';
   const logs = mine.logs || [];
   const medal = ['🥇', '🥈', '🥉'];
+
+  // 顶栏积分徽章与页面余额同步（2026-08-21 修复）：
+  // 徽章读 localStorage 缓存的 u.points、这里是服务端实时值，积分在别处变动
+  // （被点赞/后台调整/毕业领取等）后缓存未刷新会出现「徽章 ≠ 我的积分」。
+  // 拿到实时值后回写缓存并重绘导航（值没变则不重绘）。
+  function syncNavPoints(total) {
+    const u = API.getUser() || {};
+    if (typeof total === 'number' && u.points !== total) {
+      u.points = total;
+      API.setUser(u);
+      Nav.render();
+    }
+  }
+  syncNavPoints(myPoints);
   // +0 流水（超出计分规则被置 0）的 ⓘ 提示文案
   const ZERO_REASON_HINTS = {
     file_submit: '超出计分规则：作品文件 + GitHub 项目合计最多计 5 个',
@@ -45,12 +59,13 @@ Views.points = async () => {
     link_submit: '超出计分规则：作品文件 + GitHub 项目合计最多计 5 个',
   };
 
-  // ---- 刷新积分余额显示（领取毕业奖后）----
+  // ---- 刷新积分余额显示（领取毕业奖后）：同步页面数值 + 顶栏徽章 + 缓存 ----
   function refreshPoints() {
     API.get('/api/points').then((m) => {
       if (m && typeof m.points === 'number') {
         const el = document.getElementById('my-points-val');
         if (el) el.textContent = m.points;
+        syncNavPoints(m.points);
       }
     }).catch(() => {});
   }

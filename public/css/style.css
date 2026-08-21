@@ -86,6 +86,23 @@ button { font-family: inherit; cursor: pointer; }
   white-space: nowrap; overflow: hidden;
 }
 
+/* 社团引导横幅（2026-08-21）：紧贴 beta-banner 下方，同款不同色（芥末金），
+   整条可点击，链接到社团官网 itex.zznfzx.com。
+   默认隐藏，仅活动简介页（body.route-activity，#/activity）显示，避免影响其他页面体验 */
+.club-banner {
+  display: none;
+  position: sticky; top: 32px; z-index: 69;
+  height: 32px;
+  align-items: center; justify-content: center;
+  background: var(--accent-strong); color: #fff;
+  font-size: 12.5px; font-weight: 600; letter-spacing: 0.06em;
+  white-space: nowrap; overflow: hidden;
+  text-decoration: none;
+}
+body.route-activity .club-banner { display: flex; }
+.club-banner:hover { text-decoration: underline; }
+.club-banner:visited { color: #fff; }
+
 /* 底部备案号（全局） */
 .site-footer {
   text-align: center; padding: 18px 12px 30px;
@@ -106,6 +123,8 @@ button { font-family: inherit; cursor: pointer; }
   z-index: 20;
   box-shadow: 1px 0 8px rgba(59, 51, 43, 0.04);
 }
+/* 活动简介页多了 32px 社团横幅，左侧导航下移避开 */
+body.route-activity .rail { top: 64px; }
 
 .main {
   margin-left: var(--rail-w);
@@ -844,6 +863,7 @@ span.brand-logo {
   .rail { display: none; }
   .main { margin-left: 0; padding: 0 14px 88px; }
   .topbar { display: flex; top: 32px; }
+  body.route-activity .topbar { top: 64px; }
   .appbar {
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
     background: rgba(255, 255, 255, 0.92);
@@ -910,6 +930,7 @@ span.brand-logo {
 }
 
 #qq-banner-root { position: sticky; top: 32px; z-index: 60; }
+body.route-activity #qq-banner-root { top: 64px; }
 .qq-expired-banner {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap;

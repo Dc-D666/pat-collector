@@ -36,6 +36,8 @@ window.App = (() => {
     const isProject = key === 'p' && !!arg;
     // is-auth = 登录页/独立页标记：隐藏主页壳（rail/appbar/topbar），进入系统后移除恢复
     document.body.classList.toggle('is-auth', isLogin || isProject);
+    // 首页（#/activity）专属社团横幅（club-banner）：仅该路由显示，其余路由隐藏，避免影响体验
+    document.body.classList.toggle('route-activity', key === 'activity');
 
     if (isLogin) {
       routes.login();

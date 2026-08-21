@@ -1,20 +1,22 @@
 'use strict';
 
-// GitHub 项目外链（2026-08-20）：Token 文件验证防冒充。
-// 流程：提交仓库链接 → 平台生成 token → 用户在仓库根目录建 nanfang-pat.txt 写入 → 平台读取验证通过 → 发分。
-// 仅支持公开 GitHub 仓库（raw.githubusercontent.com 可读）；验证通过才计分（link_submit +25，最多 5 个）。
-// Fork 防护（2026-08-21）：Token 文件只能证明"能往该仓库 push"，而 Fork 的仓库人人可 push——
-// 若不加限制，Fork 别人的项目再写入自己的 token 即可通过验证。故验证时调 GitHub API 查 fork 标志，Fork 仓库直接拒绝。
+// GitHub 项目外链（2026-08-20 起，2026-08-21 改为 OAuth 所有权验证）：
+// 流程：提交仓库链接 → 用户 GitHub OAuth 授权（一次性连接）→ 验证 → 发分。
+// 验证（2026-08-21 取代「仓库根目录 nanfang-pat.txt 文件」校验）：
+//   用用户授权的 access_token 调 GitHub API GET /repos/{owner}/{repo}——
+//   repo 可读（200）+ owner 是授权账号本人 + 非 Fork → 通过；无需在仓库放任何文件。
+//   仅支持本人创建的项目仓库（Fork 的仓库人人可 push，不能证明原创，直接拒绝）。
+// 连接管理见 routes/github-oauth.js（/api/github/*）。
 
 const express = require('express');
 const crypto = require('crypto');
-const config = require('../config');
 const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../utils/rateLimit');
 const { grant, revokeInTx } = require('../utils/points');
 const { auditDisplayText } = require('../utils/audit');
+const { getGithubConnection } = require('./github-oauth');
 
 const router = express.Router();
 const ipKey = (req) => req.ip || req.connection.remoteAddress || 'unknown';
@@ -26,90 +28,58 @@ function parseGitHubUrl(raw) {
   );
   if (!m) return null;
   const repo = m[2].replace(/\.git\/?$/, '').replace(/\/+$/, '');
-  // 拒绝含 '..' 的路径段（防 raw.githubusercontent.com 拉取 URL 被当作路径穿越；GitHub 本身也不允许）
+  // 拒绝含 '..' 的路径段（GitHub 本身不允许，双重保险）
   if (!repo || repo.includes('..') || m[1].includes('..')) return null;
   return { owner: m[1], repo };
 }
 
-// 读取仓库根目录 nanfang-pat.txt 内容并与预期 token 比对。
-// 注意：本服务器在境内，raw.githubusercontent.com 不稳定（实测间歇超时），
-// 故以 jsDelivr CDN（cdn.jsdelivr.net/gh/...@HEAD 解析默认分支，境内可达）为主源，raw 兜底。
-// R2-11（2026-08-21）：按内容匹配决定是否继续尝试下一源——CDN 缓存旧内容时不直接返回，
-// 只要与预期 token 不匹配就继续尝试 raw 源（否则 CDN 缓存会导致验证持续失败）。
-async function fetchRepoToken(owner, repo, expected) {
-  const sources = [
-    'https://cdn.jsdelivr.net/gh/' + owner + '/' + repo + '@HEAD/nanfang-pat.txt',
-    'https://raw.githubusercontent.com/' + owner + '/' + repo + '/HEAD/nanfang-pat.txt',
-  ];
-  for (const url of sources) {
-    const txt = await fetchText(url);
-    if (txt == null) continue; // 404/网络失败：尝试下一源
-    if (txt === expected) return txt; // 内容匹配 → 验证通过
-    // 内容存在但不匹配（如 CDN 缓存旧 token）：继续尝试下一源
-  }
-  return null;
-}
-
-async function fetchText(url) {
+// 用 GitHub 用户 token 验证仓库归属。返回 { ok, status?, error?, fork?, parent? }
+// 鉴权：token 请求 GET /repos 对公开仓库任何人可读，故必须校验 owner 是授权账号本人。
+async function verifyRepoWithToken(owner, repo, conn) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 6000);
+  const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, headers: { 'User-Agent': 'PatPlayer/1.0' } });
-    if (!res.ok) return null; // 404 = 文件/仓库不存在或私有
-    if (!res.body) return (await res.text()).trim();
-    // 限制响应体大小（防仓库里放超大 nanfang-pat.txt 造成内存尖峰；验证文件应 <1KB）
-    const reader = res.body.getReader();
-    const chunks = [];
-    let total = 0;
-    const MAX = 64 * 1024;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.length;
-      if (total > MAX) { await reader.cancel().catch(() => {}); return null; }
-      chunks.push(value);
+    const res = await fetch(
+      'https://api.github.com/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo),
+      {
+        signal: ctrl.signal,
+        headers: {
+          'User-Agent': 'PatPlayer/1.0',
+          Accept: 'application/vnd.github+json',
+          Authorization: 'Bearer ' + conn.token,
+        },
+      }
+    );
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, status: 400, error: 'GitHub 授权已失效，请断开后重新连接' };
     }
-    return Buffer.concat(chunks).toString('utf8').trim();
+    if (res.status === 404) {
+      return { ok: false, status: 400, error: '仓库不存在或无权访问。请确认链接正确（私有仓库需在连接时授权 repo 权限）' };
+    }
+    if (!res.ok) {
+      return { ok: false, status: 503, error: 'GitHub API 暂时不可用（' + res.status + '），请稍后重试' };
+    }
+    const data = await res.json();
+    const ownerId = String((data.owner && data.owner.id) || '');
+    const ownerLogin = String((data.owner && data.owner.login) || '').toLowerCase();
+    const myUid = String(conn.uid || '');
+    const myLogin = String(conn.login || '').toLowerCase();
+    // 优先按稳定的 owner.id 比对；个别场景拿不到 id 时退回 login 比对（忽略大小写）
+    const mine = ownerId ? ownerId === myUid : ownerLogin === myLogin;
+    if (!mine) {
+      return {
+        ok: false,
+        status: 400,
+        error: '该仓库不属于你授权的 GitHub 账号（' + (conn.login || '')
+          + '）。请确认提交的是你自己创建的项目仓库；如需切换账号，先断开 GitHub 再重新授权',
+      };
+    }
+    return { ok: true, fork: !!data.fork, parent: data.parent ? data.parent.full_name : '' };
   } catch (_) {
-    return null; // 网络失败按未验证处理（可重试）
+    return { ok: false, status: 503, error: '无法连接 GitHub API（网络超时），请稍后重试' };
   } finally {
     clearTimeout(timer);
   }
-}
-
-// ---- Fork 检测：GitHub API /repos/{owner}/{repo} 的 fork 标志 ----
-// 注意：仅在 token 匹配后调用（API 调用次数 ≈ 成功验证次数），并带 10 分钟内存缓存，
-// 避免未认证配额（60 次/时/IP）被反复点验证耗尽；配置 GITHUB_TOKEN 可提升到 5000 次/时。
-const repoMetaCache = new Map(); // key: owner/repo → { ts, meta }
-const REPO_META_TTL = 10 * 60 * 1000;
-async function getRepoMeta(owner, repo) {
-  const key = owner + '/' + repo;
-  const hit = repoMetaCache.get(key);
-  if (hit && Date.now() - hit.ts < REPO_META_TTL) return hit.meta;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 6000);
-  let meta = null;
-  try {
-    const headers = { 'User-Agent': 'PatPlayer/1.0', Accept: 'application/vnd.github+json' };
-    if (config.github.token) headers.Authorization = 'token ' + config.github.token;
-    const res = await fetch(
-      'https://api.github.com/repos/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo),
-      { signal: ctrl.signal, headers }
-    );
-    if (res.ok) {
-      const data = await res.json();
-      meta = {
-        fork: !!data.fork,
-        parent: data.parent ? data.parent.full_name : '',
-      };
-    }
-    // 仅缓存成功结果（API 故障不缓存，下次验证可重试）
-    if (meta) repoMetaCache.set(key, { ts: Date.now(), meta });
-  } catch (_) { /* API 不可达 → meta=null，调用方按放行处理 */ }
-  finally {
-    clearTimeout(timer);
-  }
-  return meta;
 }
 
 // 提交 GitHub 仓库链接：解析 owner/repo + 生成 token → 待验证
@@ -169,7 +139,7 @@ router.post(
   })
 );
 
-// 验证：读取仓库 nanfang-pat.txt 比对 token → 通过则标记 verified 并发放提交积分
+// 验证：GitHub OAuth 授权后一键验证仓库归属 → 通过则标记 verified 并发放提交积分
 router.post(
   '/:id/verify',
   requireAuth,
@@ -179,23 +149,18 @@ router.post(
     const [row] = await query('SELECT * FROM links WHERE id = ? AND user_id = ?', [id, req.user.id]);
     if (!row) return res.status(404).json({ error: '链接不存在' });
     if (!row.verified) {
-      const token = await fetchRepoToken(row.owner, row.repo, row.verify_token);
-      if (!token || token !== row.verify_token) {
+      // 1. 需已连接 GitHub（OAuth；token 仅存服务端）
+      const conn = await getGithubConnection(req.user.id);
+      if (!conn) {
         return res.status(400).json({
-          error: '未找到匹配的验证文件。请在仓库根目录新建 nanfang-pat.txt，内容写入：' + row.verify_token
-            + '（push 到默认分支；私有仓库无法验证，请将仓库设为公开）。若刚提交，请等 1 分钟再试（CDN 缓存延迟）',
+          error: '请先连接 GitHub 账号：到「我的项目」→「GitHub 项目」点「用 GitHub 授权」，连接后即可一键验证',
         });
       }
-      // Token 匹配（所有权 = 能 push）通过后，再查是否为 Fork：
-      // Fork 的仓库任何登录用户都能 push 自己的 token，不能证明项目是本人原创，直接拒绝。
-      const meta = await getRepoMeta(row.owner, row.repo);
-      if (!meta) {
-        // R2-12（2026-08-21）：GitHub API 超时/限流/异常时无法确认仓库状态 → 暂缓验证（fail-closed），
-        // 避免 Fork 仓库在 API 故障或额度耗尽期间绕过"禁止 Fork"约束
-        return res.status(503).json({ error: '暂时无法确认仓库状态（GitHub API 不可达或繁忙），请稍后重试' });
-      }
-      if (meta.fork) {
-        const parent = meta.parent ? '（原仓库：' + meta.parent + '）' : '';
+      // 2. 带用户 token 调 GitHub API 验证归属（含 Fork 检测）
+      const r = await verifyRepoWithToken(row.owner, row.repo, conn);
+      if (!r.ok) return res.status(r.status || 400).json({ error: r.error });
+      if (r.fork) {
+        const parent = r.parent ? '（原仓库：' + r.parent + '）' : '';
         return res.status(400).json({
           error: '检测到该仓库是 Fork 的副本' + parent + '，无法通过验证。'
             + '请提交你自己创建的项目仓库：在 GitHub 新建仓库（不要点 Fork）后上传你自己的项目代码。',

@@ -52,6 +52,16 @@ async function main() {
       );
       console.log('[init-db] ✅ users.is_admin / status 列已补充（存量库迁移）');
     }
+    // 存量库迁移：users 表补 GitHub OAuth 三列（2026-08-21：所有权验证改为 GitHub 授权）
+    const [ghCols] = await conn.query(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'github_uid'"
+    );
+    if (ghCols.length === 0) {
+      await conn.query(
+        "ALTER TABLE users ADD COLUMN github_uid VARCHAR(32) NULL COMMENT 'GitHub OAuth 用户 id' AFTER status, ADD COLUMN github_login VARCHAR(64) NULL COMMENT 'GitHub OAuth 用户名' AFTER github_uid, ADD COLUMN github_token_enc VARCHAR(512) NULL COMMENT 'GitHub access_token（AES-256-GCM 加密）' AFTER github_login"
+      );
+      console.log('[init-db] ✅ users.github_uid / github_login / github_token_enc 列已补充（存量库迁移）');
+    }
     console.log('[init-db] ✅ 建表完成：users / files / admin_log');
   } finally {
     await conn.end();

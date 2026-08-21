@@ -515,3 +515,20 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 - 内测清理脚本 `scripts/clear-beta-data.js` 同步清空 `storage/uploads` 与 `storage/qq-sessions`。
 
 **遗留已知边界（见 §11）**：视频/纯自报任务无服务端核验（当前章节无此类）；Fork 检测 API 故障时新验证暂缓；NFTI 换发依赖 PAT 在线；访客未设密码无法自助找回地址。
+
+### 13.20 GitHub 项目 OAuth 重构 + 相关修复（2026-08-21）
+
+**背景**：原「仓库根目录放 nanfang-pat.txt 文件」所有权验证体验差（建文件/等 CDN/必须公开），且手填链接防冒充弱。改为 **GitHub OAuth 授权验证**。
+
+- **链路**：`GET /api/github/oauth/start`（生成 state，10 分钟一次性，防 CSRF）→ 弹窗跳 github.com 授权 → `/api/github/oauth/callback`（code 换 access_token → `GET /api/github/user` 取身份 → 绑定 `users.github_uid/github_login`）→ **access_token 用 `TOKEN_SECRET` 派生密钥 AES-256-GCM 加密落库**（`github_token_enc`，含篡改检测），不下发前端；`/status` 查连接、`/disconnect` 断开。新文件 `server/routes/github-oauth.js`，`index.js` 挂 `/api/github`；`users` 表新增三列（schema.sql + init-db.js 存量迁移）。
+- **验证**：`POST /api/links/:id/verify` 带用户 token 调 `GET /repos/{owner}/{repo}`——200 + **owner.id == github_uid** + 非 Fork → 通过；401/403（授权失效）/404/网络异常（503 fail-closed）分别提示。`links.js` 删除了整条文件校验路径（fetchRepoToken/fetchText/getRepoMeta）。Fork 检测并入同一响应，不再单独调 API。
+- **只选不填（用户拍板）**：提交表单**移除手填链接输入框**，只能从下拉选择本人仓库（`GET /api/github/repos`：`affiliation=owner`、分页 100×3、过滤非 Fork）。**公开可选、私有置灰带 🔒 不可选**——为此 **OAuth scope 默认从 `public_repo` 改为 `repo`**（public_repo 下 GitHub API 根本不返回私有仓库）；`X-OAuth-Scopes` 检测旧授权 → 响应 `scope_limited:true`，前端提示"断开后重新授权"（**存量用户必须重授权一次才能看到私有项目**）。未连接 GitHub 时整个表单置灰禁用。
+- **AI 自动生成（用户拍板）**：`POST /api/github/describe` 选仓库后自动拉 README 原文（`Accept: application/vnd.github.raw+json`，截 8000 字）→ 智谱 GLM 生成名称（≤12 字）+ 80~120 字简介，自动填入可修改。模型默认 **`glm-4.7-flash`**（最新免费档，实测 429 繁忙），**繁忙自动回退 `glm-4-flash`**（`GLM_FALLBACK_MODEL`）；未配 `GLM_API_KEY`/无 README 降级用仓库名/描述（generated:false）。归属校验前置（防当任意 README+GLM 代理刷额度）。前端 `autoDescribe` 带竞态保护（快速切换仓库丢弃过期结果）。
+- **部署注意**：`.env` 已配 `GITHUB_OAUTH_CLIENT_ID/SECRET`（回调 `https://pat.weaxi.cn/api/github/oauth/callback`）与 `GLM_API_KEY`（智谱 `9bea...`，生产 `.env` 不入库）；`GLM_MODEL=glm-4.7-flash`。**存量用户需断开后重新授权（repo scope）**。
+
+**同期修复（同 commit）**
+- 第2章实操任务：完成条件改为「发帖 + 本站投稿记录」**双条件**（`taskVerify.js` 原只查 posted，只发帖即可过关；前端 `initAppTask` 同步）——与文档既定口径一致。
+- `feed_links.py`：轻应用识别只保留 `pd.qq.com/launch_app/` 链接（原把所有 urlContent 链接都当轻应用，B站/GitHub/分享链误识别）。
+- 活动简介页新增社团引导横幅（芥末金，链接 itex.zznfzx.com），**仅 `#/activity` 显示**（body.route-activity 标记 + 条件布局偏移），移除站内「👋 社团简介」卡片。
+- 我的积分页：顶栏积分徽章与页面余额同步（徽章读 localStorage 缓存，页面读服务端，被赞/后台调分后曾不一致）。
+- QQ 授权绑定表单：修复慢网络下偶现「年级选不了」——表单渲染原被 `await loadGrades()` 阻塞，改为**立即渲染（兜底年级数据）+ 后台刷新班级选项**（`renderIdentity` 返回 `{getValues, refresh}`）；访客直传表单同款修复。

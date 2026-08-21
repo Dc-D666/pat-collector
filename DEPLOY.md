@@ -40,6 +40,9 @@ vim .env
 | `MAX_UPLOAD_MB` | 与 nginx `client_max_body_size` 对齐（默认 200） |
 | `PAT_TICKET_SECRET` | 跨站体验（NFTI）ticket 签名密钥，**必须与 NFTI 仓库 `docker-compose.yml` 的 `PAT_TICKET_SECRET` 完全一致**（NFTI 侧校验/换发依赖），改一侧必改另一侧 |
 | `GITHUB_TOKEN` | 可选：GitHub Fork 检测 API 配额（未认证 60 次/时/IP，填 token 提至 5000/时） |
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | GitHub 项目所有权验证（OAuth App 凭据；App 回调地址需填 `https://pat.weaxi.cn/api/github/oauth/callback`） |
+| `GITHUB_OAUTH_SCOPE` | 默认 `repo`（可列出全部项目、私有仅展示）；改 `public_repo` 则私有项目不出现 |
+| `GLM_API_KEY` | 可选：智谱开放平台 key（`glm-4.7-flash` 免费），配置后选 GitHub 仓库自动生成名称/简介；缺省时用仓库名/描述填充 |
 
 ## 4. 启动（PM2）
 

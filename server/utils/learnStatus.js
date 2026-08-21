@@ -1,7 +1,9 @@
 'use strict';
 
 // 章节任务"状态检测"（/api/learn/*-status 与 /api/points/task 完成核验共用同一套口径）：
-// 第2章：是否已发表 AI 应用（站内有带来源帖的投稿，或频道最近发帖）
+// 第2章：是否已发表 AI 应用——**完成须双条件**：posted（频道发帖）+ submitted（本站投稿记录）。
+//   - submitted：apps 表有带来源帖（source_feed_id）的记录（导入阶段已核验归属）；
+//   - posted：有 submitted 即视为已发帖；否则 CLI 扫描频道最近 7 天/24 条帖子，仅作发帖状态提示。
 // 第3章：最近 14 天是否上传过项目文件
 const config = require('../config');
 const { query } = require('../db');
@@ -9,7 +11,7 @@ const qqSessions = require('../qq/sessions');
 const { runCli } = require('../qq/proxy');
 
 // 第2章 app-status：已导入（apps 有 source_feed_id，导入阶段已核验归属）直接视为已发帖；
-// 未导入则 CLI 扫描频道最近 7 天/24 条帖子兜底。
+// 未导入则 CLI 扫描频道最近 7 天/24 条帖子给出 posted 状态（不发分依据——发帖须配合本站投稿）。
 // user 为 req.user（需含 qq_tiny_id / id）；返回 { posted, post_count, submitted, need_login? }
 async function getAppPostedStatus(userId, user) {
   const appRows = await query(

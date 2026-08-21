@@ -24,6 +24,11 @@ import urllib.request
 TARGET = "https://graph.qq.com/mcp_gateway/open_platform_agent_mcp/mcp"
 CAPTURED = []
 
+# AI 轻应用链接特征：https://pd.qq.com/launch_app/<appId>
+# 帖子里的 urlContent 除轻应用卡片外还可能是普通网页/视频/分享链接等，
+# 一律按此特征过滤，只保留真正的轻应用（2026-08-21 修复：此前会把任意链接都识别上来）。
+APP_URL_RE = re.compile(r"^https://pd\.qq\.com/launch_app/[a-zA-Z0-9-]+(?:[?#].*)?$")
+
 
 class H(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -62,7 +67,11 @@ class H(http.server.BaseHTTPRequestHandler):
 
 
 def extract_urls(resp_text):
-    """从 MCP 原始响应中提取 urlContent 链接 (displayText, url)"""
+    """从 MCP 原始响应中提取 AI 轻应用链接 (displayText, url)
+
+    只保留 pd.qq.com/launch_app/ 形式的轻应用链接；urlContent 里的普通网页/
+    视频/分享链接一律过滤掉。
+    """
     found = []
     try:
         data = json.loads(resp_text)
@@ -73,7 +82,9 @@ def extract_urls(resp_text):
         if isinstance(o, dict):
             uc = o.get("urlContent")
             if isinstance(uc, dict) and uc.get("url"):
-                found.append((uc.get("displayText", ""), uc["url"]))
+                url = uc["url"]
+                if APP_URL_RE.match(url):
+                    found.append((uc.get("displayText", ""), url))
             for v in o.values():
                 walk(v)
         elif isinstance(o, list):
@@ -81,9 +92,11 @@ def extract_urls(resp_text):
                 walk(v)
 
     walk(data)
-    # 兜底: 直接正则抓 launch_app 链接
+    # 兜底: 直接正则抓 launch_app 链接（同样按轻应用特征过滤，防截断/杂散匹配）
     for m in re.finditer(r"https://pd\.qq\.com/launch_app/[a-zA-Z0-9-]+", resp_text):
-        found.append(("", m.group(0)))
+        url = m.group(0)
+        if APP_URL_RE.match(url):
+            found.append(("", url))
     return found
 
 

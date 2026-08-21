@@ -55,15 +55,21 @@
 | 列表/删除 | `GET /`（仅本人）、`DELETE /:id` | apps.js:168/181 |
 | 前置条件 | 需 QQ 频道登录会话（token 持久化于 `storage/qq-sessions`，30 天闲置回收） | qq/sessions.js |
 
-## 三·五、GitHub 项目外链（server/routes/links.js + dashboard.js「🔗 GitHub 项目」tab，2026-08-20）
+## 三·五、GitHub 项目外链（server/routes/links.js + routes/github-oauth.js + dashboard.js「🔗 GitHub 项目」tab，2026-08-20 起；08-21 改 OAuth 验证）
 
-- **定位**：解决"频繁更新"痛点——提交 GitHub 仓库链接，push 即更新，无需重新上传；**仅支持 `github.com/{owner}/{repo}` 公开仓库**
-- **防冒充（Token 文件验证）**：提交后平台生成 `PAT-xxx` token，要求用户在仓库根目录新建 `nanfang-pat.txt` 写入（GitHub 网页端可建），平台经 **jsDelivr CDN**（`cdn.jsdelivr.net/gh/{owner}/{repo}@HEAD/nanfang-pat.txt`，境内可达）为主源、`raw.githubusercontent.com` 兜底比对（**2026-08-21：按内容匹配决定是否回退**——CDN 缓存旧内容时不直接返回，继续尝试 raw） → 通过才标记 ✓ 已认证并**发分**
-- **Fork 防护（2026-08-21）**：token 只能证明「能 push」，Fork 的仓库人人可 push——验证时调 GitHub API `/repos/{owner}/{repo}` 查 `fork` 标志，**Fork 仓库直接拒绝**（提示新建仓库勿点 Fork）；**API 不可达/限流时暂缓验证（503 提示重试，fail-closed）**，不因 API 故障放行 Fork（`link_submit` +25⭐，**与 `file_submit` 合计最多 5 个**（2026-08-20 用户拍板：项目文件+GitHub 项目共同上限，走 REASON_CAPS+CAP_GROUPS）；删除回扣 `link_submit_revoke`）；只有仓库 owner 能 push 文件，冒充零成本问题被堵死
+- **定位**：解决"频繁更新"痛点——提交 GitHub 仓库链接，push 即更新，无需重新上传；仅支持 `github.com/{owner}/{repo}` 仓库
+- **所有权验证（2026-08-21 起为 GitHub OAuth，取代 Token 文件校验）**：
+  - 学生点「用 GitHub 授权」→ 弹窗走 GitHub OAuth（`/api/github/oauth/start` → authorize → `/api/github/oauth/callback`，`state` 防 CSRF、10 分钟有效、一次性）→ code 换 access_token → 绑定 `github_uid/github_login`，**access_token 用 `TOKEN_SECRET` 派生密钥 AES-256-GCM 加密落库，不下发前端**（`/api/github/status` 查连接、`/disconnect` 断开）
+  - 验证：`POST /api/links/:id/verify` 带用户 token 调 GitHub API `GET /repos/{owner}/{repo}` —— **200 + owner.id 是授权账号本人 + 非 Fork → 通过**；401/403（授权失效）/404（仓库不存在或无权）/API 不可达（503 fail-closed）分别给出可操作提示；**无需在仓库放任何文件**
+  - **scope=repo（2026-08-21 起默认）**：需看到用户「全部」项目才能做置灰展示；`GET /api/github/repos` 返回全部本人非 Fork 仓库（含私有），前端**公开可选、私有置灰带 🔒 不可选**（X-OAuth-Scopes 检测旧授权并提示重新授权）；旧 `nanfang-pat.txt` 文件校验流程（jsDelivr/raw 拉取比对）已移除
+  - **自动生成（2026-08-21）**：`POST /api/github/describe` 选仓库后自动拉 README（raw，截 8000 字）→ 智谱 GLM（`glm-4.7-flash`，繁忙自动回退 `glm-4-flash`）生成名称（≤12 字）+ 80~120 字简介，自动填入表单可修改；未配 GLM/无 README 时降级用仓库名/描述
+  - **不再手填链接（2026-08-21）**：提交表单只有下拉选择器（未连接 GitHub 时整块置灰禁用），杜绝粘贴他人仓库链接
+  - 旧 `nanfang-pat.txt` 文件校验流程（jsDelivr/raw 拉取比对）已移除
+- **Fork 防护**：token/授权只能证明「能访问」，Fork 的仓库人人可 push——验证响应直接带 `fork` 标志，**Fork 仓库直接拒绝**（提示新建仓库勿点 Fork）；API 不可达/限流时暂缓验证（503 提示重试，fail-closed），不因 API 故障放行 Fork（`link_submit` +25⭐，**与 `file_submit` 合计最多 5 个**（2026-08-20 用户拍板：项目文件+GitHub 项目共同上限，走 REASON_CAPS+CAP_GROUPS）；删除回扣 `link_submit_revoke`）
 - 去重：同用户同 url 唯一（`uq_link_user_url`）；展示文本过 R2 AI 审查；点赞支持 `link` 类型（与被赞积分联动）
 - 作品展：已验证外链混排入墙（🔗 图标 + ✓ 已认证徽标 + owner/repo + 「前往 GitHub」），总览统计 link_count
 - 管理后台「外链」页签：搜索/删除（回扣积分，记 admin_log）
-- 已知取舍：只对编程向同学友好（需 GitHub 账号）；私有仓库无法验证（正好保证公开可见） | links.js / class.js / admin.js
+- 已知取舍：只对编程向同学友好（需 GitHub 账号）；私有项目仅展示不可选（展示需公开，正好保证作品公开可见）；scope=repo 权限较大（能读写私有仓库），如需更小授权面可换 GitHub App 方案 | links.js / github-oauth.js / class.js / admin.js
 
 ## 四、全校作品展（server/routes/class.js:77 + public/js/class-wall.js）
 

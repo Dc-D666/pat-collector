@@ -666,13 +666,16 @@ async function initAppTask(task) {
   }
   try {
     const data = await API.get('/api/learn/app-status');
-    if (data.posted) {
-      // 已检测到发帖 → 自动标记完成
+    if (data.posted && data.submitted) {
+      // 发帖 + 本站投稿双条件都满足 → 自动标记完成
       task.dataset.done = '1';
       const btn = task.querySelector('.app-done-btn');
       if (btn) { btn.disabled = true; btn.textContent = '✓ 已完成'; btn.classList.add('task-done'); }
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">✓ 检测到你的频道发帖，任务已自动完成</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">✓ 检测到你的频道发帖与本站投稿，任务已自动完成</span>`;
       reportTask(parseInt(task.dataset.article, 10), parseInt(task.dataset.task, 10));
+    } else if (data.posted) {
+      // 只检测到发帖、还没投稿到本站：引导去「自动识别」投稿
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">已检测到频道发帖 ✓，但还没投稿到本站。到「我的项目」→「AI 轻应用」点「自动识别」把作品提交上来，再点「我已发表」核验～</span>`;
     } else {
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">发表应用后点「我已发表」，系统自动核验</span>`;
     }
