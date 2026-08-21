@@ -133,8 +133,8 @@ router.get(
     const scope = String(req.query.scope || 'in_school') === 'all' ? 'all' : 'in_school';
     const myClass = req.user.class_name || '';
     const scopeSql = scope === 'all'
-      ? 'AND qq_tiny_id IS NOT NULL'
-      : 'AND qq_tiny_id IS NOT NULL AND class_name IN (' + config.classes.map(() => '?').join(',') + ')';
+      ? 'AND qq_tiny_id IS NOT NULL AND status = \'active\''
+      : 'AND qq_tiny_id IS NOT NULL AND status = \'active\' AND class_name IN (' + config.classes.map(() => '?').join(',') + ')';
     const scopeParams = scope === 'all' ? [] : config.classes;
     const rows = await query(
       `SELECT id, class_name, real_name, show_real_name, nickname, points
@@ -187,7 +187,7 @@ router.get(
     const rows = await query(
       `SELECT class_name, COUNT(*) AS cnt, SUM(points) AS total
        FROM users
-       WHERE qq_tiny_id IS NOT NULL AND class_name IN (${config.classes.map(() => '?').join(',')})
+       WHERE qq_tiny_id IS NOT NULL AND status = 'active' AND class_name IN (${config.classes.map(() => '?').join(',')})
        GROUP BY class_name`,
       config.classes
     );
