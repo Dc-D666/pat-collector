@@ -20,7 +20,7 @@ Views.classWall = async () => {
       <div class="wall-sort">
         <button class="sort-btn active" data-sort="time">${Icons.icon('time', 15)} 最新发表</button>
         <button class="sort-btn" data-sort="likes">${Icons.icon('heart', 15)} 点赞最多</button>
-        <button class="wall-filter-btn" id="wall-mine-btn" ${myClass ? '' : 'disabled'} title="${myClass ? '只看自己班级同学的作品' : '仅 QQ 登录用户可查看班级'}">${Icons.icon('view-module', 15)} 仅看本班</button>
+        <button class="wall-filter-btn" id="wall-mine-btn" ${myClass ? '' : 'disabled'} title="${myClass ? '只看自己班级同学的作品' : '仅 QQ 登录用户可查看班级'}">${Icons.icon('filter', 15)} 仅看本班</button>
       </div>
       <div id="wall-content"><div class="spinner"></div></div>
     </div>`;
