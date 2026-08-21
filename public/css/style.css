@@ -421,6 +421,14 @@ span.brand-logo {
   /* 按钮组固定贴容器右下角：同行时靠右（space-between），换行（窄容器）时第二行也靠右（2026-08-22） */
   margin-left: auto;
 }
+/* 我的项目-文件列表：操作按钮竖排（2026-08-22 用户要求；仅 #file-list 内生效，不误伤作品墙） */
+#file-list .file-row > .file-actions {
+  flex-direction: column;
+  align-items: stretch;
+}
+#file-list .file-row > .file-actions .btn {
+  justify-content: center;
+}
 
 /* AI 轻应用列表 */
 .app-row {
@@ -1109,6 +1117,7 @@ body.route-activity #qq-banner-root { top: 64px; }
 .project-card.topped { border-color: #F5C97B; box-shadow: 0 0 0 1px #F5C97B, var(--shadow); }
 .top-badge {
   position: absolute; top: 12px; right: 12px;
+  display: inline-flex; align-items: center; gap: 4px;
   background: linear-gradient(135deg, #FF6B35, #F59E0B);
   color: #fff; font-size: 11px; font-weight: 700;
   padding: 3px 10px; border-radius: 9999px; z-index: 2;
