@@ -610,6 +610,14 @@ span.brand-logo {
   background: var(--primary-soft); color: var(--primary); white-space: nowrap;
 }
 /* 本章完成人数小标签 */
+/* 选做章节标签（2026-08-22）：琥珀色，区别于称号/完成标签 */
+.optional-tag {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  color: #9A6A00; background: #FFF3D6; border: 1px solid #F0D48A;
+  padding: 1px 9px; border-radius: 9999px; margin-left: 6px; vertical-align: middle;
+}
+.learn-chapter-no .optional-tag { margin-left: 8px; }
+
 .learn-done-tag {
   display: inline-flex; align-items: center; gap: 4px;
   font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 9999px;
@@ -629,7 +637,15 @@ span.brand-logo {
   background: var(--bg); color: var(--text-dim);
   border: 1px solid var(--border);
 }
-.learn-chapter.done .learn-done-tag {
+.learn-chapter.done /* 选做章节标签（2026-08-22）：琥珀色，区别于称号/完成标签 */
+.optional-tag {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  color: #9A6A00; background: #FFF3D6; border: 1px solid #F0D48A;
+  padding: 1px 9px; border-radius: 9999px; margin-left: 6px; vertical-align: middle;
+}
+.learn-chapter-no .optional-tag { margin-left: 8px; }
+
+.learn-done-tag {
   background: var(--bg); color: var(--text-dim);
   border: 1px solid var(--border);
 }

@@ -2,6 +2,9 @@
 
 // 学AI 栏目：教程列表 + 文章详情（轻量 Markdown 渲染，无外部依赖）
 window.Views = window.Views || {};
+// 选做章节（2026-08-22）：这些章不要求实际操作，阅读了解即可。
+// 与 seed-articles.js 的章节结构对应，改动章节需同步。
+const OPTIONAL_CHAPTERS = new Set([4]);
 
 // 阅读计时器通过 window.__cancelLearnReadTimer 由 app.js 在每次路由切换时取消
 
@@ -225,7 +228,7 @@ Views.learnList = async () => {
       <div class="learn-chapter-head">
         <span class="learn-chapter-badge">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '✓' : c.chapter}</span>
         <div class="learn-chapter-titles">
-          <div class="learn-chapter-no">第 ${c.chapter} 章</div>
+          <div class="learn-chapter-no">第 ${c.chapter} 章${OPTIONAL_CHAPTERS.has(c.chapter) ? ' <span class="optional-tag">选做</span>' : ''}</div>
           <div class="learn-chapter-sub">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '已通关 · 奖励已到账' : c.articles.length + ' 篇内容 · 通关得 ' + Icons.icon('star-filled', 12) + ' 积分'}</div>
         </div>
         <span class="learn-chapter-count">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '✓ 已通关' : c.articles.length + ' 篇'}</span>
@@ -293,7 +296,7 @@ Views.learnArticle = async (slug) => {
     <a class="btn btn-sm btn-ghost learn-back" href="#/learn">← 返回目录</a>
     <article class="card learn-article">
       <div class="learn-article-head">
-        <div class="learn-article-chapter">第 ${article.chapter} 章</div>
+        <div class="learn-article-chapter">第 ${article.chapter} 章${OPTIONAL_CHAPTERS.has(article.chapter) ? ' <span class="optional-tag">选做</span>' : ''}</div>
         <h1 class="learn-article-title">${escapeHtml(article.title)}</h1>
         ${article.summary ? `<p class="learn-article-summary">${escapeHtml(article.summary)}</p>` : ''}
       </div>
