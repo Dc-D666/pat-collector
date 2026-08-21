@@ -720,7 +720,18 @@ Views.files = () => {
   }
 
   async function connectGithub() {
-    // 先开空窗口（保持用户手势，防弹窗拦截），再请求授权链接并跳转
+    // 移动端（QQ/微信内置浏览器等无可靠弹窗模型，window.open 常返回 null 或行为异常）：
+    // 直接整页跳转 GitHub 授权，授权后回调结果页自动跳回 /#/files，本页加载时自动刷新连接状态。
+    // （2026-08-22 修复：此前依赖弹窗 + postMessage，手机端 opener 缺失导致「完不成」）
+    const isMobile = /Android|iPhone|iPad|iPod|MQQBrowser|MicroMessenger|Mobile/i.test(navigator.userAgent);
+    if (isMobile) {
+      let data;
+      try { data = await API.get('/api/github/oauth/start'); }
+      catch (err) { toast(err.message); return; }
+      location.href = data.url;
+      return;
+    }
+    // 桌面：先开空窗口（保持用户手势，防弹窗拦截），再请求授权链接并跳转
     const win = window.open('', '_blank', 'width=640,height=760');
     let data;
     try { data = await API.get('/api/github/oauth/start'); }

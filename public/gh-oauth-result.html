@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GitHub 授权结果</title>
+  <style>
+    html, body { margin: 0; min-height: 100%; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    body { display: flex; align-items: center; justify-content: center; background: #FAF7F0; }
+    .card {
+      width: 100%; max-width: 360px; margin: 24px; padding: 28px 22px;
+      background: #fff; border-radius: 18px; box-shadow: 0 10px 30px rgba(59,51,43,.1);
+      text-align: center;
+    }
+    .icon { font-size: 40px; }
+    .msg { font-size: 15px; font-weight: 600; margin: 14px 0 6px; color: #333; }
+    .sub { font-size: 12.5px; color: #999; line-height: 1.7; }
+    .btn {
+      display: inline-block; margin-top: 16px; padding: 10px 26px; border-radius: 12px;
+      background: #0052D9; color: #fff; font-size: 14px; font-weight: 600;
+      text-decoration: none; border: none; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon" id="icon">⏳</div>
+    <div class="msg" id="msg">处理中…</div>
+    <div class="sub" id="sub"></div>
+    <a class="btn" href="/#/files" id="back-btn" style="display:none;">返回我的项目</a>
+  </div>
+  <script>
+  // GitHub OAuth 结果页（2026-08-22）：
+  // 双模式——弹窗（桌面，window.opener 存在）：postMessage 通知主页面并自动关闭；
+  // 整页（手机 QQ/微信内置浏览器无弹窗）：直接展示结果并自动跳回 /#/files，
+  // 我的项目页加载时会自动刷新 GitHub 连接状态。
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var ok = q.get('ok') === '1';
+    var msg = q.get('msg') || (ok ? 'GitHub 连接成功' : 'GitHub 连接失败');
+    document.getElementById('icon').textContent = ok ? '✅' : '⚠️';
+    document.getElementById('msg').textContent = msg;
+    if (window.opener) {
+      // 弹窗模式：通知 opener（主页面刷新状态）后关闭
+      try {
+        window.opener.postMessage({ type: 'github-oauth', ok: ok, message: msg }, '*');
+      } catch (e) { /* ignore */ }
+      document.getElementById('sub').textContent = '此窗口即将自动关闭，请回到平台继续操作';
+      setTimeout(function () { try { window.close(); } catch (e) {} }, 900);
+    } else {
+      // 整页模式（手机内置浏览器）：展示结果，自动跳回我的项目
+      document.getElementById('sub').textContent = ok
+        ? '即将自动返回我的项目…'
+        : '请回到我的项目页重试';
+      document.getElementById('back-btn').style.display = 'inline-block';
+      if (ok) setTimeout(function () { location.href = '/#/files'; }, 2000);
+    }
+  })();
+  </script>
+</body>
+</html>

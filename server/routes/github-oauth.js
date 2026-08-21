@@ -148,25 +148,11 @@ router.get(
   })
 );
 
-// 弹窗结果页：postMessage 给 opener（前端刷新状态）后自动关闭
+// 结果页（2026-08-22）：统一重定向到 /gh-oauth-result.html，由页面按环境分派——
+// 弹窗（window.opener 存在）→ postMessage 通知主页面后自动关闭；
+// 整页（手机 QQ/微信内置浏览器，无弹窗）→ 展示结果并自动跳回 /#/files。
 function sendPopupResult(res, ok, message) {
-  res.set('Content-Type', 'text/html; charset=utf-8');
-  const safe = escapeHtml(message);
-  const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>连接 GitHub</title>
-<body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:90vh;margin:0;color:#333;">
-<div style="text-align:center;">
-  <p style="font-size:18px;font-weight:600;">${ok ? '✅' : '⚠️'} ${safe}</p>
-  <p style="color:#999;font-size:13px;">${ok ? '此窗口即将自动关闭，请回到平台继续操作' : ''}</p>
-</div>
-<script>
-  try {
-    if (window.opener) {
-      window.opener.postMessage({ type: 'github-oauth', ok: ${ok ? 'true' : 'false'}, message: ${JSON.stringify(message)} }, '*');
-    }
-  } catch (e) {}
-  setTimeout(function(){ window.close(); }, ${ok ? 800 : 2500});
-</script></body></html>`;
-  res.send(html);
+  res.redirect('/gh-oauth-result.html?ok=' + (ok ? '1' : '0') + '&msg=' + encodeURIComponent(message));
 }
 
 function escapeHtml(s) {
