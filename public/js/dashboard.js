@@ -61,7 +61,7 @@ Views.files = () => {
         <div class="card">
           <div style="margin-bottom:12px;">
             <h2 style="margin:0;font-size:17px;">${Icons.icon('link', 18)} GitHub 项目</h2>
-            <div style="font-size:12px;color:var(--text-dim);margin-top:4px;line-height:1.7;">从你的 GitHub 仓库选择公开项目提交，验证通过 +25⭐（作品文件 + GitHub 项目合计最多 5 个）；Fork 无法通过验证。</div>
+            <div style="font-size:12px;color:var(--text-dim);margin-top:4px;line-height:1.7;">从你的 GitHub 仓库选择公开项目提交，验证通过 +25 ${Icons.icon('star-filled', 12)}（作品文件 + GitHub 项目合计最多 5 个）；Fork 无法通过验证。</div>
             <div id="lk-gh-status" style="margin-top:10px;"></div>
           </div>
           <div id="lk-fields" style="opacity:.5;">
@@ -840,7 +840,7 @@ Views.files = () => {
       if (cb) cb.onclick = connectGithub;
       return;
     }
-    box.innerHTML = `✅ 已连接 GitHub。确认是你自己创建的公开项目（Fork 无法通过验证）后点「验证」，+25⭐ 自动发放。<br>
+    box.innerHTML = `✅ 已连接 GitHub。确认是你自己创建的公开项目（Fork 无法通过验证）后点「验证」，+25 ${Icons.icon('star-filled', 12)} 自动发放。<br>
       <button class="btn btn-sm btn-primary" id="lk-verify-new" style="margin-top:8px;" data-id="${l.id}">立即验证</button>`;
     const vb = document.getElementById('lk-verify-new');
     vb.onclick = async () => {

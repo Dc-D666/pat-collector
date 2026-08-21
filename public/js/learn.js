@@ -226,7 +226,7 @@ Views.learnList = async () => {
         <span class="learn-chapter-badge">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '✓' : c.chapter}</span>
         <div class="learn-chapter-titles">
           <div class="learn-chapter-no">第 ${c.chapter} 章</div>
-          <div class="learn-chapter-sub">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '已通关 · 奖励已到账' : c.articles.length + ' 篇内容 · 通关得 ⭐ 积分'}</div>
+          <div class="learn-chapter-sub">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '已通关 · 奖励已到账' : c.articles.length + ' 篇内容 · 通关得 ' + Icons.icon('star-filled', 12) + ' 积分'}</div>
         </div>
         <span class="learn-chapter-count">${progMap.get(c.chapter) && progMap.get(c.chapter).done ? '✓ 已通关' : c.articles.length + ' 篇'}</span>
         <span class="learn-done-tag" title="已完成本章学习的同学人数">${Icons.icon('user', 13)} ${c.completed_count} 人已完成</span>
@@ -331,7 +331,7 @@ Views.learnArticle = async (slug) => {
     try {
       const data = await API.post('/api/points/read', JSON.stringify({ article_id: article.id }));
       if (data.granted) {
-        toast('⏱ 阅读完成 +' + data.granted + ' ⭐');
+        toast(Icons.icon('star-filled', 14) + ' 阅读完成 +' + data.granted, { html: true });
         bumpPoints(data.points);
       }
     } catch (_) { /* 静默 */ }
@@ -386,7 +386,7 @@ function renderTasks(tasks, articleId) {
         <span class="learn-tasks-progress" id="learn-tasks-progress">0 / ${tasks.length}</span>
       </div>
       <div class="learn-tasks-bar"><div class="learn-tasks-bar-fill" id="learn-tasks-bar-fill" style="width:0%"></div></div>
-      <div class="learn-tasks-hint">完成本章全部 ${tasks.length} 个任务，可领取 20 ⭐ 积分</div>
+      <div class="learn-tasks-hint">完成本章全部 ${tasks.length} 个任务，可领取 20 ${Icons.icon('star-filled', 12)} 积分</div>
       ${tasks.map((t, i) => {
         if (t.type === 'action') {
           if (t.nfti) {
@@ -501,7 +501,7 @@ async function reportTask(articleId, taskIndex, extra) {
     const data = await API.post('/api/points/task', JSON.stringify({ article_id: articleId, task_index: taskIndex, ...(extra || {}) }));
     updateTaskProgressUI(articleId, data);
     if (data.granted) {
-      Utils.toast('🎉 本章任务全部完成 +' + data.granted + ' ⭐');
+      Utils.toast(Icons.icon('check-circle', 14) + ' 本章任务全部完成 +' + data.granted + ' ' + Icons.icon('star-filled', 14), { html: true });
       if (window.__bumpPoints) window.__bumpPoints(data.points);
     } else if (data && data.chapter_done) {
       // 已发过整章积分（重复完成）
@@ -918,7 +918,7 @@ document.addEventListener('click', async (e) => {
   }
   updateTaskProgressUI(articleId, data);
   if (data.granted) {
-    Utils.toast('🎉 本章任务全部完成 +' + data.granted + ' ⭐');
+    Utils.toast(Icons.icon('check-circle', 14) + ' 本章任务全部完成 +' + data.granted + ' ' + Icons.icon('star-filled', 14), { html: true });
     if (window.__bumpPoints) window.__bumpPoints(data.points);
   }
 });

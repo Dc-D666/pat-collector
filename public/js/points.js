@@ -13,7 +13,7 @@ Views.points = async () => {
     <div class="page">
       <div class="page-head">
         <h1 class="page-title">我的积分</h1>
-        <div class="page-sub">完成课程、提交作品、互相点赞赚 ⭐</div>
+        <div class="page-sub">完成课程、提交作品、互相点赞赚 ${Icons.icon('star-filled', 13)}</div>
       </div>
       <div id="points-content"><div class="spinner"></div></div>
     </div>`;
@@ -82,8 +82,8 @@ Views.points = async () => {
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
         <h2 style="margin:0;font-size:17px;">${Icons.icon('education', 18)} 课程毕业奖励</h2>
         ${graduate.has_claimed
-          ? '<button class="btn btn-sm" disabled>已领取 +40 ⭐</button>'
-          : `<button class="btn btn-sm btn-primary" id="grad-btn" ${graduate.eligible ? '' : 'disabled'}>领取 +40 ⭐</button>`}
+          ? '<button class="btn btn-sm" disabled>已领取 +40 ' + Icons.icon('star-filled', 13) + '</button>'
+          : `<button class="btn btn-sm btn-primary" id="grad-btn" ${graduate.eligible ? '' : 'disabled'}>领取 +40 ${Icons.icon('star-filled', 13)}</button>`}
       </div>
       <div style="font-size:13px;color:var(--text-dim);line-height:1.8;">
         读完 5 章全部课程 + 完成全部章节任务，即可领取毕业大奖。
@@ -95,10 +95,10 @@ Views.points = async () => {
     <div class="card" style="padding:16px 18px;margin-bottom:16px;">
       <h2 style="margin:0 0 8px;font-size:17px;">${Icons.icon('info-circle', 18)} 怎么赚积分</h2>
       <div style="font-size:13px;color:var(--text-dim);line-height:2;">
-        1. 提交作品文件 +25⭐（最多计 5 个）/ 提交 AI 轻应用 +15⭐（最多计 3 个）<br>
-        2. 主动点赞他人 +2⭐/次（每天上限 10⭐，票数不限）<br>
-        3. 你的作品被点赞 +5⭐/赞（每天上限 20⭐）<br>
-        4. 读完 5 章全部任务完成，毕业大奖 +40⭐<br>
+        1. 提交作品文件 +25 ${Icons.icon('star-filled', 12)}（最多计 5 个）/ 提交 AI 轻应用 +15 ${Icons.icon('star-filled', 12)}（最多计 3 个）<br>
+        2. 主动点赞他人 +2 ${Icons.icon('star-filled', 12)}/次（每天上限 10 ${Icons.icon('star-filled', 12)}，票数不限）<br>
+        3. 你的作品被点赞 +5 ${Icons.icon('star-filled', 12)}/赞（每天上限 20 ${Icons.icon('star-filled', 12)}）<br>
+        4. 读完 5 章全部任务完成，毕业大奖 +40 ${Icons.icon('star-filled', 12)}<br>
         5. 连续点击顶栏的积分徽章 5 次，有惊喜
       </div>
     </div>
@@ -117,7 +117,7 @@ Views.points = async () => {
             <span class="lb-rank">${i < 3 ? medal[i] : '#' + (i + 1)}</span>
             <span class="lb-name">${escapeHtml(u.display_name)}${u.title_tag ? `<span class="title-tag" style="margin-left:6px;">${escapeHtml(u.title_tag)}</span>` : ''}</span>
             <span class="lb-class">${escapeHtml(u.class_name)}班</span>
-            <span class="lb-points">⭐ ${u.points}</span>
+            <span class="lb-points">${Icons.icon('star-filled', 14)} ${u.points}</span>
           </div>`).join('')
         : `<div class="empty" style="padding:20px;">还没有人获得积分，快来抢第一！</div>`}
       </div>
@@ -134,7 +134,7 @@ Views.points = async () => {
             <span class="lb-rank">${g.rank <= 3 ? medal[g.rank - 1] : '#' + g.rank}</span>
             <span class="lb-name">${escapeHtml(g.grade)}</span>
             <span class="lb-class">${g.student_count} 人 · 人均 ${g.avg_points}</span>
-            <span class="lb-points">⭐ ${g.total_points}</span>
+            <span class="lb-points">${Icons.icon('star-filled', 14)} ${g.total_points}</span>
           </div>`).join('')}
       </div>
 
@@ -145,7 +145,7 @@ Views.points = async () => {
             <span class="lb-rank">${c.rank <= 3 ? medal[c.rank - 1] : '#' + c.rank}</span>
             <span class="lb-name">${escapeHtml(c.class_name)}班</span>
             <span class="lb-class">${c.student_count} 人 · 人均 ${c.avg_points}</span>
-            <span class="lb-points">⭐ ${c.total_points}</span>
+            <span class="lb-points">${Icons.icon('star-filled', 14)} ${c.total_points}</span>
           </div>`).join('') : `<div class="empty" style="padding:20px;">还没有班级获得积分，快来拉高班级总分！</div>`}
       </div>
     </div>
@@ -163,7 +163,7 @@ Views.points = async () => {
           <div class="lb-row">
             <span class="lb-reason">${escapeHtml(l.reason_text)}${zero ? `<button class="lb-info" type="button" data-hint="${zeroHint}" title="${zeroHint}" aria-label="${zeroHint}">${Icons.icon('info-circle', 14)}</button>` : ''}</span>
             <span class="lb-time">${formatTime(l.created_at)}</span>
-            <span class="lb-points" style="color:${l.amount > 0 ? 'var(--success)' : (l.amount < 0 ? 'var(--danger)' : 'var(--text-dim)')};">${l.amount > 0 ? '+' : ''}${l.amount} ⭐</span>
+            <span class="lb-points" style="color:${l.amount > 0 ? 'var(--success)' : (l.amount < 0 ? 'var(--danger)' : 'var(--text-dim)')};">${l.amount > 0 ? '+' : ''}${l.amount} ${Icons.icon('star-filled', 14)}</span>
           </div>`;
         }).join('')}
       </div>` : `<div class="empty" style="padding:20px;">还没有积分记录</div>`}
@@ -189,7 +189,7 @@ Views.points = async () => {
               <span class="lb-rank">${i < 3 ? medal[i] : '#' + (i + 1)}</span>
               <span class="lb-name">${escapeHtml(u.display_name)}${u.title_tag ? `<span class="title-tag" style="margin-left:6px;">${escapeHtml(u.title_tag)}</span>` : ''}</span>
               <span class="lb-class">${escapeHtml(u.class_name)}班</span>
-              <span class="lb-points">⭐ ${u.points}</span>
+              <span class="lb-points">${Icons.icon('star-filled', 14)} ${u.points}</span>
             </div>`).join('')
           : `<div class="empty" style="padding:20px;">还没有人获得积分，快来抢第一！</div>`;
         }
@@ -216,7 +216,7 @@ Views.points = async () => {
       try {
         const r = await API.post('/api/points/graduate', '{}');
         if (r.granted) {
-          toast('毕业奖励 +40 ⭐');
+          toast(Icons.icon('education', 14) + ' 毕业奖励 +40 ' + Icons.icon('star-filled', 14), { html: true });
           refreshPoints();
           setTimeout(() => Views.points(), 600);
         } else {

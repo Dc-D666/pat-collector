@@ -106,7 +106,7 @@ Views.classWall = async () => {
             </div>
             <div class="file-actions">
               <button class="like-btn${p.liked_by_me ? ' liked' : ''}" data-like="${p.type}:${p.id}"
-                ${likeDisabled ? 'disabled' : ''} title="${p.is_mine ? '不能给自己点赞' : (p.liked_by_me ? '已点赞' : '点赞支持一下（+2⭐）')}">
+                ${likeDisabled ? 'disabled' : ''} title="${p.is_mine ? '不能给自己点赞' : (p.liked_by_me ? '已点赞' : '点赞支持一下（+2 积分）')}">
                 ${p.liked_by_me ? Icons.icon('heart-filled', 15) : Icons.icon('heart', 15)}<span>${p.like_count || 0}</span>
               </button>
               ${isFile
@@ -144,7 +144,7 @@ Views.classWall = async () => {
             num.textContent = (Number(num.textContent) || 0) + 1;
             b.innerHTML = Icons.icon('heart-filled', 15) + `<span>${num.textContent}</span>`;
             b.title = '已点赞';
-            toast(r.author_gained ? '点赞成功 ❤️ 作者 +2⭐' : '点赞成功 ❤️');
+            toast((r.author_gained ? Icons.icon('heart-filled', 14) + ' 点赞成功 作者 +2 ' + Icons.icon('star-filled', 14) : Icons.icon('heart-filled', 14) + ' 点赞成功'), { html: true });
           } else {
             b.disabled = false;
           }

@@ -135,14 +135,14 @@ window.App = (() => {
       try {
         const r = await API.post('/api/points/easter-egg', '{}');
         if (r && r.ok) {
-          Utils.toast('🎉 发现彩蛋！+5 ⭐');
+          Utils.toast(Icons.icon('gift', 14) + ' 发现彩蛋！+5 ' + Icons.icon('star-filled', 14), { html: true });
           const u = API.getUser();
           if (u) {
             if (typeof r.points === 'number') u.points = r.points;
             API.setUser(u);
           }
           if (r.points != null) {
-            document.querySelectorAll('.points-badge').forEach((b) => { b.textContent = '⭐ ' + r.points; });
+            document.querySelectorAll('.points-badge').forEach((b) => { b.innerHTML = Icons.icon('star-filled', 14) + ' ' + r.points; });
           }
         } else {
           Utils.toast('彩蛋已经领过啦 😉');

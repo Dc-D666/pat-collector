@@ -89,11 +89,14 @@ window.Utils = (() => {
   }
 
   // ---- Toast ----
-  function toast(message) {
+  // opts.html = true：按 HTML 渲染（仅限内部拼接的受信内容，如含 Icons SVG 的消息）；
+  // 默认 textContent（安全，防注入）
+  function toast(message, opts) {
     const wrap = document.getElementById('toast-root');
     const el = document.createElement('div');
     el.className = 'toast';
-    el.textContent = message;
+    if (opts && opts.html) el.innerHTML = message;
+    else el.textContent = message;
     wrap.appendChild(el);
     setTimeout(() => el.remove(), 2600);
   }

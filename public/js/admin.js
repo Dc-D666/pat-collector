@@ -823,7 +823,7 @@ Views.admin = (page) => {
   async function loadJudge() {
     content.innerHTML = `
       <div class="card" style="padding:16px 18px;margin-bottom:14px;">
-        <div class="file-list-head"><span>🧑‍⚖️ 评审打分（创意40% · 内容30% · 完成20% · 价值观10%｜满分 300⭐｜综合 &lt;6 不兑现）</span></div>
+        <div class="file-list-head"><span>${Icons.icon('certificate', 16)} 评审打分（创意40% · 内容30% · 完成20% · 价值观10%｜满分 300 ${Icons.icon('star-filled', 13)}｜综合 &lt;6 不兑现）</span></div>
         <div class="form-error" id="aj-error" style="margin-top:6px;"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0;">
           <select id="aj-type" style="padding:9px;border:1px solid var(--border);border-radius:10px;font-size:14px;">
@@ -880,7 +880,7 @@ Views.admin = (page) => {
       if (!valid) { previewEl.textContent = '请完整输入 0-10 的整数分数'; return; }
       t = Math.round(t * 100) / 100;
       const pts = t < 6 ? 0 : Math.round(Math.round(t * 100) * 30 / 100);
-      previewEl.textContent = `综合 ${t.toFixed(2)} / 10 分 → 评审积分 ${pts} ⭐${t < 6 ? '（低于 6 分不兑现）' : ''}`;
+      previewEl.innerHTML = `综合 ${t.toFixed(2)} / 10 分 → 评审积分 ${pts} ${Icons.icon('star-filled', 14)}${t < 6 ? '（低于 6 分不兑现）' : ''}`;
     };
     JUDGE_DIMS.forEach((d) => {
       const el = document.getElementById('aj-' + d.key);
@@ -935,7 +935,7 @@ Views.admin = (page) => {
             const el = document.getElementById('aj-' + d.key);
             if (sc[d.key] != null) el.value = sc[d.key];
           });
-          selEl.textContent += `（已评审：综合 ${r.review.total} 分 / +${r.review.points}⭐，重新提交将覆盖并自动补/扣差额）`;
+          selEl.textContent += `（已评审：综合 ${r.review.total} 分 / +${r.review.points} 积分，重新提交将覆盖并自动补/扣差额）`;
         }
       } catch (_) { /* ignore */ }
       calc();
@@ -1038,7 +1038,7 @@ Views.admin = (page) => {
         <div class="file-row">
           <div class="file-info">
             <div class="file-name" style="font-size:13px;">${escapeHtml(title)} <span class="audit-tag">${r.ref_type === 'file' ? '文件' : '轻应用'}#${r.ref_id}</span> <span class="audit-tag">综合 ${r.total} 分</span></div>
-            <div class="file-meta">${escapeHtml(r.owner_name || '')}${r.class_name ? ' · ' + escapeHtml(r.class_name) + '班' : ''} · 评审积分 +${r.points}⭐ · ${formatTime(r.updated_at)}</div>
+            <div class="file-meta">${escapeHtml(r.owner_name || '')}${r.class_name ? ' · ' + escapeHtml(r.class_name) + '班' : ''} · 评审积分 +${r.points} ${Icons.icon('star-filled', 13)} · ${formatTime(r.updated_at)}</div>
           </div>
           <button class="btn btn-sm btn-ghost" data-rejudge="${r.ref_type}:${r.ref_id}">重新评审</button>
         </div>`;
