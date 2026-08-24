@@ -194,10 +194,12 @@ async function streamChat(cfg, model, prompt, onDelta, signal, prevHtml) {
 }
 
 // 流式入口：主模型失败且未产出任何内容时回退模型重来；结束后提取校验
-async function generateAppHtmlStream(idea, onDelta, signal) {
+async function generateAppHtmlStream(idea, onDelta, signal, prevHtml) {
   const cfg = providerCfg();
   if (!cfg.apiKey) throw new Error('未配置生成模型 API Key');
   const prompt = String(idea || '').slice(0, config.genApp.maxIdeaChars);
+  // 上一版代码（改进模式上下文），截断防超长挤占预算
+  const prev = String(prevHtml || '').slice(0, 60000);
 
   let raw;
   let gotAny = false;
