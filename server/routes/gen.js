@@ -138,11 +138,14 @@ router.get('/preview/:draft_token', requireAuth, async (req, res, next) => {
     if (!payload) return res.status(404).json({ error: '草稿不存在或已过期，请重新生成' });
     const p = genApp.draftPath(req.user.id, payload.fn);
     if (!p || !fs.existsSync(p)) return res.status(404).json({ error: '草稿文件已丢失，请重新生成' });
-    // 安全口径对齐现有 HTML 预览：CSP 禁外联 + sandbox 响应头（前端 iframe 另加 sandbox 属性）
+    // 安全口径对齐现有 HTML 预览：CSP 禁外联 + sandbox 响应头（前端 iframe 另加 sandbox 属性）。
+    // X-Frame-Options 覆盖全局中间件的 DENY：本端点就是设计给自己页面 iframe 同源嵌入的，
+    // 改为 SAMEORIGIN（仍防第三方站嵌套），否则弹窗预览会被浏览器拦截「拒绝连接」。
     res.set({
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:",
       'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'SAMEORIGIN',
     });
     res.send(await fs.promises.readFile(p, 'utf8'));
   } catch (err) {
