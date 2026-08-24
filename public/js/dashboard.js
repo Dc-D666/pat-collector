@@ -54,12 +54,12 @@ Views.files = () => {
           <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
             <label for="gen-model" style="font-size:12px;color:var(--text-dim);">生成模型</label>
             <select id="gen-model" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);">
-              <option value="glm47">GLM 4.7 Flash（稳定推荐）</option>
-              <option value="glm52">GLM-5.2（免费池，高峰易满）</option>
-              <option value="gemma4">Gemma 4 31B（免费池）</option>
-              <option value="nemotron35">Nemotron 3.5 Lightning（免费池）</option>
-              <option value="nemotronultra">Nemotron 3 Ultra 550B（免费池）</option>
-              <option value="dots3note">Dots3-Note Preview（免费池）</option>
+              <option value="inkling">Inkling 975B</option>
+              <option value="glm52">GLM-5.2 744B</option>
+              <option value="nemotronultra">Nemotron 3 Ultra 550B</option>
+              <option value="dots3note">Dots3-Note Preview 280B</option>
+              <option value="nemotron35">Nemotron 3.5 Lightning 30B</option>
+              <option value="glm47">GLM 4.7 Flash 30B（稳定推荐）</option>
             </select>
           </div>
           <textarea id="gen-log" rows="4" readonly placeholder="AI 思考与输出过程（思考结束自动清空，开始展示代码）…" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
@@ -237,6 +237,7 @@ Views.files = () => {
                 logEl.scrollTop = logEl.scrollHeight;
               } else if (ev.type === 'error') {
                 streamErr = new Error(ev.message || '生成失败');
+                if (ev.code === 'model_unavailable') { streamErr.modelUnavailable = true; streamErr.suppress = true; }
               } else if (ev.type === 'done') {
                 draftToken = ev.draft_token;
                 lastHtml = ev.html || '';
@@ -245,12 +246,22 @@ Views.files = () => {
             } catch (_) { /* 忽略不完整块 */ }
           }
         }
-        if (streamErr) throw streamErr;
+        if (streamErr) {
+          if (streamErr.modelUnavailable) {
+            // 上游模型限流：卡片内显著红条提醒，引导换模型
+            errEl.innerHTML = '⚠️ <strong>该模型暂不可用，请更换模型。</strong>（免费模型高峰期限流，稍后可再试或选其它模型）';
+            errEl.classList.add('show');
+            toast('⚠️ 该模型暂不可用，请更换其它模型');
+          }
+          throw streamErr.suppress ? streamErr : streamErr;
+        }
         if (!draftToken) throw new Error('生成中断，请重试');
         showGenPreview({ draft_token: draftToken, preview_url: '/api/gen/preview/' + encodeURIComponent(draftToken) });
       } catch (err) {
-        errEl.textContent = (err && err.name === 'AbortError') ? '请求超时，请重试' : (err.message || '生成失败，请稍后再试');
-        errEl.classList.add('show');
+        if (!(err && err.suppress)) { // model_unavailable 已有显著提醒，不覆盖
+          errEl.textContent = (err && err.name === 'AbortError') ? '请求超时，请重试' : (err.message || '生成失败，请稍后再试');
+          errEl.classList.add('show');
+        }
       } finally {
         btn.disabled = false;
         btn.textContent = '✨ 开始生成';

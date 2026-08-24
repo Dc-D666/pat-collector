@@ -123,6 +123,10 @@ router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, 
         send({ type: 'error', message: '生成超时，请稍后重试' });
       } else if (err.code === 'GEN_FORMAT') {
         send({ type: 'error', message: err.message });
+      } else if (err.code === 'MODEL_429') {
+        // 上游模型限流：不静默回退（用户拍板 2026-08-25），显著提醒更换模型
+        console.warn('[gen] 模型限流：', err.message);
+        send({ type: 'error', code: 'model_unavailable', message: '该模型暂不可用，请更换模型' });
       } else {
         console.error('[gen] 流式生成失败：', err.message);
         send({ type: 'error', message: '生成服务暂时不可用，请稍后再试' });

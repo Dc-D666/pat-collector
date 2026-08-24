@@ -32,9 +32,8 @@ function providerCfg(modelId) {
       apiKey: config.openrouter.apiKey,
       baseUrl: config.openrouter.baseUrl,
       model: sel.model,
-      // 免费池高峰期常见 429：统一回退官方 GLM（稳定可用），保证学生总能出结果
-      fallbackModel: config.glm.model,
-      fallbackViaOfficialGlm: true,
+      fallbackModel: null, // 不静默回退：429 时由路由层向前端发显著提醒（用户拍板 2026-08-25）
+      agentUA: !!sel.agentUA,
     };
   }
   if (sel.provider === 'deepseek') {
@@ -63,13 +62,16 @@ function thinkingParam(model) {
 
 // 模型白名单（2026-08-25）：用户可选的生成模型。id 为前端提交值（服务端白名单校验，绝不透传原始字符串）。
 // glm47 走智谱官方；其余走 OpenRouter（免费共享池，高峰期可能上游 429，自动回退官方 GLM）。
+// 模型白名单（2026-08-25）：用户可选的生成模型。id 为前端提交值（服务端白名单校验，绝不透传原始字符串）。
+// glm47 走智谱官方；其余走 OpenRouter 免费共享池（高峰期可能上游 429——前端显著提醒更换模型）。
+// inkling 特殊：OpenRouter 仅允许 agentic 客户端调用，请求时需携带 coding-agent 的 User-Agent（见 callChat/streamChat）。
 const GEN_MODELS = {
-  'glm47':         { label: 'GLM 4.7 Flash',          provider: 'glm',        model: config.glm.model,            fallbackModel: config.glm.fallbackModel },
-  'glm52':         { label: 'GLM-5.2',                provider: 'openrouter', model: 'z-ai/glm-5.2:free',         fallbackModel: null },
-  'gemma4':        { label: 'Gemma 4 31B',            provider: 'openrouter', model: 'google/gemma-4-31b-it:free', fallbackModel: null },
-  'nemotron35':    { label: 'Nemotron 3.5 Lightning', provider: 'openrouter', model: 'nvidia/nemotron-3.5-lightning:free', fallbackModel: null },
+  'inkling':       { label: 'Inkling 975B',           provider: 'openrouter', model: 'thinkingmachines/inkling:free',        fallbackModel: null, agentUA: true },
+  'glm52':         { label: 'GLM-5.2 744B',           provider: 'openrouter', model: 'z-ai/glm-5.2:free',                    fallbackModel: null },
   'nemotronultra': { label: 'Nemotron 3 Ultra 550B',  provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', fallbackModel: null },
-  'dots3note':     { label: 'Dots3-Note Preview',     provider: 'openrouter', model: 'dots-studio/dots-3-note-preview:free', fallbackModel: null },
+  'dots3note':     { label: 'Dots3-Note Preview 280B',provider: 'openrouter', model: 'dots-studio/dots-3-note-preview:free', fallbackModel: null },
+  'nemotron35':    { label: 'Nemotron 3.5 Lightning 30B', provider: 'openrouter', model: 'nvidia/nemotron-3.5-lightning:free', fallbackModel: null },
+  'glm47':         { label: 'GLM 4.7 Flash 30B',      provider: 'glm',        model: config.glm.model,                       fallbackModel: config.glm.fallbackModel },
 };
 
 function resolveGenModel(id) {
@@ -86,18 +88,25 @@ function buildUserPrompt(prompt, prevHtml) {
 
 const GEN_MAX_TOKENS = 32000;
 
+// 请求头：OpenRouter 推荐 Referer/Title 标识应用；inkling 等仅限 agentic 客户端的模型需带 coding-agent 的 UA
+function apiHeaders(cfg) {
+  const h = {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer ' + cfg.apiKey,
+    'HTTP-Referer': 'https://pat.weaxi.cn',
+    'X-Title': 'PatPlayer',
+  };
+  if (cfg.agentUA) h['User-Agent'] = 'claude-cli/2.0.14 (external, cli)';
+  return h;
+}
+
 async function callChat(cfg, model, prompt, prevHtml) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.genApp.timeoutMs);
   try {
     const res = await fetch(cfg.baseUrl + '/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + cfg.apiKey,
-        'HTTP-Referer': 'https://pat.weaxi.cn',
-        'X-Title': 'PatPlayer',
-      },
+      headers: apiHeaders(cfg),
       body: JSON.stringify({
         model,
         messages: [
@@ -112,7 +121,9 @@ async function callChat(cfg, model, prompt, prevHtml) {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      throw new Error('HTTP ' + res.status + ' ' + body.slice(0, 200));
+      const e = new Error('HTTP ' + res.status + ' ' + body.slice(0, 200));
+      if (res.status === 429) e.code = 'MODEL_429'; // 上游模型限流：前端需显著提醒更换模型
+      throw e;
     }
     const data = await res.json();
     const out = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
@@ -176,12 +187,7 @@ async function generateAppHtml(idea) {
 async function streamChat(cfg, model, prompt, onDelta, signal, prevHtml) {
   const res = await fetch(cfg.baseUrl + '/chat/completions', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + cfg.apiKey,
-      'HTTP-Referer': 'https://pat.weaxi.cn',
-      'X-Title': 'PatPlayer',
-    },
+    headers: apiHeaders(cfg),
     body: JSON.stringify({
       model,
       messages: [
@@ -197,7 +203,9 @@ async function streamChat(cfg, model, prompt, onDelta, signal, prevHtml) {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error('HTTP ' + res.status + ' ' + body.slice(0, 200));
+    const e = new Error('HTTP ' + res.status + ' ' + body.slice(0, 200));
+    if (res.status === 429) e.code = 'MODEL_429'; // 上游模型限流：前端需显著提醒更换模型
+    throw e;
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
