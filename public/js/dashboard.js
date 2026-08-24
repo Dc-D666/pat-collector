@@ -140,6 +140,9 @@ Views.files = () => {
     ideaEl.addEventListener('focus', () => {
       if (!ideaEl.value && hintEl) hintEl.textContent = '💡 没灵感？试试：' + GEN_EXAMPLES[Math.floor(Math.random() * GEN_EXAMPLES.length)];
     });
+    // 当前草稿令牌：提在 initGenApp 层级，供 showGenPreview 内的重新生成/提交按钮访问
+    // （此前误声明在 btn.onclick 内部，弹窗按钮引用时抛 ReferenceError 导致“无响应”）
+    let draftToken = '';
     btn.onclick = async () => {
       errEl.classList.remove('show');
       const idea = ideaEl.value.trim();
@@ -151,7 +154,6 @@ Views.files = () => {
       // 流式输出框：展示模型逐段输出的内容，自动滚动到底部（用户可手动滚动）
       logEl.style.display = '';
       logEl.value = '';
-      let draftToken = '';
       try {
         // 手动 fetch 消费 SSE（API.request 不支持流式读取）；Bearer 走请求头
         const controller = new AbortController();
@@ -223,9 +225,13 @@ Views.files = () => {
           <button class="btn btn-primary" id="gen-commit">✅ 满意，提交</button>
         </div>`);
       document.getElementById('gen-regen').onclick = () => {
-        // 作废草稿并关闭弹层（输入框保留原描述，可直接调整后再生成）
+        // 作废草稿并关闭弹层：从零重新生成（非增量修改）——输入框保留原描述，
+        // 可直接改几个字微调需求后重新点「开始生成」
         if (draftToken) API.del('/api/gen/draft/' + encodeURIComponent(draftToken)).catch(() => {});
         closeModal();
+        draftToken = '';
+        ideaEl.focus();
+        if (hintEl) hintEl.textContent = '✏️ 可修改描述后重新生成；越具体效果越好';
       };
       document.getElementById('gen-commit').onclick = async () => {
         const commitErr = document.getElementById('gen-commit-error');

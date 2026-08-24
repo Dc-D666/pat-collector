@@ -58,6 +58,7 @@ async function callChat(cfg, model, prompt) {
           { role: 'user', content: '请根据以下需求生成小程序：\n\n' + prompt },
         ],
         temperature: 0.6,
+        thinking: cfg.provider === "glm" ? { type: "disabled" } : undefined,
         max_tokens: 16000,
         signal: controller.signal,
       }),
@@ -139,6 +140,7 @@ async function streamChat(cfg, model, prompt, onDelta, signal) {
       ],
       temperature: 0.6,
       max_tokens: 16000,
+      thinking: cfg.provider === 'glm' ? { type: 'disabled' } : undefined, // 关闭思考模式：单文件 HTML 生成无需推理，避免挤占 token 导致截断
       stream: true,
     }),
     signal,
