@@ -64,10 +64,12 @@ function thinkingParam(model) {
 // 模型白名单（2026-08-25）：用户可选的生成模型。id 为前端提交值（服务端白名单校验，绝不透传原始字符串）。
 // glm47 走智谱官方；其余走 OpenRouter（免费共享池，高峰期可能上游 429，自动回退官方 GLM）。
 const GEN_MODELS = {
-  'glm47':      { label: 'GLM 4.7 Flash',          provider: 'glm',        model: config.glm.model,            fallbackModel: config.glm.fallbackModel },
-  'glm52':      { label: 'GLM-5.2',                provider: 'openrouter', model: 'z-ai/glm-5.2:free',         fallbackModel: null },
-  'gemma4':     { label: 'Gemma 4 31B',            provider: 'openrouter', model: 'google/gemma-4-31b-it:free', fallbackModel: null },
-  'nemotron35': { label: 'Nemotron 3.5 Lightning', provider: 'openrouter', model: 'nvidia/nemotron-3.5-lightning:free', fallbackModel: null },
+  'glm47':         { label: 'GLM 4.7 Flash',          provider: 'glm',        model: config.glm.model,            fallbackModel: config.glm.fallbackModel },
+  'glm52':         { label: 'GLM-5.2',                provider: 'openrouter', model: 'z-ai/glm-5.2:free',         fallbackModel: null },
+  'gemma4':        { label: 'Gemma 4 31B',            provider: 'openrouter', model: 'google/gemma-4-31b-it:free', fallbackModel: null },
+  'nemotron35':    { label: 'Nemotron 3.5 Lightning', provider: 'openrouter', model: 'nvidia/nemotron-3.5-lightning:free', fallbackModel: null },
+  'nemotronultra': { label: 'Nemotron 3 Ultra 550B',  provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', fallbackModel: null },
+  'dots3note':     { label: 'Dots3-Note Preview',     provider: 'openrouter', model: 'dots-studio/dots-3-note-preview:free', fallbackModel: null },
 };
 
 function resolveGenModel(id) {

@@ -58,6 +58,8 @@ Views.files = () => {
               <option value="glm52">GLM-5.2（免费池，高峰易满）</option>
               <option value="gemma4">Gemma 4 31B（免费池）</option>
               <option value="nemotron35">Nemotron 3.5 Lightning（免费池）</option>
+              <option value="nemotronultra">Nemotron 3 Ultra 550B（免费池）</option>
+              <option value="dots3note">Dots3-Note Preview（免费池）</option>
             </select>
           </div>
           <textarea id="gen-log" rows="4" readonly placeholder="AI 思考与输出过程（思考结束自动清空，开始展示代码）…" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
