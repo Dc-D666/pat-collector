@@ -153,7 +153,7 @@ function extractHtml(raw) {
   } else if (!/^<!doctype html/i.test(text) && !/^<html[\s>]/i.test(text)) {
     return null; // 完全不像 HTML
   }
-  if (!/<\/body>/i.test(text)) return null; // 结构不完整
+  // </body> 不再强制（部分模型省略闭合 body，只有 </html> 也接受——2026-08-25 实测误判）
   if (Buffer.byteLength(text, 'utf8') > config.genApp.maxHtmlBytes) return null;
   return text;
 }

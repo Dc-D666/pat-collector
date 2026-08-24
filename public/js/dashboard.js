@@ -189,7 +189,12 @@ Views.files = () => {
       try {
         // 手动 fetch 消费 SSE（API.request 不支持流式读取）；Bearer 走请求头
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 180000);
+        const timer = setTimeout(() => controller.abort(), 240000);
+        const t0 = Date.now();
+        waitTimer = setInterval(() => {
+          if (gotFirstDelta) { clearInterval(waitTimer); return; }
+          logEl.value = '⏳ 正在等待模型响应… 已等待 ' + Math.round((Date.now() - t0) / 1000) + ' 秒\n（免费模型高峰期需排队，最长约 4 分钟；不想等可直接换模型）';
+        }, 1000);
         const res = await fetch('/api/gen/app/stream', {
           method: 'POST',
           headers: {
@@ -214,14 +219,10 @@ Views.files = () => {
         let streamErr = null;
         let sawContent = false;
         let contentAcc = ''; // 正文累计（用于检测 <html 起点）
+        var waitTimer = null; // 用 var 提升到函数级：finally 里要清理（const 在 try 内声明会作用域报错）
 
         // 等待期动态反馈：首增量到达前每秒刷新（免费档排队可能很久，静默会让用户以为卡死）
         let gotFirstDelta = false;
-        const t0 = Date.now();
-        const waitTimer = setInterval(() => {
-          if (gotFirstDelta) { clearInterval(waitTimer); return; }
-          logEl.value = '⏳ 正在等待模型响应… 已等待 ' + Math.round((Date.now() - t0) / 1000) + ' 秒\n（免费模型高峰期需排队，最长约 3 分钟；不想等可直接换模型）';
-        }, 1000);
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
