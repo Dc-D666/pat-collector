@@ -55,7 +55,6 @@ router.post('/app', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, max: co
     try {
       html = await genApp.generateAppHtml(idea);
     } catch (err) {
-    } catch (err) {
       if (err.code === 'GEN_FORMAT') return res.status(422).json({ error: err.message });
       console.error('[gen] 生成失败：', err.message);
       return res.status(502).json({ error: '生成服务暂时不可用，请稍后再试' });
