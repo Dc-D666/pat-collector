@@ -55,6 +55,7 @@ router.post('/app', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, max: co
     try {
       html = await genApp.generateAppHtml(idea);
     } catch (err) {
+    } catch (err) {
       if (err.code === 'GEN_FORMAT') return res.status(422).json({ error: err.message });
       console.error('[gen] 生成失败：', err.message);
       return res.status(502).json({ error: '生成服务暂时不可用，请稍后再试' });
@@ -103,7 +104,8 @@ router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, 
         idea,
         (t, isReasoning) => send({ type: 'delta', text: t, reasoning: !!isReasoning }),
         controller.signal,
-        prevHtml
+        prevHtml,
+        req.body.model // 前端选择的模型 id（服务端白名单校验，非法值回默认）
       );
       // 新草稿覆盖旧草稿（一次只保留最新一份）
       await fs.promises.rm(genApp.userDraftDir(req.user.id), { recursive: true, force: true }).catch(() => {});

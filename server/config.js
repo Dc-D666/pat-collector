@@ -171,6 +171,12 @@ const config = {
     maxConcurrent: 3,          // 全局并发信号量（同时生成中的请求数）
     draftTtlMs: 30 * 60 * 1000,// 草稿有效期（30 分钟）
   },
+  // OpenRouter（可选模型源，2026-08-25）：国内服务器实测可直连；:free 模型共享池高峰期常见上游 429，
+  // 失败自动回退官方 GLM glm-4.7-flash。模型白名单见 genApp.js GEN_MODELS。
+  openrouter: {
+    apiKey: process.env.OPENROUTER_API_KEY || '',
+    baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+  },
   projectRoot: PROJECT_ROOT,
   classes: CLASSES,
   grades: GRADES,

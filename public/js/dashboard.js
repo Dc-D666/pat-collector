@@ -51,6 +51,15 @@ Views.files = () => {
           </div>
           <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">用一句话描述你想做的小游戏/小工具，AI 会生成一个能玩的小程序。生成的作品和频道轻应用一样计入「提交应用」积分。示例：做一个 5 以内加减法答题小游戏，每轮 5 题，答对加 1 分</div>
           <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+            <label for="gen-model" style="font-size:12px;color:var(--text-dim);">生成模型</label>
+            <select id="gen-model" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);">
+              <option value="glm47">GLM 4.7 Flash（稳定推荐）</option>
+              <option value="glm52">GLM-5.2（免费池，高峰易满）</option>
+              <option value="gemma4">Gemma 4 31B（免费池）</option>
+              <option value="nemotron35">Nemotron 3.5 Lightning（免费池）</option>
+            </select>
+          </div>
           <textarea id="gen-log" rows="4" readonly placeholder="AI 思考与输出过程（思考结束自动清空，开始展示代码）…" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
           <div class="form-error" id="gen-error"></div>
           <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
@@ -147,6 +156,15 @@ Views.files = () => {
     const errEl = document.getElementById('gen-error');
     const hintEl = document.getElementById('gen-hint');
     if (!btn || !ideaEl) return;
+    // 模型选择记忆：localStorage 持久化用户上次的选择
+    const modelSel = document.getElementById('gen-model');
+    if (modelSel) {
+      try {
+        const saved = localStorage.getItem('gen_model');
+        if (saved && modelSel.querySelector(`option[value="${saved}"]`)) modelSel.value = saved;
+        modelSel.addEventListener('change', () => localStorage.setItem('gen_model', modelSel.value));
+      } catch (_) { /* 隐私模式等场景忽略 */ }
+    }
     // 示例快捷填充：聚焦时随机提示一个示例
     ideaEl.addEventListener('focus', () => {
       if (!ideaEl.value && hintEl) hintEl.textContent = '💡 没灵感？试试：' + GEN_EXAMPLES[Math.floor(Math.random() * GEN_EXAMPLES.length)];
@@ -176,7 +194,10 @@ Views.files = () => {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + API.getToken(),
           },
-          body: JSON.stringify(regenContext ? { idea, prev_html: regenContext } : { idea }),
+          body: JSON.stringify(Object.assign(
+            regenContext ? { idea, prev_html: regenContext } : { idea },
+            { model: (document.getElementById('gen-model') || {}).value || 'glm47' }
+          )),
           signal: controller.signal,
         });
         clearTimeout(timer);
