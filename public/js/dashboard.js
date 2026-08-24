@@ -49,6 +49,9 @@ Views.files = () => {
             <h2 style="margin:0;font-size:17px;">✨ 一句话生成小程序</h2>
             <span id="gen-quota" style="font-size:12px;color:var(--text-dim);"></span>
           </div>
+          <div id="gen-slot-pills" style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
+            <span style="font-size:12px;color:var(--text-dim);margin-right:2px;">作品槽：</span>
+          </div>
           <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">描述你的想法，AI 生成一个能玩的小程序，作品计入「提交应用」积分</div>
           <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
           <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
@@ -68,6 +71,12 @@ Views.files = () => {
             <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
             <span id="gen-hint" style="font-size:12px;color:var(--text-dim);"></span>
           </div>
+          <!-- 对话记录（版本链时间线，紧凑单行式） -->
+          <details id="gen-history-box" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;">
+            <summary style="font-size:13px;cursor:pointer;color:var(--text-dim);">💬 对话记录与历史版本</summary>
+            <div id="gen-history" style="max-height:180px;overflow-y:auto;font-size:12.5px;line-height:1.9;"></div>
+          </details>
+
           <!-- 内嵌预览区（不再用弹窗）：生成成功后展示，含预览/标题/提交/重生成 -->
           <div id="gen-preview-inline" style="display:none;margin-top:12px;">
             <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📺 预览你的小程序</div>
@@ -157,17 +166,30 @@ Views.files = () => {
     const btn = document.getElementById('gen-start-btn');
     const errEl = document.getElementById('gen-error');
     const hintEl = document.getElementById('gen-hint');
+    const logEl = document.getElementById('gen-log');
     if (!btn || !ideaEl) return;
-    // 模型选择记忆：localStorage 持久化用户上次的选择
+
+    // ---- 状态：当前槽 / 各槽版本链 ----
+    let curSlot = 1;
+    let slotsData = {};
+    let activeAbort = null;
+    let waitTimer = null;
+    let curPreviewVersionId = null;
+    let draftToken = '';
+
+    try { const sv = parseInt(localStorage.getItem('gen_slot'), 10); if (sv >= 1 && sv <= 5) curSlot = sv; } catch (_) {}
+
+    // 模型选择记忆
     const modelSel = document.getElementById('gen-model');
     if (modelSel) {
       try {
         const saved = localStorage.getItem('gen_model');
         if (saved && modelSel.querySelector(`option[value="${saved}"]`)) modelSel.value = saved;
         modelSel.addEventListener('change', () => localStorage.setItem('gen_model', modelSel.value));
-      } catch (_) { /* 隐私模式等场景忽略 */ }
+      } catch (_) {}
     }
-    // 今日剩余次数展示
+
+    // 今日剩余次数
     async function loadGenQuota() {
       const el = document.getElementById('gen-quota');
       if (!el) return;
@@ -176,58 +198,138 @@ Views.files = () => {
         el.textContent = d.unlimited
           ? `今日已生成 ${d.used_today} 次 · 测试期间不限次`
           : `今天还可生成 ${Math.max(0, d.max_per_day - d.used_today)}/${d.max_per_day} 次`;
-      } catch (_) { /* 静默 */ }
+      } catch (_) {}
     }
     loadGenQuota();
 
-    // 示例快捷填充：聚焦时随机提示一个示例
+    // ---- 创作槽：胶囊 + 对话记录渲染 ----
+    function renderSlots() {
+      const box = document.getElementById('gen-slot-pills');
+      if (!box) return;
+      box.innerHTML = '<span style="font-size:12px;color:var(--text-dim);margin-right:2px;">作品槽：</span>';
+      for (let n = 1; n <= 5; n++) {
+        const d = slotsData[n] || { versions: [] };
+        const b = document.createElement('button');
+        b.className = 'btn btn-sm ' + (n === curSlot ? 'btn-primary' : 'btn-ghost');
+        b.style.padding = '3px 10px';
+        b.textContent = '槽' + n + (d.versions.length ? '·' + d.versions.length : '');
+        b.title = d.versions.length ? ('最近：' + (d.versions[0].idea || '').slice(0, 60)) : '空槽';
+        b.onclick = () => switchSlot(n);
+        box.appendChild(b);
+      }
+      const hint = document.createElement('span');
+      hint.style.cssText = 'font-size:12px;color:var(--text-dim);margin-left:4px;';
+      const cur = slotsData[curSlot];
+      hint.textContent = cur && cur.versions.length
+        ? '当前槽已迭代 ' + cur.versions.length + ' 版，AI 将基于最新版继续修改'
+        : '空槽：将从零开始创建';
+      box.appendChild(hint);
+    }
+
+    function renderHistory() {
+      const box = document.getElementById('gen-history-box');
+      const list = document.getElementById('gen-history');
+      if (!box || !list) return;
+      const vers = (slotsData[curSlot] || {}).versions || [];
+      if (!vers.length) { box.style.display = 'none'; list.innerHTML = ''; return; }
+      box.style.display = '';
+      list.innerHTML = vers.map((v) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:2px 0;">
+          <span style="color:${v.id === curPreviewVersionId ? 'var(--primary)' : 'inherit'};flex-shrink:0;font-weight:600;">v${v.seq}</span>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${Utils.escapeHtml(v.idea)}">${Utils.escapeHtml(v.idea)}</span>
+          <span style="color:var(--text-dim);flex-shrink:0;">${Utils.formatTime(v.created_at)}</span>
+          <button class="btn btn-sm btn-ghost" data-vprev="${v.id}" style="padding:1px 8px;flex-shrink:0;">预览</button>
+        </div>`).join('');
+      list.querySelectorAll('[data-vprev]').forEach((b) => {
+        b.onclick = () => previewHistoryVersion(parseInt(b.dataset.vprev, 10));
+      });
+    }
+
+    async function refreshSlots() {
+      try {
+        const data = await API.get('/api/gen/slots');
+        slotsData = {};
+        for (const sl of data.slots) slotsData[sl.slot_no] = sl;
+      } catch (_) {}
+      renderSlots();
+      renderHistory();
+    }
+
+    function switchSlot(n) {
+      if (n === curSlot) return;
+      curSlot = n;
+      try { localStorage.setItem('gen_slot', String(n)); } catch (_) {}
+      // 切槽即切上下文：中止进行中请求，清空工作区
+      if (activeAbort) { try { activeAbort.abort(); } catch (_) {} activeAbort = null; }
+      clearInterval(waitTimer);
+      draftToken = '';
+      curPreviewVersionId = null;
+      logEl.value = '';
+      logEl.style.display = 'none';
+      document.getElementById('gen-preview-inline').style.display = 'none';
+      errEl.classList.remove('show');
+      renderSlots();
+      renderHistory();
+    }
+
+    // 回看历史版本：签发短时令牌 → iframe 加载
+    async function previewHistoryVersion(vid) {
+      try {
+        const d = await API.get('/api/gen/version/' + vid + '/token');
+        curPreviewVersionId = vid;
+        showInlinePreview(d.preview_url);
+        renderHistory();
+        const v = (slotsData[curSlot].versions.find((x) => x.id === vid) || {});
+        if (hintEl) hintEl.textContent = '👁 正在预览历史版本 v' + v.seq + '；点「开始生成」将基于最新版继续改进';
+      } catch (err) { toast(err.message || '预览失败'); }
+    }
+
+    function showInlinePreview(previewUrl) {
+      const box = document.getElementById('gen-preview-inline');
+      if (!box) return;
+      box.style.display = '';
+      const frame = document.getElementById('gen-preview-frame');
+      if (frame) frame.src = previewUrl;
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
     ideaEl.addEventListener('focus', () => {
       if (!ideaEl.value && hintEl) hintEl.textContent = '💡 没灵感？试试：' + GEN_EXAMPLES[Math.floor(Math.random() * GEN_EXAMPLES.length)];
     });
-    // 当前草稿令牌 + 上一版代码（供「修改后重新生成」携带上下文）
-    let draftToken = '';
-    let lastHtml = '';        // 最近一次生成的完整 HTML（done 事件下发）
-    let regenContext = null;  // 点「不满意，修改后重新生成」后置为 lastHtml，下一次请求作为上下文
-    // waitTimer/activeAbort 提到 try 外：finally 清理与「重新生成」中止都要访问
-    let waitTimer = null;
-    let activeAbort = null;
+
     btn.onclick = async () => {
       errEl.classList.remove('show');
       const idea = ideaEl.value.trim();
       if (!idea) { errEl.textContent = '请先用一句话描述你的想法'; errEl.classList.add('show'); return; }
-      const logEl = document.getElementById('gen-log');
       btn.disabled = true;
       btn.textContent = '⏳ AI 正在编写…';
-      if (hintEl) hintEl.textContent = '约需 30 秒～ 2 分钟，可实时查看下方输出';
-      // 流式输出框：展示模型逐段输出的内容，自动滚动到底部（用户可手动滚动）
+      if (hintEl) hintEl.textContent = '约需 30 秒～ 3 分钟，可实时查看下方输出；同槽内将基于最新版继续迭代';
       logEl.style.display = '';
       logEl.value = '';
+      let draftTokenNew = '';
       try {
-        // 手动 fetch 消费 SSE（API.request 不支持流式读取）；Bearer 走请求头
         const controller = new AbortController();
         activeAbort = controller;
         const timer = setTimeout(() => controller.abort(), 240000);
         const t0 = Date.now();
         waitTimer = setInterval(() => {
-          if (gotFirstDelta) { clearInterval(waitTimer); return; }
           logEl.value = '⏳ 正在等待模型响应… 已等待 ' + Math.round((Date.now() - t0) / 1000) + ' 秒\n（免费模型高峰期需排队，最长约 4 分钟；不想等可直接换模型）';
         }, 1000);
+
         const res = await fetch('/api/gen/app/stream', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + API.getToken(),
           },
-          body: JSON.stringify(Object.assign(
-            (regenContext || lastHtml) ? { idea, prev_html: regenContext || lastHtml } : { idea },
-            { model: (document.getElementById('gen-model') || {}).value || 'glm47' }
-          )),
+          body: JSON.stringify({ idea, model: (modelSel || {}).value || 'glm47', slot_no: curSlot }),
           signal: controller.signal,
         });
         clearTimeout(timer);
         if (!res.ok || !res.body) {
+          clearInterval(waitTimer);
           let msg = '生成失败，请稍后再试';
-          try { msg = (await res.json()).error || msg; } catch (_) { /* ignore */ }
+          try { msg = (await res.json()).error || msg; } catch (_) {}
           throw new Error(msg);
         }
         const reader = res.body.getReader();
@@ -235,9 +337,7 @@ Views.files = () => {
         let buf = '';
         let streamErr = null;
         let sawContent = false;
-        let contentAcc = ''; // 正文累计（用于检测 <html 起点）
-
-        // 等待期动态反馈：首增量到达前每秒刷新（免费档排队可能很久，静默会让用户以为卡死）
+        let contentAcc = '';
         let gotFirstDelta = false;
         while (true) {
           const { done, value } = await reader.read();
@@ -250,17 +350,12 @@ Views.files = () => {
             if (!chunk.startsWith('data:')) continue;
             try {
               const ev = JSON.parse(chunk.slice(5).trim());
-              if (ev.type === 'start') {
-                // 链路已通（静默：仅作占位，不向用户展示）
-              } else if (ev.type === 'delta') {
+              if (ev.type === 'delta') {
                 if (!gotFirstDelta) { gotFirstDelta = true; clearInterval(waitTimer); logEl.value = ''; }
                 if (ev.reasoning) {
-                  // 独立思考字段（GLM 4.7 等）：直接展示
                   logEl.value += ev.text;
                   contentAcc = '';
                 } else {
-                  // 正文：部分模型会把思考混在正文里（如 Nemotron 3.5）——
-                  // 归一化处理：<html 出现前的内容一律视为前置说明；出现后清空改显代码
                   contentAcc += ev.text;
                   const pos = contentAcc.search(/<html[\s>]|<!doctype/i);
                   if (!sawContent && pos >= 0) { logEl.value = ''; sawContent = true; }
@@ -271,79 +366,74 @@ Views.files = () => {
                 streamErr = new Error(ev.message || '生成失败');
                 if (ev.code === 'model_unavailable') { streamErr.modelUnavailable = true; streamErr.suppress = true; }
               } else if (ev.type === 'done') {
-                draftToken = ev.draft_token;
-                lastHtml = ev.html || '';
-                regenContext = null;
+                draftTokenNew = ev.draft_token;
                 loadGenQuota();
               }
-            } catch (_) { /* 忽略不完整块 */ }
+            } catch (_) {}
           }
         }
         if (streamErr) {
           if (streamErr.modelUnavailable) {
-            // 上游模型限流：卡片内显著红条提醒，引导换模型
             errEl.innerHTML = '⚠️ <strong>该模型暂不可用，请更换模型。</strong>（免费模型高峰期限流，稍后可再试或选其它模型）';
             errEl.classList.add('show');
             toast('⚠️ 该模型暂不可用，请更换其它模型');
           }
-          throw streamErr.suppress ? streamErr : streamErr;
+          const e2 = new Error(streamErr.message);
+          e2.suppress = !!streamErr.suppress;
+          throw e2;
         }
-        if (!draftToken) throw new Error('生成中断，请重试');
-        showGenPreview({ draft_token: draftToken, preview_url: '/api/gen/preview/' + encodeURIComponent(draftToken) });
+        if (!draftTokenNew) throw new Error('生成中断，请重试');
+        draftToken = draftTokenNew;
+        await refreshSlots();
+        showInlinePreview('/api/gen/preview/' + encodeURIComponent(draftToken));
+        bindPreviewActions();
+        if (hintEl) hintEl.textContent = '✅ 已生成 v' + ((slotsData[curSlot] || {}).versions[0] || {}).seq + '；可直接提交，或输入修改意见继续迭代';
       } catch (err) {
-        if (!(err && err.suppress)) { // model_unavailable 已有显著提醒，不覆盖
+        clearInterval(waitTimer);
+        if (!(err && err.suppress)) {
           errEl.textContent = (err && err.name === 'AbortError') ? '请求超时，请重试' : (err.message || '生成失败，请稍后再试');
           errEl.classList.add('show');
         }
       } finally {
         clearInterval(waitTimer);
+        activeAbort = null;
         btn.disabled = false;
         btn.textContent = '✨ 开始生成';
-        if (hintEl) hintEl.textContent = '';
-        // 输出框保留内容供回看；下次生成时清空
+        if (hintEl && hintEl.textContent.startsWith('⏳')) hintEl.textContent = '';
       }
     };
 
-    // 内嵌预览区：渲染到卡片内的 #gen-preview-inline（不再用弹窗）
-    function showGenPreview(genData) {
-      const box = document.getElementById('gen-preview-inline');
-      if (!box) return;
-      box.style.display = '';
-      const frame = document.getElementById('gen-preview-frame');
-      if (frame) frame.src = genData.preview_url; // iframe 原生导航，无需 Bearer（draft_token 即身份）
-      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-      document.getElementById('gen-regen').onclick = () => {
-        // 作废草稿；把上一版代码作为上下文保留——下次生成将基于上一版改进而非从零重写。
-        // 输入框保留原描述，可直接改成新的修改意见（如“加上科学计数法”）
+    // 内嵌预览操作区（重新生成=基于最新版继续；满意=提交当前草稿）
+    function bindPreviewActions() {
+      const regenBtn = document.getElementById('gen-regen');
+      const commitBtn = document.getElementById('gen-commit');
+      if (!regenBtn || !commitBtn) return;
+      regenBtn.onclick = () => {
         if (draftToken) API.del('/api/gen/draft/' + encodeURIComponent(draftToken)).catch(() => {});
         if (activeAbort) { try { activeAbort.abort(); } catch (_) {} activeAbort = null; }
         clearInterval(waitTimer);
-        regenContext = lastHtml || null;
         draftToken = '';
-        box.style.display = 'none';
+        document.getElementById('gen-preview-inline').style.display = 'none';
         ideaEl.focus();
-        if (hintEl) hintEl.textContent = regenContext ? '🔁 将基于上一版修改：直接在上方输入修改意见' : '✏️ 可修改描述后重新生成；越具体效果越好';
+        if (hintEl) hintEl.textContent = '🔁 输入修改意见后点「开始生成」，将基于本槽最新版改进';
       };
-      document.getElementById('gen-commit').onclick = async () => {
+      commitBtn.onclick = async () => {
         const commitErr = document.getElementById('gen-commit-error');
         const titleEl = document.getElementById('gen-title');
         commitErr.classList.remove('show');
         const title = (titleEl ? titleEl.value : '').trim();
         if (!title) { commitErr.textContent = '请先填写作品标题'; commitErr.classList.add('show'); return; }
-        const cbtn = document.getElementById('gen-commit');
-        cbtn.disabled = true;
-        cbtn.textContent = '提交中…';
+        commitBtn.disabled = true;
+        commitBtn.textContent = '提交中…';
         try {
           await API.post('/api/gen/commit', JSON.stringify({ draft_token: draftToken, title }));
-          box.style.display = 'none';
+          document.getElementById('gen-preview-inline').style.display = 'none';
           draftToken = '';
-          lastHtml = '';
           toast('✅ 作品已提交，可在下方列表查看；去 AI 小学堂第2章打卡吧！');
           loadFiles();
         } catch (err) {
-          cbtn.disabled = false;
-          cbtn.textContent = '✅ 满意，提交';
+          commitBtn.disabled = false;
+          commitBtn.textContent = '✅ 满意，提交';
           commitErr.textContent = err.message || '提交失败，请重试';
           commitErr.classList.add('show');
         }

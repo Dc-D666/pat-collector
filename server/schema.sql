@@ -223,3 +223,25 @@ CREATE TABLE IF NOT EXISTS settings (
   svalue VARCHAR(500) NOT NULL DEFAULT '',
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 一句话生成小程序：创作槽与版本链（2026-08-25）
+-- 每用户 5 个固定槽位，每槽一条版本链；未提交的历史版本不占作品配额，7 天未动自动清理
+CREATE TABLE IF NOT EXISTS gen_slots (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  slot_no TINYINT NOT NULL COMMENT '槽位号 1-5',
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_user_slot (user_id, slot_no),
+  CONSTRAINT fk_genslot_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS gen_versions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  slot_id INT NOT NULL,
+  seq INT NOT NULL COMMENT '槽内版本序号，从 1 递增',
+  idea VARCHAR(2000) NOT NULL DEFAULT '' COMMENT '生成该版时的需求描述（对话记录）',
+  stored_path VARCHAR(255) NOT NULL COMMENT '相对 storage/gen 的路径',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_slot_seq (slot_id, seq),
+  CONSTRAINT fk_genver_slot FOREIGN KEY (slot_id) REFERENCES gen_slots(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -354,4 +354,31 @@ function draftPath(userId, filename) {
   return path.join(userDraftDir(userId), filename);
 }
 
-module.exports = { GEN_MODELS, resolveGenModel, generateAppHtml, generateAppHtmlStream, draftTokenIssue, draftTokenVerify, draftTokenVerifySelf, saveDraft, draftPath, genTmpDir, userDraftDir, extractHtml };
+// ---- 创作槽持久化（2026-08-25）：storage/gen/u<uid>/s<槽号>/v<序号>.html ----
+function genStoreDir() {
+  return path.join(path.resolve(config.storageDir, '..'), 'gen');
+}
+
+// 通用签名令牌：HMAC(base64url(payload))，payload 自带 exp；用于 iframe 无法带 Bearer 的场景
+function signToken(payloadObj, ttlMs) {
+  const payload = Object.assign({}, payloadObj, { exp: Date.now() + ttlMs });
+  const body = b64url(JSON.stringify(payload));
+  return body + '.' + signBody(body);
+}
+function verifyTokenSelf(token) {
+  if (typeof token !== 'string') return null;
+  const dot = token.indexOf('.');
+  if (dot < 0) return null;
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(signBody(body));
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!payload.exp || Date.now() > payload.exp) return null;
+    return payload;
+  } catch (e) { return null; }
+}
+
+module.exports = { GEN_MODELS, resolveGenModel, genStoreDir, signToken, verifyTokenSelf, generateAppHtml, generateAppHtmlStream, draftTokenIssue, draftTokenVerify, draftTokenVerifySelf, saveDraft, draftPath, genTmpDir, userDraftDir, extractHtml };

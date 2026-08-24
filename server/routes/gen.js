@@ -34,6 +34,40 @@ async function getGenUsedToday(userId) {
   return rows.length ? Number(rows[0].c) : 0;
 }
 
+// ---- 创作槽（2026-08-25）：每用户 5 槽，每槽独立对话/版本链 ----
+const SLOT_COUNT = 5;
+async function ensureSlot(userId, slotNo) {
+  await query('INSERT IGNORE INTO gen_slots (user_id, slot_no) VALUES (?, ?)', [userId, slotNo]);
+  const rows = await query('SELECT id FROM gen_slots WHERE user_id = ? AND slot_no = ?', [userId, slotNo]);
+  return rows[0].id;
+}
+function slotVersionPath(userId, slotNo, seq) {
+  return 'u' + userId + '/s' + slotNo + '/v' + seq + '.html';
+}
+async function saveSlotVersion(userId, slotNo, idea, html) {
+  const slotId = await ensureSlot(userId, slotNo);
+  const [r] = await query('SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM gen_versions WHERE slot_id = ?', [slotId]);
+  const seq = Number(r.next);
+  const rel = slotVersionPath(userId, slotNo, seq);
+  const abs = path.join(genApp.genStoreDir(), rel);
+  await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+  await fs.promises.writeFile(abs, html, 'utf8');
+  await query('INSERT INTO gen_versions (slot_id, seq, idea, stored_path) VALUES (?, ?, ?, ?)', [slotId, seq, String(idea).slice(0, 2000), rel]);
+  await query('UPDATE gen_slots SET updated_at = NOW() WHERE id = ?', [slotId]);
+  const [v] = await query('SELECT id FROM gen_versions WHERE slot_id = ? AND seq = ?', [slotId, seq]);
+  return { version_id: v.id, seq };
+}
+// 槽内上一版 HTML（改进模式上下文；跨会话也生效）
+async function latestSlotHtml(userId, slotNo) {
+  try {
+    const rows = await query(
+      `SELECT v.stored_path FROM gen_versions v JOIN gen_slots s ON s.id = v.slot_id
+       WHERE s.user_id = ? AND s.slot_no = ? ORDER BY v.seq DESC LIMIT 1`, [userId, slotNo]);
+    if (!rows.length) return '';
+    return await fs.promises.readFile(path.join(genApp.genStoreDir(), rows[0].stored_path), 'utf8');
+  } catch (_) { return ''; }
+}
+
 // 全局并发信号量：同时生成中的请求数 ≤ maxConcurrent（防模型接口被并发打爆）
 let running = 0;
 const waiters = [];
@@ -111,11 +145,16 @@ router.post('/app/stream', requireAuth, dailyLimitMw, async (req, res, next) => 
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no', // nginx 不缓冲，保证流式实时到达
     });
-    // 立即回执：让前端马上知道链路已通（GLM 免费档首 token 排队可能 ~20s，避免用户以为卡死）
-    send({ type: 'start', context: !!(req.body && req.body.prev_html) });
     try {
-      const prevHtml = String((req.body && req.body.prev_html) || '').slice(0, 100000);
-      if (prevHtml) console.log('[gen] 改进模式：携带上一版', Buffer.byteLength(prevHtml), '字节');
+      // 槽号校验（1-5）；改进模式上下文：显式 prev_html 优先，否则取该槽最新版（跨会话生效）
+      const slotNo = Math.min(5, Math.max(1, parseInt(req.body && req.body.slot_no, 10) || 1));
+      let prevHtml = String((req.body && req.body.prev_html) || '').slice(0, 100000);
+      if (!prevHtml && req.body && req.body.slot_no) {
+        prevHtml = (await latestSlotHtml(req.user.id, slotNo)).slice(0, 100000);
+      }
+      const improving = !!prevHtml;
+      if (improving) console.log('[gen] 改进模式：携带上一版', Buffer.byteLength(prevHtml), '字节, 槽', slotNo);
+      send({ type: 'start', context: improving });
       const html = await genApp.generateAppHtmlStream(
         idea,
         (t, isReasoning) => send({ type: 'delta', text: t, reasoning: !!isReasoning }),
@@ -126,14 +165,17 @@ router.post('/app/stream', requireAuth, dailyLimitMw, async (req, res, next) => 
       // 新草稿覆盖旧草稿（一次只保留最新一份）
       await fs.promises.rm(genApp.userDraftDir(req.user.id), { recursive: true, force: true }).catch(() => {});
       await recordGenUsage(req.user.id);
-      const filename = await genApp.saveDraft(req.user.id, html);
+      const ver = await saveSlotVersion(req.user.id, slotNo, idea, html); // 持久化进对话记录
+      const filename = await genApp.saveDraft(req.user.id, html); // 临时草稿：供「满意提交」走 commit 流程
       const token = genApp.draftTokenIssue(req.user.id, filename);
       send({
         type: 'done',
         draft_token: token,
         preview_url: '/api/gen/preview/' + encodeURIComponent(token),
         expires_in_minutes: Math.round(config.genApp.draftTtlMs / 60000),
-        html, // 下发给前端留存，作为「修改后重新生成」的上下文
+        slot_no: slotNo,
+        version_id: ver.version_id,
+        version_seq: ver.seq,
       });
     } catch (err) {
       if (closed) return; // 客户端已断开，无需回报
@@ -166,6 +208,76 @@ router.get('/quota', requireAuth, async (req, res, next) => {
     res.json(config.genApp.dailyLimitDisabled
       ? { unlimited: true, used_today: used }
       : { unlimited: false, used_today: used, max_per_day: config.genApp.maxPerUserPerDay });
+  } catch (err) { next(err); }
+});
+
+// 创作槽概览：5 个槽各自的版本链（对话记录）
+router.get('/slots', requireAuth, async (req, res, next) => {
+  try {
+    const slots = await query('SELECT id, slot_no FROM gen_slots WHERE user_id = ? ORDER BY slot_no', [req.user.id]);
+    const byNo = {};
+    for (const sl of slots) byNo[sl.slot_no] = { slot_no: sl.slot_no, versions: [] };
+    if (slots.length) {
+      const ids = slots.map((x) => x.id);
+      const ph = ids.map(() => '?').join(',');
+      const vers = await query(
+        `SELECT v.id, v.slot_id, v.seq, v.idea, v.created_at FROM gen_versions v WHERE v.slot_id IN (${ph}) ORDER BY v.seq DESC LIMIT 300`, ids);
+      for (const v of vers) {
+        const no = slots.find((x) => x.id === v.slot_id).slot_no;
+        byNo[no].versions.push({ id: v.id, seq: v.seq, idea: String(v.idea || '').slice(0, 120), created_at: v.created_at });
+      }
+    }
+    // 补齐空槽（保证前端始终拿到 5 个）
+    const list = [];
+    for (let n = 1; n <= SLOT_COUNT; n++) list.push(byNo[n] || { slot_no: n, versions: [] });
+    res.json({ slot_count: SLOT_COUNT, slots: list });
+  } catch (err) { next(err); }
+});
+
+// 历史版本预览令牌：iframe 无法带 Bearer，签发短时自证令牌（30 分钟）
+router.get('/version/:id/token', requireAuth, async (req, res, next) => {
+  try {
+    const vid = Number(req.params.id);
+    const rows = await query(
+      'SELECT v.id FROM gen_versions v JOIN gen_slots s ON s.id = v.slot_id WHERE v.id = ? AND s.user_id = ?', [vid, req.user.id]);
+    if (!rows.length) return res.status(404).json({ error: '版本不存在' });
+    const vt = genApp.signToken({ kind: 'genver', uid: req.user.id, vid }, 30 * 60 * 1000);
+    res.json({ preview_url: '/api/gen/version-preview/' + encodeURIComponent(vt), expires_in_minutes: 30 });
+  } catch (err) { next(err); }
+});
+
+// 版本预览（凭自证令牌；安全头同草稿预览）
+router.get('/version-preview/:vtoken', async (req, res, next) => {
+  try {
+    const payload = genApp.verifyTokenSelf(req.params.vtoken);
+    if (!payload || payload.kind !== 'genver') return res.status(404).json({ error: '链接已失效，请刷新对话记录' });
+    const rows = await query(
+      'SELECT v.stored_path FROM gen_versions v JOIN gen_slots s ON s.id = v.slot_id WHERE v.id = ? AND s.user_id = ?',
+      [Number(payload.vid), payload.uid]);
+    if (!rows.length) return res.status(404).json({ error: '版本不存在' });
+    const abs = path.join(genApp.genStoreDir(), rows[0].stored_path);
+    if (!fs.existsSync(abs)) return res.status(404).json({ error: '文件已丢失' });
+    res.set({
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:",
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'SAMEORIGIN',
+    });
+    res.send(await fs.promises.readFile(abs, 'utf8'));
+  } catch (err) { next(err); }
+});
+
+// 清空某个创作槽
+router.post('/slots/:no/clear', requireAuth, async (req, res, next) => {
+  try {
+    const no = Math.min(5, Math.max(1, parseInt(req.params.no, 10) || 0));
+    const rows = await query('SELECT id FROM gen_slots WHERE user_id = ? AND slot_no = ?', [req.user.id, no]);
+    if (rows.length) {
+      const vers = await query('SELECT stored_path FROM gen_versions WHERE slot_id = ?', [rows[0].id]);
+      for (const v of vers) fs.promises.unlink(path.join(genApp.genStoreDir(), v.stored_path)).catch(() => {});
+      await query('DELETE FROM gen_slots WHERE id = ?', [rows[0].id]); // 级联删 versions
+    }
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
