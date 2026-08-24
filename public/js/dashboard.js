@@ -29,20 +29,6 @@ Views.files = () => {
 
       <!-- Tab 1：项目文件 -->
       <div id="panel-files" style="display:${isQqBound ? 'none' : ''};">
-        <!-- ✨ 一句话生成小程序（2026-08-25，AI 小学堂第2章配套） -->
-        <div class="card" id="gen-app-card" style="margin-bottom:14px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-            <h2 style="margin:0;font-size:17px;">✨ 一句话生成小程序</h2>
-            <span style="font-size:12px;color:var(--text-dim);">AI 小学堂第 2 章实操 · 每人每天 ${10} 次</span>
-          </div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">用一句话描述你想做的小游戏/小工具，AI 会生成一个能玩的小程序。示例：做一个 5 以内加减法答题小游戏，每轮 5 题，答对加 1 分</div>
-          <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
-          <div class="form-error" id="gen-error"></div>
-          <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
-            <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
-            <span id="gen-hint" style="font-size:12px;color:var(--text-dim);"></span>
-          </div>
-        </div>
         <div class="dropzone" id="dropzone">
           <div class="dz-icon">${Icons.icon('upload', 26)}</div>
           <div class="dz-title">点击选择 或 拖拽文件到此处</div>
@@ -57,6 +43,20 @@ Views.files = () => {
 
       <!-- Tab 2：AI 轻应用 -->
       <div id="panel-apps" style="display:${isQqBound ? '' : 'none'};">
+        <!-- ✨ 一句话生成小程序（2026-08-25，AI 小学堂第2章配套；生成作品与频道轻应用完全等价） -->
+        <div class="card" id="gen-app-card" style="margin-bottom:14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+            <h2 style="margin:0;font-size:17px;">✨ 一句话生成小程序</h2>
+            <span style="font-size:12px;color:var(--text-dim);">AI 小学堂第 2 章实操 · 每人每天 10 次</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">用一句话描述你想做的小游戏/小工具，AI 会生成一个能玩的小程序。生成的作品和频道轻应用一样计入「提交应用」积分。示例：做一个 5 以内加减法答题小游戏，每轮 5 题，答对加 1 分</div>
+          <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
+          <div class="form-error" id="gen-error"></div>
+          <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
+            <span id="gen-hint" style="font-size:12px;color:var(--text-dim);"></span>
+          </div>
+        </div>
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
             <div>
