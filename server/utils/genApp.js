@@ -80,10 +80,11 @@ function resolveGenModel(id) {
   return GEN_MODELS['glm47']; // 非法值静默回默认，不报错
 }
 
-// 组装用户消息：带 prevHtml 时进入「改进模式」——把上一版代码作为上下文增量改进而非从零重写
+// 组装用户消息：带 prevHtml 时进入「改进模式」——把上一版代码作为上下文增量改进而非从零重写。
+// 注意顺序：代码在前、修改意见在最后（模型对结尾指令注意力最强，实测反序会被无视导致“另起炉灶”）
 function buildUserPrompt(prompt, prevHtml) {
   if (!prevHtml) return '请根据以下需求生成小程序：\n\n' + prompt;
-  return '这是你上一版生成的代码，用户提出了修改意见。请在保留其合理部分的基础上，按新需求改进，输出完整的改进后 HTML：\n\n【新需求/修改意见】\n' + prompt + '\n\n【上一版代码】\n' + prevHtml;
+  return '这是当前版本的小程序代码，即将按用户意见进行修改：\n【当前版代码开始】\n' + prevHtml + '\n【当前版代码结束】\n\n用户的修改要求（必须基于上面这份代码改进，保留其合理部分与整体结构，不要推倒重来）：\n' + prompt;
 }
 
 const GEN_MAX_TOKENS = 32000;

@@ -47,9 +47,9 @@ Views.files = () => {
         <div class="card" id="gen-app-card" style="margin-bottom:14px;">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
             <h2 style="margin:0;font-size:17px;">✨ 一句话生成小程序</h2>
-            <span style="font-size:12px;color:var(--text-dim);">AI 小学堂第 2 章实操 · 每人每天 10 次</span>
+            <span id="gen-quota" style="font-size:12px;color:var(--text-dim);"></span>
           </div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">用一句话描述你想做的小游戏/小工具，AI 会生成一个能玩的小程序。生成的作品和频道轻应用一样计入「提交应用」积分。示例：做一个 5 以内加减法答题小游戏，每轮 5 题，答对加 1 分</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">描述你的想法，AI 生成一个能玩的小程序，作品计入「提交应用」积分</div>
           <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
           <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
             <label for="gen-model" style="font-size:12px;color:var(--text-dim);">生成模型</label>
@@ -167,6 +167,19 @@ Views.files = () => {
         modelSel.addEventListener('change', () => localStorage.setItem('gen_model', modelSel.value));
       } catch (_) { /* 隐私模式等场景忽略 */ }
     }
+    // 今日剩余次数展示
+    async function loadGenQuota() {
+      const el = document.getElementById('gen-quota');
+      if (!el) return;
+      try {
+        const d = await API.get('/api/gen/quota');
+        el.textContent = d.unlimited
+          ? `今日已生成 ${d.used_today} 次 · 测试期间不限次`
+          : `今天还可生成 ${Math.max(0, d.max_per_day - d.used_today)}/${d.max_per_day} 次`;
+      } catch (_) { /* 静默 */ }
+    }
+    loadGenQuota();
+
     // 示例快捷填充：聚焦时随机提示一个示例
     ideaEl.addEventListener('focus', () => {
       if (!ideaEl.value && hintEl) hintEl.textContent = '💡 没灵感？试试：' + GEN_EXAMPLES[Math.floor(Math.random() * GEN_EXAMPLES.length)];
@@ -202,7 +215,7 @@ Views.files = () => {
             'Authorization': 'Bearer ' + API.getToken(),
           },
           body: JSON.stringify(Object.assign(
-            regenContext ? { idea, prev_html: regenContext } : { idea },
+            (regenContext || lastHtml) ? { idea, prev_html: regenContext || lastHtml } : { idea },
             { model: (document.getElementById('gen-model') || {}).value || 'glm47' }
           )),
           signal: controller.signal,
@@ -258,6 +271,7 @@ Views.files = () => {
                 draftToken = ev.draft_token;
                 lastHtml = ev.html || '';
                 regenContext = null;
+                loadGenQuota();
               }
             } catch (_) { /* 忽略不完整块 */ }
           }

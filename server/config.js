@@ -168,6 +168,7 @@ const config = {
     maxIdeaChars: 500,
     maxHtmlBytes: 1024 * 1024,
     maxPerUserPerDay: 10,      // 每人每天生成次数上限（rateLimit）
+    dailyLimitDisabled: (process.env.GENAPP_DISABLE_DAILY_LIMIT || '1') === '1', // 测试期间不限次（2026-08-25），上线正式版时设 GENAPP_DISABLE_DAILY_LIMIT=0 恢复
     maxConcurrent: 3,          // 全局并发信号量（同时生成中的请求数）
     draftTtlMs: 30 * 60 * 1000,// 草稿有效期（30 分钟）
   },

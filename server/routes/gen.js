@@ -18,6 +18,22 @@ const genApp = require('../utils/genApp');
 
 const router = express.Router();
 
+// 每日限流：测试期间禁用（genApp.dailyLimitDisabled），恢复限制时自动生效
+const dailyLimitMw = config.genApp.dailyLimitDisabled
+  ? (req, res, next) => next()
+  : rateLimit({ windowMs: 24 * 3600 * 1000, max: config.genApp.maxPerUserPerDay, keyFn: (r) => 'gen:' + r.user.id });
+
+// 计次（用于前端展示“今天还可生成N次”）：成功产出草稿后记 audit_logs（kind=gen_app）
+async function recordGenUsage(userId) {
+  try {
+    await query("INSERT INTO audit_logs (kind, content, result, user_id, ref_type, ref_id) VALUES ('gen_app', '一句话生成小程序', 'approved', ?, '', 0)", [userId]);
+  } catch (err) { console.warn('[gen] 记次失败（不影响生成）：', err.message); }
+}
+async function getGenUsedToday(userId) {
+  const rows = await query("SELECT COUNT(*) AS c FROM audit_logs WHERE user_id = ? AND kind = 'gen_app' AND result = 'approved' AND DATE(created_at) = CURDATE()", [userId]);
+  return rows.length ? Number(rows[0].c) : 0;
+}
+
 // 全局并发信号量：同时生成中的请求数 ≤ maxConcurrent（防模型接口被并发打爆）
 let running = 0;
 const waiters = [];
@@ -44,7 +60,7 @@ async function assertEnabled(res) {
 }
 
 // 生成草稿：{idea} → {draft_token, preview_url}
-router.post('/app', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, max: config.genApp.maxPerUserPerDay, keyFn: (r) => 'gen:' + r.user.id }), async (req, res, next) => {
+router.post('/app', requireAuth, dailyLimitMw, async (req, res, next) => {
   try {
     if (!(await assertEnabled(res))) return;
     const idea = String((req.body && req.body.idea) || '').trim();
@@ -77,7 +93,7 @@ router.post('/app', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, max: co
 
 // 流式生成（SSE）：逐段推送大模型输出，前端实时展示；完成后推送 draft_token
 // 事件格式：data: {"type":"delta","text":"…"} / {"type":"done",draft_token,…} / {"type":"error","message":"…"}
-router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, max: config.genApp.maxPerUserPerDay, keyFn: (r) => 'gen:' + r.user.id }), async (req, res, next) => {
+router.post('/app/stream', requireAuth, dailyLimitMw, async (req, res, next) => {
   try {
     if (!(await assertEnabled(res))) return;
     const idea = String((req.body && req.body.idea) || '').trim();
@@ -99,6 +115,7 @@ router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, 
     send({ type: 'start', context: !!(req.body && req.body.prev_html) });
     try {
       const prevHtml = String((req.body && req.body.prev_html) || '').slice(0, 100000);
+      if (prevHtml) console.log('[gen] 改进模式：携带上一版', Buffer.byteLength(prevHtml), '字节');
       const html = await genApp.generateAppHtmlStream(
         idea,
         (t, isReasoning) => send({ type: 'delta', text: t, reasoning: !!isReasoning }),
@@ -108,6 +125,7 @@ router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, 
       );
       // 新草稿覆盖旧草稿（一次只保留最新一份）
       await fs.promises.rm(genApp.userDraftDir(req.user.id), { recursive: true, force: true }).catch(() => {});
+      await recordGenUsage(req.user.id);
       const filename = await genApp.saveDraft(req.user.id, html);
       const token = genApp.draftTokenIssue(req.user.id, filename);
       send({
@@ -139,6 +157,16 @@ router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, 
   } catch (err) {
     next(err);
   }
+});
+
+// 今日生成次数（前端卡片展示“今天还可生成N次”；测试期间不限次）
+router.get('/quota', requireAuth, async (req, res, next) => {
+  try {
+    const used = await getGenUsedToday(req.user.id);
+    res.json(config.genApp.dailyLimitDisabled
+      ? { unlimited: true, used_today: used }
+      : { unlimited: false, used_today: used, max_per_day: config.genApp.maxPerUserPerDay });
+  } catch (err) { next(err); }
 });
 
 // 草稿预览（sandbox iframe 加载）：凭 draft_token 自证身份，不走 Bearer——
