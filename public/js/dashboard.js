@@ -188,6 +188,9 @@ Views.files = () => {
     let draftToken = '';
     let lastHtml = '';        // 最近一次生成的完整 HTML（done 事件下发）
     let regenContext = null;  // 点「不满意，修改后重新生成」后置为 lastHtml，下一次请求作为上下文
+    // waitTimer/activeAbort 提到 try 外：finally 清理与「重新生成」中止都要访问
+    let waitTimer = null;
+    let activeAbort = null;
     btn.onclick = async () => {
       errEl.classList.remove('show');
       const idea = ideaEl.value.trim();
@@ -202,6 +205,7 @@ Views.files = () => {
       try {
         // 手动 fetch 消费 SSE（API.request 不支持流式读取）；Bearer 走请求头
         const controller = new AbortController();
+        activeAbort = controller;
         const timer = setTimeout(() => controller.abort(), 240000);
         const t0 = Date.now();
         waitTimer = setInterval(() => {
@@ -232,7 +236,6 @@ Views.files = () => {
         let streamErr = null;
         let sawContent = false;
         let contentAcc = ''; // 正文累计（用于检测 <html 起点）
-        var waitTimer = null; // 用 var 提升到函数级：finally 里要清理（const 在 try 内声明会作用域报错）
 
         // 等待期动态反馈：首增量到达前每秒刷新（免费档排队可能很久，静默会让用户以为卡死）
         let gotFirstDelta = false;
@@ -314,6 +317,8 @@ Views.files = () => {
         // 作废草稿；把上一版代码作为上下文保留——下次生成将基于上一版改进而非从零重写。
         // 输入框保留原描述，可直接改成新的修改意见（如“加上科学计数法”）
         if (draftToken) API.del('/api/gen/draft/' + encodeURIComponent(draftToken)).catch(() => {});
+        if (activeAbort) { try { activeAbort.abort(); } catch (_) {} activeAbort = null; }
+        clearInterval(waitTimer);
         regenContext = lastHtml || null;
         draftToken = '';
         box.style.display = 'none';
