@@ -54,15 +54,15 @@ Views.files = () => {
           <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
             <label for="gen-model" style="font-size:12px;color:var(--text-dim);">生成模型</label>
             <select id="gen-model" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);">
-              <option value="inkling">Inkling 975B</option>
-              <option value="glm52">GLM-5.2 744B</option>
-              <option value="nemotronultra">Nemotron 3 Ultra 550B</option>
-              <option value="dots3note">Dots3-Note Preview 280B</option>
+              <option value="glm47" selected>GLM 4.7 Flash 30B</option>
               <option value="nemotron35">Nemotron 3.5 Lightning 30B</option>
-              <option value="glm47">GLM 4.7 Flash 30B（稳定推荐）</option>
+              <option value="dots3note">Dots3-Note Preview 280B</option>
+              <option value="nemotronultra">Nemotron 3 Ultra 550B</option>
+              <option value="glm52">GLM-5.2 744B</option>
+              <option value="inkling">Inkling 975B</option>
             </select>
           </div>
-          <textarea id="gen-log" rows="4" readonly placeholder="AI 思考与输出过程（思考结束自动清空，开始展示代码）…" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
+          <textarea id="gen-log" rows="4" readonly placeholder="AI输出结果......" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
           <div class="form-error" id="gen-error"></div>
           <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
             <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
@@ -226,8 +226,7 @@ Views.files = () => {
             try {
               const ev = JSON.parse(chunk.slice(5).trim());
               if (ev.type === 'start') {
-                // 链路已通的即时反馈（免费档首 token 排队可能 ~20s，避免用户以为卡死）
-                logEl.value += ev.context ? '✅ 已连接（改进模式：将基于上一版修改）…\n' : '✅ 已连接生成服务…\n';
+                // 链路已通（静默：仅作占位，不向用户展示）
               } else if (ev.type === 'delta') {
                 if (ev.reasoning) {
                   // 独立思考字段（GLM 4.7 等）：直接展示

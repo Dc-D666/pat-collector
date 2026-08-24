@@ -211,6 +211,7 @@ async function streamChat(cfg, model, prompt, onDelta, signal, prevHtml) {
   const decoder = new TextDecoder();
   let buf = '';
   let full = '';
+  let reasonChars = 0;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -227,12 +228,18 @@ async function streamChat(cfg, model, prompt, onDelta, signal, prevHtml) {
         const j = JSON.parse(payload);
         const d = j.choices && j.choices[0] && j.choices[0].delta;
         if (!d) continue;
-        if (d.reasoning_content) onDelta(d.reasoning_content, true);   // 思考过程：仅展示，不计入正文
+        if (d.reasoning_content) { reasonChars += d.reasoning_content.length; onDelta(d.reasoning_content, true); } // 思考过程：仅展示，不计入正文
         if (d.content) { full += d.content; onDelta(d.content, false); } // 正文：累计并参与提取校验
       } catch (_) { /* 忽略不完整行 */ }
     }
   }
-  if (!full) throw new Error('模型返回为空');
+  if (!full) {
+    const e = new Error(reasonChars > 0
+      ? '模型把全部输出用于思考但没有产出代码，请重试一次或更换模型'
+      : '模型没有返回内容，请重试一次或更换模型');
+    e.code = 'GEN_EMPTY';
+    throw e;
+  }
   return full;
 }
 
