@@ -98,7 +98,7 @@ router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, 
     try {
       const html = await genApp.generateAppHtmlStream(
         idea,
-        (t) => send({ type: 'delta', text: t }),
+        (t, isReasoning) => send({ type: 'delta', text: t, reasoning: !!isReasoning }),
         controller.signal
       );
       // 新草稿覆盖旧草稿（一次只保留最新一份）

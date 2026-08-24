@@ -41,6 +41,12 @@ function providerCfg() {
   };
 }
 
+// 思考模式参数（2026-08-25 用户拍板：模型不够聪明，必须开）：仅 glm 新一代模型支持；
+// 开启后响应中推理部分走 delta.reasoning_content，正文走 delta.content，两者分流展示
+function thinkingParam(model) {
+  return /glm-(4\.[5-9]|v[0-9])/.test(String(model)) ? { type: 'enabled' } : undefined;
+}
+
 async function callChat(cfg, model, prompt) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.genApp.timeoutMs);
@@ -58,8 +64,8 @@ async function callChat(cfg, model, prompt) {
           { role: 'user', content: '请根据以下需求生成小程序：\n\n' + prompt },
         ],
         temperature: 0.6,
-        thinking: cfg.provider === "glm" ? { type: "disabled" } : undefined,
-        max_tokens: 16000,
+        max_tokens: 24000, // 思考+正文共用预算，2026-08-25 由 16000 放宽
+        thinking: thinkingParam(model),
         signal: controller.signal,
       }),
     });
@@ -123,7 +129,8 @@ async function generateAppHtml(idea) {
   return html;
 }
 
-// 流式生成：stream:true 调 GLM/DeepSeek，逐段回调 onDelta(text)，返回完整原始输出
+// 流式生成：stream:true 调 GLM/DeepSeek，逐段回调 onDelta(text, isReasoning)，返回完整正文
+// （reasoning_content = 思考过程，content = 正文；只把正文累计进返回值）
 // 失败自动换回退模型重试一次（仅限尚未收到任何增量时）
 async function streamChat(cfg, model, prompt, onDelta, signal) {
   const res = await fetch(cfg.baseUrl + '/chat/completions', {
@@ -139,8 +146,8 @@ async function streamChat(cfg, model, prompt, onDelta, signal) {
         { role: 'user', content: '请根据以下需求生成小程序：\n\n' + prompt },
       ],
       temperature: 0.6,
-      max_tokens: 16000,
-      thinking: cfg.provider === 'glm' ? { type: 'disabled' } : undefined, // 关闭思考模式：单文件 HTML 生成无需推理，避免挤占 token 导致截断
+      max_tokens: 24000, // 思考+正文共用预算，2026-08-25 由 16000 放宽
+      thinking: thinkingParam(model),
       stream: true,
     }),
     signal,
@@ -167,8 +174,10 @@ async function streamChat(cfg, model, prompt, onDelta, signal) {
       if (payload === '[DONE]') continue;
       try {
         const j = JSON.parse(payload);
-        const piece = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
-        if (piece) { full += piece; onDelta(piece); }
+        const d = j.choices && j.choices[0] && j.choices[0].delta;
+        if (!d) continue;
+        if (d.reasoning_content) onDelta(d.reasoning_content, true);   // 思考过程：仅展示，不计入正文
+        if (d.content) { full += d.content; onDelta(d.content, false); } // 正文：累计并参与提取校验
       } catch (_) { /* 忽略不完整行 */ }
     }
   }
@@ -184,7 +193,7 @@ async function generateAppHtmlStream(idea, onDelta, signal) {
 
   let raw;
   let gotAny = false;
-  const wrappedDelta = (t) => { gotAny = true; onDelta(t); };
+  const wrappedDelta = (t, isR) => { gotAny = true; onDelta(t, isR); };
   try {
     raw = await streamChat(cfg, cfg.model, prompt, wrappedDelta, signal);
   } catch (err) {
