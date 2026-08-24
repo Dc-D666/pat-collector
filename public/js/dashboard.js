@@ -212,7 +212,8 @@ Views.files = () => {
         const decoder = new TextDecoder();
         let buf = '';
         let streamErr = null;
-        let sawContent = false; // 思考过程结束后，正式代码的第一个片段到达时清空展示框
+        let sawContent = false;
+        let contentAcc = ''; // 正文累计（用于检测 <html 起点）
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -229,9 +230,15 @@ Views.files = () => {
                 logEl.value += ev.context ? '✅ 已连接（改进模式：将基于上一版修改）…\n' : '✅ 已连接生成服务…\n';
               } else if (ev.type === 'delta') {
                 if (ev.reasoning) {
+                  // 独立思考字段（GLM 4.7 等）：直接展示
                   logEl.value += ev.text;
+                  contentAcc = '';
                 } else {
-                  if (!sawContent) { logEl.value = ''; sawContent = true; }
+                  // 正文：部分模型会把思考混在正文里（如 Nemotron 3.5）——
+                  // 归一化处理：<html 出现前的内容一律视为前置说明；出现后清空改显代码
+                  contentAcc += ev.text;
+                  const pos = contentAcc.search(/<html[\s>]|<!doctype/i);
+                  if (!sawContent && pos >= 0) { logEl.value = ''; sawContent = true; }
                   logEl.value += ev.text;
                 }
                 logEl.scrollTop = logEl.scrollHeight;
