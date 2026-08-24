@@ -4,7 +4,7 @@
 // 此前完成校验全在前端 UI，直接 POST /api/points/task 即可刷完成——这里对可核验的任务类型
 // 按任务配置实际校验（与 /api/learn/*-status 检测口径一致），核验不过拒绝记录。
 // 无法服务端核验的类型（video 观看、普通自报实操）按自报处理（放行）。
-const { getAppPostedStatus, getProjectSubmitted } = require('./learnStatus');
+const { getAppPostedStatus, getProjectSubmitted, getGeneratedAppStatus } = require('./learnStatus');
 const { hasNftiExperience } = require('./nfti');
 
 // task: 文章 tasks 数组中的单个任务配置；user: req.user；payload: req.body
@@ -43,8 +43,16 @@ async function verifyTaskCompletion(task, user, payload) {
     }
     return { ok: true };
   }
+  if (task.genappcheck) {
+    // 第2章（2026-08-25 改版）：须在本站「一句话生成小程序」提交过作品（files.source='gen'，不限时间窗）
+    const st = await getGeneratedAppStatus(user.id);
+    if (!st.generated) {
+      return { ok: false, error: '尚未检测到你生成的小程序，请先到「我的项目」→「一句话生成小程序」制作并提交' };
+    }
+    return { ok: true };
+  }
   if (task.projectcheck) {
-    // 第3章：最近 14 天上传过项目文件
+    // 第3章：最近 14 天上传过项目文件（排除 gen 来源，防第2章生成物冒充）
     const st = await getProjectSubmitted(user.id);
     if (!st.submitted) {
       return { ok: false, error: '未检测到最近上传的项目文件，请先到「我的项目」上传' };

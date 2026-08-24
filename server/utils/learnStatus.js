@@ -64,13 +64,24 @@ async function getAppPostedStatus(userId, user) {
 }
 
 // 第3章 project-status：最近 14 天是否上传过项目文件（无需 QQ 登录）
+// 2026-08-25：排除 source='gen'（站内一句话生成物），防第2章生成作品冒充第3章成果
 async function getProjectSubmitted(userId) {
   const rows = await query(
-    'SELECT COUNT(*) AS cnt FROM files WHERE user_id = ? AND uploaded_at >= (NOW() - INTERVAL 14 DAY)',
+    "SELECT COUNT(*) AS cnt FROM files WHERE user_id = ? AND source != 'gen' AND uploaded_at >= (NOW() - INTERVAL 14 DAY)",
     [userId]
   );
   const cnt = rows.length ? Number(rows[0].cnt) : 0;
   return { submitted: cnt > 0, file_count: cnt };
 }
 
-module.exports = { getAppPostedStatus, getProjectSubmitted };
+// 第2章 gen-status（2026-08-25）：是否提交过站内生成的小程序（不限时间窗，生成过一次即永久达成）
+async function getGeneratedAppStatus(userId) {
+  const rows = await query(
+    "SELECT COUNT(*) AS cnt FROM files WHERE user_id = ? AND source = 'gen'",
+    [userId]
+  );
+  const cnt = rows.length ? Number(rows[0].cnt) : 0;
+  return { generated: cnt > 0, gen_count: cnt };
+}
+
+module.exports = { getAppPostedStatus, getProjectSubmitted, getGeneratedAppStatus };

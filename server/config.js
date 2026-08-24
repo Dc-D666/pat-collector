@@ -158,6 +158,19 @@ const config = {
     fallbackModel: process.env.GLM_FALLBACK_MODEL || 'glm-4-flash',
     timeoutMs: 30000,
   },
+  // 「一句话生成小程序」（AI 小学堂第2章，2026-08-25）：复用 glm/deepseek 凭据。
+  // timeoutMs 是生成专用长超时（大模型写完整 HTML 耗时远超审查），不要复用 deepseek.timeoutMs。
+  genApp: {
+    provider: process.env.GENAPP_PROVIDER || 'glm',            // 'glm' | 'deepseek'
+    model: process.env.GENAPP_MODEL || '',                     // 留空用各 provider 默认模型
+    fallbackModel: process.env.GENAPP_FALLBACK_MODEL || '',    // 留空用各 provider 默认回退模型
+    timeoutMs: parseInt(process.env.GENAPP_TIMEOUT_MS || '150000', 10),
+    maxIdeaChars: 500,
+    maxHtmlBytes: 1024 * 1024,
+    maxPerUserPerDay: 10,      // 每人每天生成次数上限（rateLimit）
+    maxConcurrent: 3,          // 全局并发信号量（同时生成中的请求数）
+    draftTtlMs: 30 * 60 * 1000,// 草稿有效期（30 分钟）
+  },
   projectRoot: PROJECT_ROOT,
   classes: CLASSES,
   grades: GRADES,

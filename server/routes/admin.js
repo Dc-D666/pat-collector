@@ -12,7 +12,7 @@ const { query, pool } = require('../db');
 const { asyncHandler } = require('../utils/async');
 const { requireAdmin } = require('../middleware/admin');
 const { writeAdminLog } = require('../utils/adminLog');
-const { grant, revoke, bonusAmount, revokeInTx, restoreFileSubmitInTx, deactivatePurchasesInTx } = require('../utils/points');
+const { grant, revoke, bonusAmount, revokeInTx, restoreFileSubmitInTx, restoreAppSubmitInTx, deactivatePurchasesInTx } = require('../utils/points');
 const { cancelChannelPurchase } = require('../utils/channelOps');
 const { freeDiskBytes } = require('../utils/disk');
 const qqSessions = require('../qq/sessions');
@@ -348,14 +348,19 @@ router.post('/audit/:id/review', asyncHandler(async (req, res) => {
       await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [f.user_id]);
       // R2-2：按原发放流水金额原样恢复（不再硬编码 30 / 重复乘活动倍率）
       restored = await restoreFileSubmitInTx(conn, f.user_id, fid);
+      // 站内生成作品（source='gen'）的 app_submit 同步补发（误拒恢复，2026-08-25）；普通上传无此流水返回 0
+      restored += await restoreAppSubmitInTx(conn, f.user_id, fid);
       await conn.execute("UPDATE files SET audit_status = 'reviewed', audit_reason = '' WHERE id = ?", [fid]);
     } else if (action === 'reject') {
       await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [f.user_id]);
       revoked = (await revokeInTx(conn, f.user_id, 'file_submit', 'file:' + fid)) || 0;
+      // 站内生成作品的 app_submit 一并回扣（等价口径，2026-08-25）；无流水时安全空操作
+      revoked += (await revokeInTx(conn, f.user_id, 'app_submit', 'file:' + fid)) || 0;
       await conn.execute("UPDATE files SET audit_status = 'flagged', audit_reason = ? WHERE id = ?", [reason, fid]);
     } else if (action === 'delete') {
       await conn.execute('SELECT id FROM users WHERE id = ? FOR UPDATE', [f.user_id]);
       revoked = (await revokeInTx(conn, f.user_id, 'file_submit', 'file:' + fid)) || 0;
+      revoked += (await revokeInTx(conn, f.user_id, 'app_submit', 'file:' + fid)) || 0;
       // R3-4：作废该文件相关商城购买（wall_top 置顶）
       await deactivatePurchasesInTx(conn, f.user_id, 'file', fid);
       await conn.execute('DELETE FROM files WHERE id = ?', [fid]);

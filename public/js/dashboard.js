@@ -29,6 +29,20 @@ Views.files = () => {
 
       <!-- Tab 1：项目文件 -->
       <div id="panel-files" style="display:${isQqBound ? 'none' : ''};">
+        <!-- ✨ 一句话生成小程序（2026-08-25，AI 小学堂第2章配套） -->
+        <div class="card" id="gen-app-card" style="margin-bottom:14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+            <h2 style="margin:0;font-size:17px;">✨ 一句话生成小程序</h2>
+            <span style="font-size:12px;color:var(--text-dim);">AI 小学堂第 2 章实操 · 每人每天 ${10} 次</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">用一句话描述你想做的小游戏/小工具，AI 会生成一个能玩的小程序。示例：做一个 5 以内加减法答题小游戏，每轮 5 题，答对加 1 分</div>
+          <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
+          <div class="form-error" id="gen-error"></div>
+          <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+            <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
+            <span id="gen-hint" style="font-size:12px;color:var(--text-dim);"></span>
+          </div>
+        </div>
         <div class="dropzone" id="dropzone">
           <div class="dz-icon">${Icons.icon('upload', 26)}</div>
           <div class="dz-title">点击选择 或 拖拽文件到此处</div>
@@ -107,6 +121,86 @@ Views.files = () => {
       if (panelLinks) panelLinks.style.display = btn.dataset.tab === 'links' ? '' : 'none';
     });
   }
+
+  // ---- ✨ 一句话生成小程序（2026-08-25，AI 小学堂第2章） ----
+  const GEN_EXAMPLES = [
+    '做一个 5 以内加减法答题小游戏，每轮 5 题，答对加 1 分',
+    '做一个石头剪刀布游戏，和电脑对战，显示比分',
+    '做一个单位换算器，支持长度/重量/温度互换',
+    '做一个随机点名器，输入名单后随机抽人',
+  ];
+  function initGenApp() {
+    const ideaEl = document.getElementById('gen-idea');
+    const btn = document.getElementById('gen-start-btn');
+    const errEl = document.getElementById('gen-error');
+    const hintEl = document.getElementById('gen-hint');
+    if (!btn || !ideaEl) return;
+    // 示例快捷填充：聚焦时随机提示一个示例
+    ideaEl.addEventListener('focus', () => {
+      if (!ideaEl.value && hintEl) hintEl.textContent = '💡 没灵感？试试：' + GEN_EXAMPLES[Math.floor(Math.random() * GEN_EXAMPLES.length)];
+    });
+    btn.onclick = async () => {
+      errEl.classList.remove('show');
+      const idea = ideaEl.value.trim();
+      if (!idea) { errEl.textContent = '请先用一句话描述你的想法'; errEl.classList.add('show'); return; }
+      btn.disabled = true;
+      btn.textContent = '⏳ AI 正在编写…';
+      if (hintEl) hintEl.textContent = '约需 30 秒～ 2 分钟，请耐心等待，不要关闭页面';
+      let draftToken = '';
+      try {
+        const data = await API.post('/api/gen/app', JSON.stringify({ idea }), 180000); // 生成耗时 30s~2min，必须传长超时（默认 15s 会中断）
+        draftToken = data.draft_token;
+        showGenPreview(data);
+      } catch (err) {
+        errEl.textContent = err.message || '生成失败，请稍后再试';
+        errEl.classList.add('show');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '✨ 开始生成';
+        if (hintEl) hintEl.textContent = '';
+      }
+    };
+
+    // 预览弹层：sandbox iframe + 重新生成 / 满意提交
+    function showGenPreview(genData) {
+      openModal(`
+        <h3 class="modal-title">预览你的小程序</h3>
+        <iframe class="gen-preview-frame" src="${genData.preview_url}" sandbox="allow-scripts allow-modals" style="width:100%;height:min(60vh,480px);border:1px solid var(--border);border-radius:10px;background:#fff;"></iframe>
+        <div class="field" style="margin-top:12px;"><label>作品标题（提交后可参与全校作品展）</label><input id="gen-title" type="text" maxlength="100" placeholder="给作品起个名字" /></div>
+        <div class="form-error" id="gen-commit-error"></div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="gen-regen">🔄 不满意，重新生成</button>
+          <button class="btn btn-primary" id="gen-commit">✅ 满意，提交</button>
+        </div>`);
+      document.getElementById('gen-regen').onclick = () => {
+        // 作废草稿并关闭弹层（输入框保留原描述，可直接调整后再生成）
+        if (draftToken) API.del('/api/gen/draft/' + encodeURIComponent(draftToken)).catch(() => {});
+        closeModal();
+      };
+      document.getElementById('gen-commit').onclick = async () => {
+        const commitErr = document.getElementById('gen-commit-error');
+        const titleEl = document.getElementById('gen-title');
+        commitErr.classList.remove('show');
+        const title = (titleEl ? titleEl.value : '').trim();
+        if (!title) { commitErr.textContent = '请先填写作品标题'; commitErr.classList.add('show'); return; }
+        const cbtn = document.getElementById('gen-commit');
+        cbtn.disabled = true;
+        cbtn.textContent = '提交中…';
+        try {
+          await API.post('/api/gen/commit', JSON.stringify({ draft_token: draftToken, title }));
+          closeModal();
+          toast('✅ 作品已提交，可在下方列表查看；去 AI 小学堂第2章打卡吧！');
+          loadFiles();
+        } catch (err) {
+          cbtn.disabled = false;
+          cbtn.textContent = '✅ 满意，提交';
+          commitErr.textContent = err.message || '提交失败，请重试';
+          commitErr.classList.add('show');
+        }
+      };
+    }
+  }
+  initGenApp();
 
   // ---- 上传交互 ----
   const dz = document.getElementById('dropzone');

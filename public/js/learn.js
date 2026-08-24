@@ -421,6 +421,22 @@ function renderTasks(tasks, articleId) {
                 </div>
               </div>`;
           }
+          if (t.genappcheck) {
+            // 第2章（2026-08-25 改版）：站内生成小程序 → 后端核验 files.source='gen'
+            return `
+              <div class="card learn-task" data-article="${articleId}" data-task="${i}" data-genappcheck="1">
+                <div class="learn-task-badge badge-action">实操</div>
+                <div class="learn-task-body">
+                  <div class="learn-task-head">${escapeHtml(t.title || '实操任务')}</div>
+                  ${t.desc ? `<p class="learn-task-desc">${escapeHtml(t.desc)}</p>` : ''}
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <a class="btn btn-sm btn-primary" href="#/files">✨ 去「一句话生成小程序」</a>
+                    <button class="btn btn-sm btn-primary gen-done-btn">${Icons.icon('check-circle', 15)} 我已生成</button>
+                  </div>
+                  <div class="gen-status" style="margin-top:8px;font-size:13px;"></div>
+                </div>
+              </div>`;
+          }
           if (t.projectcheck) {
             // 第3章：提交独立项目文件 → 后台检测上传记录
             return `
@@ -517,7 +533,7 @@ async function reportTask(articleId, taskIndex, extra) {
     const task = document.querySelector(`.learn-task[data-article="${articleId}"][data-task="${taskIndex}"]`);
     if (task) {
       task.dataset.done = '';
-      const btn = task.querySelector('.task-done-btn, .app-done-btn, .project-done-btn, .tinyid-check-btn');
+      const btn = task.querySelector('.task-done-btn, .app-done-btn, .gen-done-btn, .project-done-btn, .tinyid-check-btn');
       if (btn) { btn.disabled = false; btn.innerHTML = Icons.icon('check-circle', 14) + ' 重试'; btn.classList.remove('task-done'); }
       const tInput = task.querySelector('.tinyid-input');
       if (tInput) tInput.disabled = false;
@@ -550,7 +566,7 @@ async function loadTaskProgress(articleId) {
       if (!doneSet.has(ti)) return;
       // 回填已完成：按钮置灰（除 NFTI 任务的"去体验"按钮仍可点）
       task.dataset.done = '1';
-      const doneBtn = task.querySelector('.task-done-btn, .app-done-btn, .project-done-btn, .tinyid-check-btn');
+      const doneBtn = task.querySelector('.task-done-btn, .app-done-btn, .gen-done-btn, .project-done-btn, .tinyid-check-btn');
       if (doneBtn) { doneBtn.disabled = true; doneBtn.textContent = '✓ 已完成'; doneBtn.classList.add('task-done'); }
       const tInput = task.querySelector('.tinyid-input');
       if (tInput) tInput.disabled = true;
@@ -685,6 +701,25 @@ async function initAppTask(task) {
   } catch (_) { /* 静默 */ }
 }
 
+// ---- 第2章生成小程序检测（data-genappcheck，2026-08-25 改版） ----
+async function initGenTask(task) {
+  if (!task) return;
+  const statusEl = task.querySelector('.gen-status');
+  try {
+    const data = await API.get('/api/learn/gen-status');
+    if (data.generated) {
+      // 生成过一次即永久达成 → 自动标记完成（老学生当年已完成旧版任务的进度/积分不受影响）
+      task.dataset.done = '1';
+      const btn = task.querySelector('.gen-done-btn');
+      if (btn) { btn.disabled = true; btn.textContent = '✓ 已完成'; btn.classList.add('task-done'); }
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">✓ 检测到你提交的生成作品，任务已自动完成</span>`;
+      reportTask(parseInt(task.dataset.article, 10), parseInt(task.dataset.task, 10));
+    } else {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">到「我的项目」→「✨ 一句话生成小程序」制作并提交后，点「我已生成」核验</span>`;
+    }
+  } catch (_) { /* 静默 */ }
+}
+
 // ---- 第3章项目提交检测（data-projectcheck） ----
 async function initProjectTask(task) {
   if (!task) return;
@@ -706,6 +741,7 @@ async function initProjectTask(task) {
 // 文章渲染完成后初始化第2/3章自动检测任务
 function initAutoTasks() {
   document.querySelectorAll('.learn-task[data-appcheck]').forEach((t) => initAppTask(t));
+  document.querySelectorAll('.learn-task[data-genappcheck]').forEach((t) => initGenTask(t));
   document.querySelectorAll('.learn-task[data-projectcheck]').forEach((t) => initProjectTask(t));
   document.querySelectorAll('.learn-task[data-tinyidcheck]').forEach((t) => initTinyidTask(t));
 }
@@ -768,6 +804,34 @@ document.addEventListener('click', async (e) => {
   const task = btn.closest('.learn-task');
   if (!task || task.dataset.done) return;
   checkProjectSubmitted(task, btn, task.querySelector('.project-status'));
+});
+
+// 我已生成（第2章改版）：服务端检测 gen 记录，有才给分
+async function checkGenApp(task, btn, statusEl) {
+  if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">正在检测你的生成记录…</span>`;
+  try {
+    const data = await API.get('/api/learn/gen-status');
+    if (data.generated) {
+      task.dataset.done = '1';
+      btn.disabled = true;
+      btn.textContent = '✓ 已完成';
+      btn.classList.add('task-done');
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">✓ 核验通过，任务完成！</span>`;
+      reportTask(parseInt(task.dataset.article, 10), parseInt(task.dataset.task, 10));
+    } else {
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">还没检测到你提交的生成作品。去「我的项目」→「一句话生成小程序」制作并填写标题提交后再试～</span>`;
+    }
+  } catch (err) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--danger);">${Utils.escapeHtml((err && err.message) || '检测失败，请重试')}</span>`;
+  }
+}
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.gen-done-btn');
+  if (!btn) return;
+  const task = btn.closest('.learn-task');
+  if (!task || task.dataset.done) return;
+  checkGenApp(task, btn, task.querySelector('.gen-status'));
 });
 
 // ---- 第5章 tiny_id 核验任务（data-tinyidcheck） ----

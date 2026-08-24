@@ -7,9 +7,12 @@
 //  2. CLI 取消失败时保持 active，下轮重试（不再无条件标记 expired 导致永不重试）；
 //  3. 清理悬空 pending 记录（两阶段兑换在外部操作后崩溃遗留）：超时未结算 → 退款并标记 cancelled。
 const config = require('./config');
+const fs = require('fs');
+const path = require('path');
 const { query, pool } = require('./db');
 const qqSessions = require('./qq/sessions');
 const proxy = require('./qq/proxy');
+const genApp = require('./utils/genApp');
 
 const CHECK_INTERVAL_MS = 10 * 60 * 1000; // 置顶/精华回收：每 10 分钟
 
@@ -165,6 +168,29 @@ async function sweepStalePending() {
   }
 }
 
+// 清理超期生成草稿（storage/tmp-gen/<userId>/*.html，TTL 宽容到 2h）
+async function sweepStaleGenDrafts() {
+  const root = genApp.genTmpDir();
+  try {
+    const users = await fs.promises.readdir(root).catch(() => []);
+    const now = Date.now();
+    for (const u of users) {
+      const dir = path.join(root, u);
+      const files = await fs.promises.readdir(dir).catch(() => []);
+      for (const f of files) {
+        const p = path.join(dir, f);
+        try {
+          const st = await fs.promises.stat(p);
+          if (now - st.mtimeMs > 2 * 3600 * 1000) await fs.promises.unlink(p);
+        } catch (_) { /* 忽略单个文件失败 */ }
+      }
+      // 目录空则顺手移除
+      const rest = await fs.promises.readdir(dir).catch(() => ['x']);
+      if (rest.length === 0) await fs.promises.rmdir(dir).catch(() => {});
+    }
+  } catch (_) { /* 目录不存在等：忽略 */ }
+}
+
 function startJobs() {
   const timer = setInterval(() => {
     sweepExpiredChannelBoosts().catch((err) => console.error('[jobs] sweep 异常：', err.message));
@@ -172,6 +198,13 @@ function startJobs() {
   if (timer.unref) timer.unref();
   // 启动后立即扫一次
   sweepExpiredChannelBoosts().catch((err) => console.error('[jobs] 启动 sweep 异常：', err.message));
+
+  // 生成草稿清理：每 20 分钟一次，启动后 5 分钟首扫
+  const genTimer = setInterval(() => {
+    sweepStaleGenDrafts().catch(() => {});
+  }, 20 * 60 * 1000);
+  if (genTimer.unref) genTimer.unref();
+  setTimeout(() => sweepStaleGenDrafts().catch(() => {}), 5 * 60 * 1000).unref?.();
 
   console.log('[jobs] 已启动：置顶/精华自动回收（10 分钟）；帖子被赞积分由「我的积分」页按用户触发');
 }

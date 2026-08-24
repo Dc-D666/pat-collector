@@ -14,6 +14,7 @@ const pointsRoutes = require('./routes/points');
 const guestRoutes = require('./routes/guest');
 const linkRoutes = require('./routes/links');
 const githubOauthRoutes = require('./routes/github-oauth');
+const genRoutes = require('./routes/gen');
 const adminRoutes = require('./routes/admin');
 const { startJobs } = require('./jobs');
 
@@ -62,6 +63,7 @@ app.use('/api/points', pointsRoutes);
 app.use('/api/guest', guestRoutes);
 app.use('/api/links', linkRoutes);
 app.use('/api/github', githubOauthRoutes);
+app.use('/api/gen', genRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 未知 API 路径 → 404 JSON

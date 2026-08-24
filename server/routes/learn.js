@@ -10,7 +10,7 @@ const { rateLimit } = require('../utils/rateLimit');
 const { verify } = require('../utils/token');
 const readTimer = require('../utils/readTimer');
 const { hasNftiExperience } = require('../utils/nfti');
-const { getAppPostedStatus, getProjectSubmitted } = require('../utils/learnStatus');
+const { getAppPostedStatus, getProjectSubmitted, getGeneratedAppStatus } = require('../utils/learnStatus');
 
 const router = express.Router();
 
@@ -222,6 +222,15 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     res.json(await getProjectSubmitted(req.user.id));
+  })
+);
+
+// 第2章任务检测（2026-08-25 改版）：是否提交过站内「一句话生成」小程序（不限时间窗）
+router.get(
+  '/gen-status',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json(await getGeneratedAppStatus(req.user.id));
   })
 );
 

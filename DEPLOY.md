@@ -82,3 +82,16 @@ curl -s https://pat.weaxi.cn/api/auth/me # 未登录应 401
 ## 回滚
 
 旧版本若用 PM2 管理：`pm2 stop patplayer` 即可停止；数据在 MySQL 与 `storage/uploads/`，删除需谨慎。
+
+## AI 小学堂改版上线（2026-08-25，一句话生成小程序）
+
+低峰期按顺序执行：
+
+1. **迁移 SQL**：`mysql -u pat -p pat < scripts/migrate-2026-08-25-ai-school.sql`
+   （第4章 slug ai-deploy→ai-project，保留 id → 学员进度/积分不丢；必须在跑新 seed **之前**执行）
+2. 发新代码：`git pull && npm install && pm2 restart patplayer`（init-db 启动时会幂等补 `files.source` 列）
+3. 重跑教程：`node seed-articles.js`（之后文案微调走管理后台编辑器，勿再跑 seed，否则覆盖手改）
+4. 冒烟：登录 → 我的项目 →「✨ 一句话生成小程序」全流程（生成→预览→提交→列表）；AI 小学堂第2章打卡 +15⭐
+5. 故障 kill-switch：管理后台设置 `genapp_enabled=0` 立即停用生成入口（无需重启）
+
+> nginx 无需改动：全局 `proxy_read_timeout 300s` 已覆盖生成接口的长耗时（GENAPP_TIMEOUT_MS 默认 150s）。

@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS files (
   gameplay VARCHAR(2000) NULL COMMENT '玩法',
   audit_status VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT 'HTML 审查状态：pending 待审 / reviewed 已过审 / flagged 违规（非 HTML 直接 reviewed）',
   audit_reason VARCHAR(500) NOT NULL DEFAULT '' COMMENT '审查不通过原因',
+  source VARCHAR(16) NOT NULL DEFAULT 'upload' COMMENT '来源：upload=手动上传 / gen=站内一句话生成（2026-08-25）',
   uploaded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_user_file (user_id, original_name),
   KEY idx_user (user_id),

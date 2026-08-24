@@ -1,0 +1,5 @@
+[sandbox]
+bash = "off"
+
+[permissions]
+allow = ["Bash"]

@@ -32,7 +32,7 @@ const RULES = {
   first_login: 10, // 首次登录（注册时发放，仅一次）
   read_article: 8, // 阅读课程 ≥1 分钟（每篇一次；P3 微降 10→8）
   task: 15, // 完成整章所有任务（每章一次；P3 微降 20→15）
-  app_submit: 15, // 提交 AI 轻应用（QQ 频道，每个作品一次；每人最多计 3 个）
+  app_submit: 15, // 提交 AI 轻应用（QQ 频道或站内一句话生成，每个作品一次；每人最多计 3 个；2026-08-25 起站内生成与频道轻应用完全等价、共享名额）
   file_submit: 25, // 提交作品文件（每个文件一次；与 GitHub 项目合计最多计 5 个；P3 30→25）
   link_submit: 25, // 提交 GitHub 项目外链（Token 文件验证通过后发放；与作品文件合计最多计 5 个；2026-08-20）
   liked: 0, // （已废弃：被赞积分改由 like_receive 通过 CLI 增量发放）
@@ -313,6 +313,31 @@ async function restoreFileSubmitInTx(conn, userId, fileId) {
   return amount;
 }
 
+// 站内生成作品的 app_submit 补发（2026-08-25）：与 restoreFileSubmitInTx 同构——
+// gen 作品以 app_submit 计分（与频道轻应用等价），审核误拒后再通过时按原额恢复。
+// 仅存在 app_submit_revoke 流水时才补发；幂等（:apprestore 后缀唯一）。
+async function restoreAppSubmitInTx(conn, userId, fileId) {
+  const ref = 'file:' + fileId;
+  const [rv] = await conn.execute(
+    "SELECT 1 FROM points_log WHERE user_id = ? AND reason = 'app_submit_revoke' AND ref_id = ?",
+    [userId, ref]
+  );
+  if (!rv.length) return 0;
+  const [orig] = await conn.execute(
+    "SELECT amount FROM points_log WHERE user_id = ? AND reason = 'app_submit' AND ref_id = ? ORDER BY id DESC LIMIT 1",
+    [userId, ref]
+  );
+  const amount = orig.length ? Number(orig[0].amount) : 15;
+  if (amount <= 0) return 0;
+  const [ins] = await conn.execute(
+    'INSERT IGNORE INTO points_log (user_id, amount, reason, ref_id) VALUES (?, ?, ?, ?)',
+    [userId, amount, 'app_submit_restore', ref + ':apprestore']
+  );
+  if (ins.affectedRows === 0) return 0; // 已补发过
+  await conn.execute('UPDATE users SET points = points + ? WHERE id = ?', [amount, userId]);
+  return amount;
+}
+
 // 事务内作废某作品相关的生效中商城购买（R3-4，2026-08-21）：
 // 删除文件/轻应用时调用，避免 wall_top 等记录在目标已删后仍残留"生效中"。
 // 频道类（app_top/app_essence）的外部撤销由调用方在提交后尽力执行（见 channelOps）。
@@ -361,4 +386,4 @@ async function grantCapped(userId, reason, refId, amount, dailyCap) {
   }
 }
 
-module.exports = { RULES, grant, grantInTx, grantCapped, getPoints, spend, spendPending, settlePurchase, revoke, revokeInTx, restoreFileSubmitInTx, deactivatePurchasesInTx, bonusAmount };
+module.exports = { RULES, grant, grantInTx, grantCapped, getPoints, spend, spendPending, settlePurchase, revoke, revokeInTx, restoreFileSubmitInTx, restoreAppSubmitInTx, deactivatePurchasesInTx, bonusAmount };

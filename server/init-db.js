@@ -62,6 +62,16 @@ async function main() {
       );
       console.log('[init-db] ✅ users.github_uid / github_login / github_token_enc 列已补充（存量库迁移）');
     }
+    // 存量库迁移：files 表补 source 列（2026-08-25 一句话生成小程序：区分手动上传/站内生成）
+    const [srcCols] = await conn.query(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'files' AND COLUMN_NAME = 'source'"
+    );
+    if (srcCols.length === 0) {
+      await conn.query(
+        "ALTER TABLE files ADD COLUMN source VARCHAR(16) NOT NULL DEFAULT 'upload' COMMENT '来源：upload=手动上传 / gen=站内一句话生成' AFTER audit_reason"
+      );
+      console.log('[init-db] ✅ files.source 列已补充（存量库迁移）');
+    }
     console.log('[init-db] ✅ 建表完成：users / files / admin_log');
   } finally {
     await conn.end();

@@ -20,8 +20,8 @@
 | 提交总览 | 统计卡片 + 每班卡片（学生数 / 文件数 / 轻应用数 / 总大小），可展开学生与项目明细 |
 | AI 轻应用 | 自动/手动识别 QQ 频道帖子中的 AI 轻应用并收集（作者硬校验） |
 | GitHub 项目 | 连接 GitHub 账号后从下拉选择本人项目提交（**仅公开项目可选，私有项目置灰展示**；不再手填链接）；选完自动读 README 调**智谱 GLM（glm-4.7-flash）**生成名称与简介；OAuth 一键核验所有权（owner 是本人 + 非 Fork）→ +25⭐ |
-| 学AI 栏目 | 5 章 AI 教程（Markdown，自研渲染器），每章含 B站视频 / 单选题 / 实操任务 |
-| 积分体系 | 首登 +10、阅读 **+8**、整章任务 **+15**、提交文件 **+25**（与 GitHub 项目**合计**最多计 5 个，2026-08-20）、提交应用 **+15**（最多计 3 个）、**GitHub 项目外链 +25**（与作品文件**合计**最多计 5 个）、主动点赞 +2（日上限 10）、**被赞 +5（日上限 20，P3）**、毕业 **+40**、彩蛋 +5；幂等发放 + 计数上限 + 排行榜；**访客不进榜（O1）**，排行榜**默认「在校」可切「全部」（2026-08-16）**；人工评委可经后台调积分发放评审分；**限时加成（2026-08-20~23 北京时间）**：窗口内获得的所有正向积分 ×1.2（`utils/points.js` `bonusAmount`，覆盖 grant/grantCapped/评审 applyJudgePoints） |
+| 学AI 栏目 | 5 章 AI 教程（Markdown，自研渲染器），每章含 B站视频 / 单选题 / 实操任务；第2章实操为站内「一句话生成小程序」（genappcheck 核验 files.source='gen'，2026-08-25 改版）；第3章 projectcheck **排除 gen 来源**；第4章改为「项目级AI应用：认识 GitHub」纯答题（slug ai-deploy→ai-project，id 不变） |
+| 积分体系 | 首登 +10、阅读 **+8**、整章任务 **+15**、提交文件 **+25**（与 GitHub 项目**合计**最多计 5 个，2026-08-20）、提交应用 **+15**（最多计 3 个；2026-08-25 起站内「一句话生成」作品与频道轻应用完全等价、共享名额）、**GitHub 项目外链 +25**（与作品文件**合计**最多计 5 个）、主动点赞 +2（日上限 10）、**被赞 +5（日上限 20，P3）**、毕业 **+40**、彩蛋 +5；幂等发放 + 计数上限 + 排行榜；**访客不进榜（O1）**，排行榜**默认「在校」可切「全部」（2026-08-16）**；人工评委可经后台调积分发放评审分；**限时加成（2026-08-20~23 北京时间）**：窗口内获得的所有正向积分 ×1.2（`utils/points.js` `bonusAmount`，覆盖 grant/grantCapped/评审 applyJudgePoints） |
 | 跨站体验 | 第1章实操任务跳转 NFTI（nfti.weaxi.cn）自动登录（HMAC ticket），完成人格测试自动核验 |
 
 ## 技术栈
@@ -112,6 +112,9 @@ npm run dev            # 或 npm start
 | `GITHUB_OAUTH_CLIENT_ID/SECRET` | GitHub OAuth App 凭据（所有权验证用，2026-08-21 起取代放文件校验） | — |
 | `GITHUB_OAUTH_CALLBACK_URL` | OAuth 回调地址（需与 GitHub OAuth App 注册一致） | `https://pat.weaxi.cn/api/github/oauth/callback` |
 | `GITHUB_OAUTH_SCOPE` | OAuth 授权范围：`repo`（默认，可列出全部项目；私有项目仅展示置灰不可选）/ `public_repo`（只列公开项目） | `repo` |
+| `GENAPP_PROVIDER` | 一句话生成小程序的模型提供方：`glm` / `deepseek`（凭据复用 GLM_/DEEPSEEK_ 配置） | `glm` |
+| `GENAPP_MODEL` / `GENAPP_FALLBACK_MODEL` | 生成用模型及回退模型（留空用各 provider 默认） | — |
+| `GENAPP_TIMEOUT_MS` | 生成专用长超时（勿复用审查用的短超时；nginx 需配 `proxy_read_timeout 180s`） | `150000` |
 
 ## API
 
@@ -155,6 +158,11 @@ npm run dev            # 或 npm start
 | GET | `/api/learn/:slug` | — | 文章详情（含 tasks） |
 | GET | `/api/learn/nfti-ticket` | Bearer | 签发 NFTI 跨站体验 ticket（需 QQ 登录） |
 | GET | `/api/learn/nfti-status` | Bearer | 是否已在 NFTI 完成人格测试 |
+| GET | `/api/learn/gen-status` | Bearer | 是否提交过站内生成的小程序（第2章 genappcheck 核验，2026-08-25） |
+| POST | `/api/gen/app` | Bearer | 一句话生成小程序草稿：限流 10 次/人/日 + 全局并发 ≤3；返回 draft_token + preview_url（30min 有效） |
+| GET | `/api/gen/preview/:draft_token` | Bearer | 草稿预览（CSP 禁外联，前端 sandbox iframe 加载） |
+| POST | `/api/gen/commit` | Bearer | 提交落库 files(source='gen')：配额复查 + DeepSeek 审查；不发 file_submit 积分 |
+| DELETE | `/api/gen/draft/:draft_token` | Bearer | 丢弃草稿 |
 | GET | `/api/points` | Bearer | 我的积分与流水 |
 | GET | `/api/points/leaderboard` | Bearer | 积分排行榜（top20 + 我的排名） |
 | GET | `/api/points/class-stats` | Bearer | 年级/班级积分统计榜（年级 3 个 + 班级 TOP5，仅在校 QQ 用户，2026-08-22） |

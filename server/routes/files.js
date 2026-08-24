@@ -185,7 +185,11 @@ router.delete(
         return res.status(404).json({ error: '文件不存在' });
       }
       storedName = rows[0].stored_name;
-      revoked = await revokeInTx(conn, req.user.id, 'file_submit', 'file:' + fid);
+      revoked = (await revokeInTx(conn, req.user.id, 'file_submit', 'file:' + fid)) || 0;
+      // 站内生成作品（source='gen'）曾以 app_submit 计分（与频道轻应用等价，2026-08-25）：
+      // 删除时一并回扣；普通上传无此流水，revokeInTx 查不到安全返回 null。名额不释放（防刷分口径）。
+      revoked += (await revokeInTx(conn, req.user.id, 'app_submit', 'file:' + fid)) || 0;
+      await deactivatePurchasesInTx(conn, req.user.id, 'file', fid);
       await deactivatePurchasesInTx(conn, req.user.id, 'file', fid);
       await conn.execute('DELETE FROM files WHERE id = ?', [fid]);
       await conn.commit();
