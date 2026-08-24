@@ -169,7 +169,9 @@ async function sweepStalePending() {
 }
 
 // 清理超期生成草稿（storage/tmp-gen/<userId>/*.html，TTL 宽容到 2h）
+// + 清理创作槽中 7 天未更新的版本（2026-08-25 创作槽功能）：未提交的历史版本不占作品配额，但也不能无限堆积
 async function sweepStaleGenDrafts() {
+  // a) 临时草稿
   const root = genApp.genTmpDir();
   try {
     const users = await fs.promises.readdir(root).catch(() => []);
@@ -189,6 +191,21 @@ async function sweepStaleGenDrafts() {
       if (rest.length === 0) await fs.promises.rmdir(dir).catch(() => {});
     }
   } catch (_) { /* 目录不存在等：忽略 */ }
+
+  // b) 创作槽 7 天未动的版本：删记录 + 删文件（活跃槽不受影响）
+  try {
+    const stale = await query(
+      'SELECT id, stored_path FROM gen_versions WHERE created_at < (NOW() - INTERVAL 7 DAY) LIMIT 200');
+    for (const v of stale) {
+      fs.promises.unlink(path.join(genApp.genStoreDir(), v.stored_path)).catch(() => {});
+    }
+    if (stale.length) {
+      await query(
+        `DELETE v FROM gen_versions v JOIN gen_slots s ON s.id = v.slot_id
+         WHERE v.created_at < (NOW() - INTERVAL 7 DAY)`);
+      console.log('[jobs] 已清理', stale.length, '个超期创作槽版本');
+    }
+  } catch (err) { /* 表可能尚未创建：忽略 */ }
 }
 
 function startJobs() {
