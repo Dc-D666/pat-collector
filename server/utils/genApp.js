@@ -47,7 +47,15 @@ function thinkingParam(model) {
   return /glm-(4\.[5-9]|v[0-9])/.test(String(model)) ? { type: 'enabled' } : undefined;
 }
 
-async function callChat(cfg, model, prompt) {
+// 组装用户消息：带 prevHtml 时进入「改进模式」——把上一版代码作为上下文增量改进而非从零重写
+function buildUserPrompt(prompt, prevHtml) {
+  if (!prevHtml) return '请根据以下需求生成小程序：\n\n' + prompt;
+  return '这是你上一版生成的代码，用户提出了修改意见。请在保留其合理部分的基础上，按新需求改进，输出完整的改进后 HTML：\n\n【新需求/修改意见】\n' + prompt + '\n\n【上一版代码】\n' + prevHtml;
+}
+
+const GEN_MAX_TOKENS = 32000;
+
+async function callChat(cfg, model, prompt, prevHtml) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.genApp.timeoutMs);
   try {
@@ -61,10 +69,10 @@ async function callChat(cfg, model, prompt) {
         model,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: '请根据以下需求生成小程序：\n\n' + prompt },
+          { role: 'user', content: buildUserPrompt(prompt, prevHtml) },
         ],
         temperature: 0.6,
-        max_tokens: 24000, // 思考+正文共用预算，2026-08-25 由 16000 放宽
+        max_tokens: GEN_MAX_TOKENS, // 思考+正文共用预算（32k，2026-08-25 放宽）
         thinking: thinkingParam(model),
         signal: controller.signal,
       }),
@@ -132,7 +140,7 @@ async function generateAppHtml(idea) {
 // 流式生成：stream:true 调 GLM/DeepSeek，逐段回调 onDelta(text, isReasoning)，返回完整正文
 // （reasoning_content = 思考过程，content = 正文；只把正文累计进返回值）
 // 失败自动换回退模型重试一次（仅限尚未收到任何增量时）
-async function streamChat(cfg, model, prompt, onDelta, signal) {
+async function streamChat(cfg, model, prompt, onDelta, signal, prevHtml) {
   const res = await fetch(cfg.baseUrl + '/chat/completions', {
     method: 'POST',
     headers: {
@@ -143,10 +151,10 @@ async function streamChat(cfg, model, prompt, onDelta, signal) {
       model,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: '请根据以下需求生成小程序：\n\n' + prompt },
+        { role: 'user', content: buildUserPrompt(prompt, prevHtml) },
       ],
       temperature: 0.6,
-      max_tokens: 24000, // 思考+正文共用预算，2026-08-25 由 16000 放宽
+      max_tokens: GEN_MAX_TOKENS, // 思考+正文共用预算（32k，2026-08-25 放宽）
       thinking: thinkingParam(model),
       stream: true,
     }),
@@ -195,11 +203,11 @@ async function generateAppHtmlStream(idea, onDelta, signal) {
   let gotAny = false;
   const wrappedDelta = (t, isR) => { gotAny = true; onDelta(t, isR); };
   try {
-    raw = await streamChat(cfg, cfg.model, prompt, wrappedDelta, signal);
+    raw = await streamChat(cfg, cfg.model, prompt, wrappedDelta, signal, prev);
   } catch (err) {
     if (gotAny || !cfg.fallbackModel || cfg.fallbackModel === cfg.model) throw err;
     console.warn('[genApp] 主模型流式失败，回退 ' + cfg.fallbackModel + '：', err.message);
-    raw = await streamChat(cfg, cfg.fallbackModel, prompt, wrappedDelta, signal);
+    raw = await streamChat(cfg, cfg.fallbackModel, prompt, wrappedDelta, signal, prev);
   }
   const html = extractHtml(raw);
   if (!html) {

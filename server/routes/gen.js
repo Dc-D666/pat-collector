@@ -95,11 +95,15 @@ router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, 
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no', // nginx 不缓冲，保证流式实时到达
     });
+    // 立即回执：让前端马上知道链路已通（GLM 免费档首 token 排队可能 ~20s，避免用户以为卡死）
+    send({ type: 'start', context: !!(req.body && req.body.prev_html) });
     try {
+      const prevHtml = String((req.body && req.body.prev_html) || '').slice(0, 100000);
       const html = await genApp.generateAppHtmlStream(
         idea,
         (t, isReasoning) => send({ type: 'delta', text: t, reasoning: !!isReasoning }),
-        controller.signal
+        controller.signal,
+        prevHtml
       );
       // 新草稿覆盖旧草稿（一次只保留最新一份）
       await fs.promises.rm(genApp.userDraftDir(req.user.id), { recursive: true, force: true }).catch(() => {});
@@ -110,6 +114,7 @@ router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, 
         draft_token: token,
         preview_url: '/api/gen/preview/' + encodeURIComponent(token),
         expires_in_minutes: Math.round(config.genApp.draftTtlMs / 60000),
+        html, // 下发给前端留存，作为「修改后重新生成」的上下文
       });
     } catch (err) {
       if (closed) return; // 客户端已断开，无需回报

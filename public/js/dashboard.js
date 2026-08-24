@@ -57,6 +57,17 @@ Views.files = () => {
             <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
             <span id="gen-hint" style="font-size:12px;color:var(--text-dim);"></span>
           </div>
+          <!-- 内嵌预览区（不再用弹窗）：生成成功后展示，含预览/标题/提交/重生成 -->
+          <div id="gen-preview-inline" style="display:none;margin-top:12px;">
+            <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📺 预览你的小程序</div>
+            <iframe id="gen-preview-frame" sandbox="allow-scripts allow-modals" style="width:100%;height:min(60vh,480px);border:1px solid var(--border);border-radius:10px;background:#fff;"></iframe>
+            <div class="field" style="margin-top:10px;"><label>作品标题（提交后可参与全校作品展）</label><input id="gen-title" type="text" maxlength="100" placeholder="给作品起个名字" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
+            <div class="form-error" id="gen-commit-error"></div>
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+              <button class="btn btn-ghost" id="gen-regen" type="button">🔄 不满意，修改后重新生成</button>
+              <button class="btn btn-primary" id="gen-commit" type="button">✅ 满意，提交</button>
+            </div>
+          </div>
         </div>
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
@@ -140,9 +151,10 @@ Views.files = () => {
     ideaEl.addEventListener('focus', () => {
       if (!ideaEl.value && hintEl) hintEl.textContent = '💡 没灵感？试试：' + GEN_EXAMPLES[Math.floor(Math.random() * GEN_EXAMPLES.length)];
     });
-    // 当前草稿令牌：提在 initGenApp 层级，供 showGenPreview 内的重新生成/提交按钮访问
-    // （此前误声明在 btn.onclick 内部，弹窗按钮引用时抛 ReferenceError 导致“无响应”）
+    // 当前草稿令牌 + 上一版代码（供「修改后重新生成」携带上下文）
     let draftToken = '';
+    let lastHtml = '';        // 最近一次生成的完整 HTML（done 事件下发）
+    let regenContext = null;  // 点「不满意，修改后重新生成」后置为 lastHtml，下一次请求作为上下文
     btn.onclick = async () => {
       errEl.classList.remove('show');
       const idea = ideaEl.value.trim();
@@ -164,7 +176,7 @@ Views.files = () => {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + API.getToken(),
           },
-          body: JSON.stringify({ idea }),
+          body: JSON.stringify(regenContext ? { idea, prev_html: regenContext } : { idea }),
           signal: controller.signal,
         });
         clearTimeout(timer);
@@ -189,20 +201,23 @@ Views.files = () => {
             if (!chunk.startsWith('data:')) continue;
             try {
               const ev = JSON.parse(chunk.slice(5).trim());
-              if (ev.type === 'delta') {
+              if (ev.type === 'start') {
+                // 链路已通的即时反馈（免费档首 token 排队可能 ~20s，避免用户以为卡死）
+                logEl.value += ev.context ? '✅ 已连接（改进模式：将基于上一版修改）…\n' : '✅ 已连接生成服务…\n';
+              } else if (ev.type === 'delta') {
                 if (ev.reasoning) {
-                  // 思考过程：直接追加展示
                   logEl.value += ev.text;
                 } else {
-                  // 正式代码输出开始：清空思考内容，改为流式展示正文
                   if (!sawContent) { logEl.value = ''; sawContent = true; }
                   logEl.value += ev.text;
                 }
-                logEl.scrollTop = logEl.scrollHeight; // 有新内容时滚到底
+                logEl.scrollTop = logEl.scrollHeight;
               } else if (ev.type === 'error') {
                 streamErr = new Error(ev.message || '生成失败');
               } else if (ev.type === 'done') {
                 draftToken = ev.draft_token;
+                lastHtml = ev.html || '';
+                regenContext = null;
               }
             } catch (_) { /* 忽略不完整块 */ }
           }
@@ -221,25 +236,24 @@ Views.files = () => {
       }
     };
 
-    // 预览弹层：sandbox iframe + 重新生成 / 满意提交
+    // 内嵌预览区：渲染到卡片内的 #gen-preview-inline（不再用弹窗）
     function showGenPreview(genData) {
-      openModal(`
-        <h3 class="modal-title">预览你的小程序</h3>
-        <iframe class="gen-preview-frame" src="${genData.preview_url}" sandbox="allow-scripts allow-modals" style="width:100%;height:min(60vh,480px);border:1px solid var(--border);border-radius:10px;background:#fff;"></iframe>
-        <div class="field" style="margin-top:12px;"><label>作品标题（提交后可参与全校作品展）</label><input id="gen-title" type="text" maxlength="100" placeholder="给作品起个名字" /></div>
-        <div class="form-error" id="gen-commit-error"></div>
-        <div class="modal-actions">
-          <button class="btn btn-ghost" id="gen-regen">🔄 不满意，重新生成</button>
-          <button class="btn btn-primary" id="gen-commit">✅ 满意，提交</button>
-        </div>`);
+      const box = document.getElementById('gen-preview-inline');
+      if (!box) return;
+      box.style.display = '';
+      const frame = document.getElementById('gen-preview-frame');
+      if (frame) frame.src = genData.preview_url; // iframe 原生导航，无需 Bearer（draft_token 即身份）
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
       document.getElementById('gen-regen').onclick = () => {
-        // 作废草稿并关闭弹层：从零重新生成（非增量修改）——输入框保留原描述，
-        // 可直接改几个字微调需求后重新点「开始生成」
+        // 作废草稿；把上一版代码作为上下文保留——下次生成将基于上一版改进而非从零重写。
+        // 输入框保留原描述，可直接改成新的修改意见（如“加上科学计数法”）
         if (draftToken) API.del('/api/gen/draft/' + encodeURIComponent(draftToken)).catch(() => {});
-        closeModal();
+        regenContext = lastHtml || null;
         draftToken = '';
+        box.style.display = 'none';
         ideaEl.focus();
-        if (hintEl) hintEl.textContent = '✏️ 可修改描述后重新生成；越具体效果越好';
+        if (hintEl) hintEl.textContent = regenContext ? '🔁 将基于上一版修改：直接在上方输入修改意见' : '✏️ 可修改描述后重新生成；越具体效果越好';
       };
       document.getElementById('gen-commit').onclick = async () => {
         const commitErr = document.getElementById('gen-commit-error');
@@ -252,7 +266,9 @@ Views.files = () => {
         cbtn.textContent = '提交中…';
         try {
           await API.post('/api/gen/commit', JSON.stringify({ draft_token: draftToken, title }));
-          closeModal();
+          box.style.display = 'none';
+          draftToken = '';
+          lastHtml = '';
           toast('✅ 作品已提交，可在下方列表查看；去 AI 小学堂第2章打卡吧！');
           loadFiles();
         } catch (err) {
