@@ -236,6 +236,28 @@ function draftTokenVerify(token, userId) {
   }
 }
 
+// 仅验证签名与有效期的版本（供 iframe 预览等无法携带 Bearer 的场景）：
+// 信任令牌内嵌的 uid 作为身份（HMAC 签名保证不可伪造，30min 过期限制窗口）
+function draftTokenVerifySelf(token) {
+  if (typeof token !== 'string') return null;
+  const dot = token.indexOf('.');
+  if (dot < 0) return null;
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = signBody(body);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!payload.uid || !payload.fn || !payload.exp) return null;
+    if (Date.now() > payload.exp) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
 // 草稿目录：storage/tmp-gen/<userId>/<uuid>.html
 function genTmpDir() {
   return path.join(path.resolve(config.storageDir, '..'), 'tmp-gen');
@@ -256,4 +278,4 @@ function draftPath(userId, filename) {
   return path.join(userDraftDir(userId), filename);
 }
 
-module.exports = { generateAppHtml, generateAppHtmlStream, draftTokenIssue, draftTokenVerify, saveDraft, draftPath, genTmpDir, userDraftDir, extractHtml };
+module.exports = { generateAppHtml, generateAppHtmlStream, draftTokenIssue, draftTokenVerify, draftTokenVerifySelf, saveDraft, draftPath, genTmpDir, userDraftDir, extractHtml };

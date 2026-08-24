@@ -131,16 +131,18 @@ router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, 
   }
 });
 
-// 草稿预览（sandbox iframe 加载）：校验签名 + 归属
-router.get('/preview/:draft_token', requireAuth, async (req, res, next) => {
+// 草稿预览（sandbox iframe 加载）：凭 draft_token 自证身份，不走 Bearer——
+// iframe 的 src 是浏览器原生导航，无法携带 Authorization 头（fetch 才行）。
+// draft_token 本身即能力令牌：HMAC 签名 + 内含 userId + 30min 过期 + 文件名白名单，
+// 拿到链接者仅能在有效期内查看该份草稿，风险可控。仍保留 CSP 禁外联防 XSS。
+router.get('/preview/:draft_token', async (req, res, next) => {
   try {
-    const payload = genApp.draftTokenVerify(req.params.draft_token, req.user.id);
+    const payload = genApp.draftTokenVerifySelf(req.params.draft_token);
     if (!payload) return res.status(404).json({ error: '草稿不存在或已过期，请重新生成' });
-    const p = genApp.draftPath(req.user.id, payload.fn);
+    const p = genApp.draftPath(payload.uid, payload.fn); // 路径由令牌内的 uid 解析，令牌即身份
     if (!p || !fs.existsSync(p)) return res.status(404).json({ error: '草稿文件已丢失，请重新生成' });
-    // 安全口径对齐现有 HTML 预览：CSP 禁外联 + sandbox 响应头（前端 iframe 另加 sandbox 属性）。
-    // X-Frame-Options 覆盖全局中间件的 DENY：本端点就是设计给自己页面 iframe 同源嵌入的，
-    // 改为 SAMEORIGIN（仍防第三方站嵌套），否则弹窗预览会被浏览器拦截「拒绝连接」。
+    // 安全口径：CSP 禁外联 + sandbox 响应头；X-Frame-Options 覆盖全局中间件的 DENY——
+    // 本端点设计给自己页面 iframe 同源嵌入，改 SAMEORIGIN 仍防第三方站嵌套。
     res.set({
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:",
