@@ -75,6 +75,62 @@ router.post('/app', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, max: co
   }
 });
 
+// 流式生成（SSE）：逐段推送大模型输出，前端实时展示；完成后推送 draft_token
+// 事件格式：data: {"type":"delta","text":"…"} / {"type":"done",draft_token,…} / {"type":"error","message":"…"}
+router.post('/app/stream', requireAuth, rateLimit({ windowMs: 24 * 3600 * 1000, max: config.genApp.maxPerUserPerDay, keyFn: (r) => 'gen:' + r.user.id }), async (req, res, next) => {
+  try {
+    if (!(await assertEnabled(res))) return;
+    const idea = String((req.body && req.body.idea) || '').trim();
+    if (!idea) return res.status(400).json({ error: '请先描述你想做的小程序' });
+
+    await acquire();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), config.genApp.timeoutMs + 10000);
+    let closed = false;
+    req.on('close', () => { closed = true; controller.abort(); }); // 客户端断开则中止上游
+    const send = (obj) => { if (!closed) res.write('data: ' + JSON.stringify(obj) + '\n\n'); };
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no', // nginx 不缓冲，保证流式实时到达
+    });
+    try {
+      const html = await genApp.generateAppHtmlStream(
+        idea,
+        (t) => send({ type: 'delta', text: t }),
+        controller.signal
+      );
+      // 新草稿覆盖旧草稿（一次只保留最新一份）
+      await fs.promises.rm(genApp.userDraftDir(req.user.id), { recursive: true, force: true }).catch(() => {});
+      const filename = await genApp.saveDraft(req.user.id, html);
+      const token = genApp.draftTokenIssue(req.user.id, filename);
+      send({
+        type: 'done',
+        draft_token: token,
+        preview_url: '/api/gen/preview/' + encodeURIComponent(token),
+        expires_in_minutes: Math.round(config.genApp.draftTtlMs / 60000),
+      });
+    } catch (err) {
+      if (closed) return; // 客户端已断开，无需回报
+      if (err.name === 'AbortError' || err.code === 'ABORT_ERR') {
+        send({ type: 'error', message: '生成超时，请稍后重试' });
+      } else if (err.code === 'GEN_FORMAT') {
+        send({ type: 'error', message: err.message });
+      } else {
+        console.error('[gen] 流式生成失败：', err.message);
+        send({ type: 'error', message: '生成服务暂时不可用，请稍后再试' });
+      }
+    } finally {
+      clearTimeout(timer);
+      release();
+      if (!closed) res.end();
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
 // 草稿预览（sandbox iframe 加载）：校验签名 + 归属
 router.get('/preview/:draft_token', requireAuth, async (req, res, next) => {
   try {

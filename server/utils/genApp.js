@@ -122,6 +122,83 @@ async function generateAppHtml(idea) {
   return html;
 }
 
+// 流式生成：stream:true 调 GLM/DeepSeek，逐段回调 onDelta(text)，返回完整原始输出
+// 失败自动换回退模型重试一次（仅限尚未收到任何增量时）
+async function streamChat(cfg, model, prompt, onDelta, signal) {
+  const res = await fetch(cfg.baseUrl + '/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + cfg.apiKey,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: '请根据以下需求生成小程序：\n\n' + prompt },
+      ],
+      temperature: 0.6,
+      max_tokens: 16000,
+      stream: true,
+    }),
+    signal,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error('HTTP ' + res.status + ' ' + body.slice(0, 200));
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let full = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    // SSE 行解析：data: {...} / data: [DONE]
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') continue;
+      try {
+        const j = JSON.parse(payload);
+        const piece = j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
+        if (piece) { full += piece; onDelta(piece); }
+      } catch (_) { /* 忽略不完整行 */ }
+    }
+  }
+  if (!full) throw new Error('模型返回为空');
+  return full;
+}
+
+// 流式入口：主模型失败且未产出任何内容时回退模型重来；结束后提取校验
+async function generateAppHtmlStream(idea, onDelta, signal) {
+  const cfg = providerCfg();
+  if (!cfg.apiKey) throw new Error('未配置生成模型 API Key');
+  const prompt = String(idea || '').slice(0, config.genApp.maxIdeaChars);
+
+  let raw;
+  let gotAny = false;
+  const wrappedDelta = (t) => { gotAny = true; onDelta(t); };
+  try {
+    raw = await streamChat(cfg, cfg.model, prompt, wrappedDelta, signal);
+  } catch (err) {
+    if (gotAny || !cfg.fallbackModel || cfg.fallbackModel === cfg.model) throw err;
+    console.warn('[genApp] 主模型流式失败，回退 ' + cfg.fallbackModel + '：', err.message);
+    raw = await streamChat(cfg, cfg.fallbackModel, prompt, wrappedDelta, signal);
+  }
+  const html = extractHtml(raw);
+  if (!html) {
+    const e = new Error('生成的内容不是有效的完整 HTML，请调整描述后重试');
+    e.code = 'GEN_FORMAT';
+    throw e;
+  }
+  return html;
+}
+
 // ---- 草稿令牌：base64url(payload).HMAC（payload 含 userId/filename/exp）----
 
 function b64url(buf) {
@@ -179,4 +256,4 @@ function draftPath(userId, filename) {
   return path.join(userDraftDir(userId), filename);
 }
 
-module.exports = { generateAppHtml, draftTokenIssue, draftTokenVerify, saveDraft, draftPath, genTmpDir, extractHtml };
+module.exports = { generateAppHtml, generateAppHtmlStream, draftTokenIssue, draftTokenVerify, saveDraft, draftPath, genTmpDir, userDraftDir, extractHtml };

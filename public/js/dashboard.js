@@ -51,6 +51,7 @@ Views.files = () => {
           </div>
           <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">用一句话描述你想做的小游戏/小工具，AI 会生成一个能玩的小程序。生成的作品和频道轻应用一样计入「提交应用」积分。示例：做一个 5 以内加减法答题小游戏，每轮 5 题，答对加 1 分</div>
           <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
+          <textarea id="gen-log" rows="4" readonly placeholder="生成过程输出…" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
           <div class="form-error" id="gen-error"></div>
           <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
             <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
@@ -143,21 +144,70 @@ Views.files = () => {
       errEl.classList.remove('show');
       const idea = ideaEl.value.trim();
       if (!idea) { errEl.textContent = '请先用一句话描述你的想法'; errEl.classList.add('show'); return; }
+      const logEl = document.getElementById('gen-log');
       btn.disabled = true;
       btn.textContent = '⏳ AI 正在编写…';
-      if (hintEl) hintEl.textContent = '约需 30 秒～ 2 分钟，请耐心等待，不要关闭页面';
+      if (hintEl) hintEl.textContent = '约需 30 秒～ 2 分钟，可实时查看下方输出';
+      // 流式输出框：展示模型逐段输出的内容，自动滚动到底部（用户可手动滚动）
+      logEl.style.display = '';
+      logEl.value = '';
       let draftToken = '';
       try {
-        const data = await API.post('/api/gen/app', JSON.stringify({ idea }), 180000); // 生成耗时 30s~2min，必须传长超时（默认 15s 会中断）
-        draftToken = data.draft_token;
-        showGenPreview(data);
+        // 手动 fetch 消费 SSE（API.request 不支持流式读取）；Bearer 走请求头
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 180000);
+        const res = await fetch('/api/gen/app/stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + API.getToken(),
+          },
+          body: JSON.stringify({ idea }),
+          signal: controller.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok || !res.body) {
+          let msg = '生成失败，请稍后再试';
+          try { msg = (await res.json()).error || msg; } catch (_) { /* ignore */ }
+          throw new Error(msg);
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let streamErr = null;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buf.indexOf('\n\n')) >= 0) {
+            const chunk = buf.slice(0, idx).trim();
+            buf = buf.slice(idx + 2);
+            if (!chunk.startsWith('data:')) continue;
+            try {
+              const ev = JSON.parse(chunk.slice(5).trim());
+              if (ev.type === 'delta') {
+                logEl.value += ev.text;
+                logEl.scrollTop = logEl.scrollHeight; // 有新内容时滚到底；用户上滑后仍会拉回，如需保留阅读位置可再优化
+              } else if (ev.type === 'error') {
+                streamErr = new Error(ev.message || '生成失败');
+              } else if (ev.type === 'done') {
+                draftToken = ev.draft_token;
+              }
+            } catch (_) { /* 忽略不完整块 */ }
+          }
+        }
+        if (streamErr) throw streamErr;
+        if (!draftToken) throw new Error('生成中断，请重试');
+        showGenPreview({ draft_token: draftToken, preview_url: '/api/gen/preview/' + encodeURIComponent(draftToken) });
       } catch (err) {
-        errEl.textContent = err.message || '生成失败，请稍后再试';
+        errEl.textContent = (err && err.name === 'AbortError') ? '请求超时，请重试' : (err.message || '生成失败，请稍后再试');
         errEl.classList.add('show');
       } finally {
         btn.disabled = false;
         btn.textContent = '✨ 开始生成';
         if (hintEl) hintEl.textContent = '';
+        // 输出框保留内容供回看；下次生成时清空
       }
     };
 
