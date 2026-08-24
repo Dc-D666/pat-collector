@@ -214,6 +214,14 @@ Views.files = () => {
         let streamErr = null;
         let sawContent = false;
         let contentAcc = ''; // 正文累计（用于检测 <html 起点）
+
+        // 等待期动态反馈：首增量到达前每秒刷新（免费档排队可能很久，静默会让用户以为卡死）
+        let gotFirstDelta = false;
+        const t0 = Date.now();
+        const waitTimer = setInterval(() => {
+          if (gotFirstDelta) { clearInterval(waitTimer); return; }
+          logEl.value = '⏳ 正在等待模型响应… 已等待 ' + Math.round((Date.now() - t0) / 1000) + ' 秒\n（免费模型高峰期需排队，最长约 3 分钟；不想等可直接换模型）';
+        }, 1000);
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -228,6 +236,7 @@ Views.files = () => {
               if (ev.type === 'start') {
                 // 链路已通（静默：仅作占位，不向用户展示）
               } else if (ev.type === 'delta') {
+                if (!gotFirstDelta) { gotFirstDelta = true; clearInterval(waitTimer); logEl.value = ''; }
                 if (ev.reasoning) {
                   // 独立思考字段（GLM 4.7 等）：直接展示
                   logEl.value += ev.text;
@@ -269,6 +278,7 @@ Views.files = () => {
           errEl.classList.add('show');
         }
       } finally {
+        clearInterval(waitTimer);
         btn.disabled = false;
         btn.textContent = '✨ 开始生成';
         if (hintEl) hintEl.textContent = '';

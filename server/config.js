@@ -164,7 +164,7 @@ const config = {
     provider: process.env.GENAPP_PROVIDER || 'glm',            // 'glm' | 'deepseek'
     model: process.env.GENAPP_MODEL || '',                     // 留空用各 provider 默认模型
     fallbackModel: process.env.GENAPP_FALLBACK_MODEL || '',    // 留空用各 provider 默认回退模型
-    timeoutMs: parseInt(process.env.GENAPP_TIMEOUT_MS || '150000', 10),
+    timeoutMs: parseInt(process.env.GENAPP_TIMEOUT_MS || '240000', 10), // 免费档排队可能超2分钟，放宽到4分钟
     maxIdeaChars: 500,
     maxHtmlBytes: 1024 * 1024,
     maxPerUserPerDay: 10,      // 每人每天生成次数上限（rateLimit）
