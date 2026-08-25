@@ -72,11 +72,11 @@ Views.files = () => {
           <!-- 内嵌预览区（不再用弹窗）：生成成功后展示，含预览/标题/提交/重生成 -->
           <div id="gen-preview-inline" style="display:none;margin-top:12px;">
             <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📺 预览你的小程序</div>
-            <iframe id="gen-preview-frame" sandbox="allow-scripts allow-modals" style="width:100%;height:min(60vh,480px);border:1px solid var(--border);border-radius:10px;background:#fff;"></iframe>
-            <div class="field" style="margin-top:10px;"><label>作品标题</label><input id="gen-title" type="text" maxlength="100" placeholder="给作品起个名字" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
+            <iframe id="gen-preview-frame" sandbox="allow-scripts allow-modals" style="width:100%;height:360px;border:1px solid var(--border);border-radius:10px;background:#fff;"></iframe>
             <div class="form-error" id="gen-commit-error"></div>
-            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-              <button class="btn btn-ghost" id="gen-regen" type="button">🔄 不满意，修改后重新生成</button>
+            <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+              <input id="gen-title" type="text" maxlength="100" placeholder="作品标题" style="flex:1;min-width:150px;padding:9px 10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" />
+              <button class="btn" id="gen-regen" type="button">🔄 重新生成</button>
               <button class="btn btn-primary" id="gen-commit" type="button">✅ 满意，提交</button>
             </div>
           </div>
@@ -274,7 +274,7 @@ Views.files = () => {
         const b = document.createElement('button');
         b.className = 'btn btn-sm ' + (n === curSlot ? 'btn-primary' : 'btn-ghost');
         b.style.padding = '3px 10px';
-        b.textContent = '槽' + n + (d.versions.length ? '·' + d.versions.length : '');
+        b.textContent = '槽' + n;
         b.title = d.versions.length ? ('最近：' + (d.versions[0].idea || '').slice(0, 60)) : '空槽';
         b.onclick = () => switchSlot(n);
         box.appendChild(b);
