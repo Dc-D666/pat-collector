@@ -249,11 +249,16 @@ Views.files = () => {
     }
     loadGenQuota();
     bindClearSlot();
+    refreshSlots(); // 页面进入即加载：用过任意槽的用户始终显示作品槽行
 
     // ---- 创作槽：胶囊 + 对话记录渲染 ----
     function renderSlots() {
       const box = document.getElementById('gen-slot-pills');
       if (!box) return;
+      // 从未使用过（5 槽全空且无使用标记）→ 整行隐藏，不干扰首次体验
+      const everUsed = (() => { try { return localStorage.getItem('gen_slot_used') === '1'; } catch (_) { return false; } })();
+      const hasAnyVersion = Object.values(slotsData).some((sl) => sl.versions && sl.versions.length > 0);
+      box.style.display = (hasAnyVersion || everUsed) ? '' : 'none';
       box.innerHTML = '<span style="font-size:12px;color:var(--text-dim);margin-right:2px;">作品槽：</span>';
       for (let n = 1; n <= 5; n++) {
         const d = slotsData[n] || { versions: [] };
@@ -417,6 +422,7 @@ Views.files = () => {
                 if (ev.code === 'model_unavailable') { streamErr.modelUnavailable = true; streamErr.suppress = true; }
               } else if (ev.type === 'done') {
                 draftTokenNew = ev.draft_token;
+                try { localStorage.setItem('gen_slot_used', '1'); } catch (_) {}
                 loadGenQuota();
               }
             } catch (_) {}
