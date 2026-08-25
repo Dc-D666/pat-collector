@@ -174,6 +174,7 @@ Views.files = () => {
     let slotsData = {};
     let activeAbort = null;
     let waitTimer = null;
+    let intentionalAbort = false; // 切槽/重新生成的主动中止：不显示超时错误
     let curPreviewVersionId = null;
     let draftToken = '';
 
@@ -260,7 +261,7 @@ Views.files = () => {
       curSlot = n;
       try { localStorage.setItem('gen_slot', String(n)); } catch (_) {}
       // 切槽即切上下文：中止进行中请求，清空工作区
-      if (activeAbort) { try { activeAbort.abort(); } catch (_) {} activeAbort = null; }
+      if (activeAbort) { intentionalAbort = true; try { activeAbort.abort(); } catch (_) {} activeAbort = null; }
       clearInterval(waitTimer);
       draftToken = '';
       curPreviewVersionId = null;
@@ -390,7 +391,9 @@ Views.files = () => {
         if (hintEl) hintEl.textContent = '✅ 已生成 v' + ((slotsData[curSlot] || {}).versions[0] || {}).seq + '；可直接提交，或输入修改意见继续迭代';
       } catch (err) {
         clearInterval(waitTimer);
-        if (!(err && err.suppress)) {
+        const intentional = intentionalAbort && err && err.name === 'AbortError';
+        intentionalAbort = false;
+        if (!intentional && !(err && err.suppress)) {
           errEl.textContent = (err && err.name === 'AbortError') ? '请求超时，请重试' : (err.message || '生成失败，请稍后再试');
           errEl.classList.add('show');
         }
@@ -410,7 +413,7 @@ Views.files = () => {
       if (!regenBtn || !commitBtn) return;
       regenBtn.onclick = () => {
         if (draftToken) API.del('/api/gen/draft/' + encodeURIComponent(draftToken)).catch(() => {});
-        if (activeAbort) { try { activeAbort.abort(); } catch (_) {} activeAbort = null; }
+        if (activeAbort) { intentionalAbort = true; try { activeAbort.abort(); } catch (_) {} activeAbort = null; }
         clearInterval(waitTimer);
         draftToken = '';
         document.getElementById('gen-preview-inline').style.display = 'none';

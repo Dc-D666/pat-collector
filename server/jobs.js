@@ -192,7 +192,8 @@ async function sweepStaleGenDrafts() {
     }
   } catch (_) { /* 目录不存在等：忽略 */ }
 
-  // b) 创作槽 7 天未动的版本：删记录 + 删文件（活跃槽不受影响）
+  // b) 创作槽 7 天前生成的版本：删记录 + 删文件。注意按“版本生成时间”清理——
+  // 活跃槽的老版本同样会被清（仅保留近 7 天），存储有界；最新版本若被清掉则该槽从零继续
   try {
     const stale = await query(
       'SELECT id, stored_path FROM gen_versions WHERE created_at < (NOW() - INTERVAL 7 DAY) LIMIT 200');

@@ -46,16 +46,27 @@ function slotVersionPath(userId, slotNo, seq) {
 }
 async function saveSlotVersion(userId, slotNo, idea, html) {
   const slotId = await ensureSlot(userId, slotNo);
-  const [r] = await query('SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM gen_versions WHERE slot_id = ?', [slotId]);
-  const seq = Number(r.next);
-  const rel = slotVersionPath(userId, slotNo, seq);
-  const abs = path.join(genApp.genStoreDir(), rel);
-  await fs.promises.mkdir(path.dirname(abs), { recursive: true });
-  await fs.promises.writeFile(abs, html, 'utf8');
-  await query('INSERT INTO gen_versions (slot_id, seq, idea, stored_path) VALUES (?, ?, ?, ?)', [slotId, seq, String(idea).slice(0, 2000), rel]);
-  await query('UPDATE gen_slots SET updated_at = NOW() WHERE id = ?', [slotId]);
-  const [v] = await query('SELECT id FROM gen_versions WHERE slot_id = ? AND seq = ?', [slotId, seq]);
-  return { version_id: v.id, seq };
+  // 同槽并发生成可能算出相同 seq（MAX+1 竞态）撞 uq_slot_seq：最多重试 3 次
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const [r] = await query('SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM gen_versions WHERE slot_id = ?', [slotId]);
+    const seq = Number(r.next);
+    const rel = slotVersionPath(userId, slotNo, seq);
+    const abs = path.join(genApp.genStoreDir(), rel);
+    await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+    try {
+      await fs.promises.writeFile(abs, html, 'utf8');
+      await query('INSERT INTO gen_versions (slot_id, seq, idea, stored_path) VALUES (?, ?, ?, ?)', [slotId, seq, String(idea).slice(0, 2000), rel]);
+      await query('UPDATE gen_slots SET updated_at = NOW() WHERE id = ?', [slotId]);
+      const [v] = await query('SELECT id FROM gen_versions WHERE slot_id = ? AND seq = ?', [slotId, seq]);
+      return { version_id: v.id, seq };
+    } catch (err) {
+      lastErr = err;
+      fs.promises.unlink(abs).catch(() => {}); // 撞名时清掉本次落盘，换 seq 重来
+      if (err.code !== 'ER_DUP_ENTRY') throw err;
+    }
+  }
+  throw lastErr;
 }
 // 槽内上一版 HTML（改进模式上下文；跨会话也生效）
 async function latestSlotHtml(userId, slotNo) {
