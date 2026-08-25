@@ -54,19 +54,20 @@ Views.files = () => {
           </div>
           <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">描述你的想法，AI 生成一个能玩的小程序，作品计入「提交应用」积分</div>
           <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
-          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
-            <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
-            <span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">
-              <label for="gen-model" style="font-size:12px;color:var(--text-dim);">模型</label>
-              <select id="gen-model" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);">
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+            <label for="gen-model" style="font-size:13px;color:var(--text);">选择模型</label>
+            <select id="gen-model" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:var(--surface);">
               <option value="glm47" selected>GLM 4.7 Flash 30B</option>
               <option value="nemotron35">Nemotron 3.5 Lightning 30B</option>
               <option value="dots3note">Dots3-Note Preview 280B</option>
               <option value="nemotronultra">Nemotron 3 Ultra 550B</option>
               <option value="glm52">GLM-5.2 744B</option>
               <option value="inkling">Inkling 975B</option>
-              </select>
-            </span>
+            </select>
+            <span id="gen-model-help" title="怎么选模型？" style="flex-shrink:0;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border);display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--text-dim);cursor:pointer;user-select:none;">?</span>
+          </div>
+          <div style="margin-top:10px;">
+            <button class="btn btn-primary" id="gen-start-btn" type="button" style="width:100%;justify-content:center;">✨ 开始生成</button>
           </div>
           <div class="form-error" id="gen-error"></div>
           <textarea id="gen-log" rows="4" readonly placeholder="AI 输出结果将实时显示在这里…" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
@@ -83,6 +84,11 @@ Views.files = () => {
             </div>
           </div>
 
+          <!-- 对话记录（版本链时间线，紧凑单行式） -->
+          <details id="gen-history-box" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;">
+            <summary style="font-size:13px;cursor:pointer;color:var(--text-dim);display:flex;align-items:center;gap:8px;padding:4px 0;">💬 对话记录与历史版本<span id="gen-slot-clear" class="btn btn-sm btn-ghost" style="padding:1px 8px;margin-left:auto;color:var(--danger);" role="button">清空此槽</span></summary>
+            <div id="gen-history" style="max-height:180px;overflow-y:auto;font-size:12.5px;line-height:1.9;"></div>
+          </details>
         </div>
         <!-- 我的 AI 轻应用（已提交的站内生成作品）：gen-app-card 的兄弟卡 -->
         <div class="card" id="gen-myworks-card" style="display:none;margin-bottom:14px;">
@@ -192,6 +198,26 @@ Views.files = () => {
         if (saved && modelSel.querySelector(`option[value="${saved}"]`)) modelSel.value = saved;
         modelSel.addEventListener('change', () => localStorage.setItem('gen_model', modelSel.value));
       } catch (_) {}
+    }
+
+    // 「怎么选模型」帮助弹窗（面向初学者）
+    const helpBtn = document.getElementById('gen-model-help');
+    if (helpBtn) {
+      helpBtn.onclick = () => {
+        openModal(`
+          <h3 class="modal-title">怎么选模型？</h3>
+          <div style="font-size:13.5px;line-height:2;">
+            <p style="margin:0 0 10px;">简单说：<strong>数字越大（参数量越大），能力越强</strong>，但可靠性和速度可能会打一点折扣。</p>
+            <p style="margin:0 0 6px;">🎯 不确定就先用 <strong>GLM 4.7 Flash 30B</strong>：最稳定、最快。</p>
+            <p style="margin:0 0 6px;">🚀 想要更强效果：试试 Inkling 975B、GLM-5.2 744B，写出的程序可能更复杂好玩，但偶尔会慢或排队。</p>
+            <p style="margin:0;">💡 免费模型高峰期可能限流，遇到「暂不可用」换一个就行。</p>
+          </div>
+          <div class="modal-actions"><button class="btn btn-primary" id="gen-help-ok">知道了</button></div>`);
+        document.getElementById('gen-help-ok').onclick = () => {
+          // 复用 closeModal（Utils）
+          closeModal();
+        };
+      };
     }
 
     // 清空当前槽（confirm 后执行；不影响已提交作品）
