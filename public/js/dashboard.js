@@ -46,7 +46,7 @@ Views.files = () => {
         <!-- ✨ 一句话生成小程序（2026-08-25，AI 小学堂第2章配套；生成作品与频道轻应用完全等价） -->
         <div class="card" id="gen-app-card" style="margin-bottom:14px;">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
-            <h2 style="margin:0;font-size:17px;">✨ 一句话生成小程序</h2>
+            <h2 style="margin:0;font-size:17px;">✨ AI 轻应用 <span style="font-size:12px;font-weight:400;color:var(--text-dim);">· 站内一句话生成</span></h2>
             <span id="gen-quota" style="font-size:12px;color:var(--text-dim);">次数统计中…</span>
           </div>
           <div id="gen-slot-pills" style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
@@ -102,8 +102,8 @@ Views.files = () => {
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
             <div>
-              <h2 style="margin:0;font-size:17px;">识别你的 AI 轻应用</h2>
-              <div style="font-size:12px;color:var(--text-dim);">从你在 QQ 频道发布的帖子中提取应用链接，确认后提交</div>
+              <h2 style="margin:0;font-size:17px;">频道轻应用 <span style="font-size:12px;font-weight:400;color:var(--text-dim);">· QQ 频道原版</span></h2>
+              <div style="font-size:12px;color:var(--text-dim);">你在 QQ 频道内原版生成的轻应用：从频道帖子中提取链接，确认后投稿入库</div>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">${appsActionBtns}</div>
           </div>
