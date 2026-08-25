@@ -81,6 +81,15 @@ Views.files = () => {
             </div>
           </div>
 
+          <!-- 我的 AI 轻应用（已提交的站内生成作品） -->
+          <div class="card" id="gen-myworks-card" style="display:none;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+              <h2 style="margin:0;font-size:15px;">我的 AI 轻应用</h2>
+              <span style="font-size:12px;color:var(--text-dim);">已提交 · 计入「提交应用」积分 · 展示于全校作品展</span>
+            </div>
+            <div id="gen-myworks-list"></div>
+          </div>
+
           <!-- 对话记录（版本链时间线，紧凑单行式） -->
           <details id="gen-history-box" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;">
             <summary style="font-size:13px;cursor:pointer;color:var(--text-dim);display:flex;align-items:center;gap:8px;padding:4px 0;">💬 对话记录与历史版本<span id="gen-slot-clear" class="btn btn-sm btn-ghost" style="padding:1px 8px;margin-left:auto;color:var(--danger);" role="button">清空此槽</span></summary>
@@ -103,7 +112,7 @@ Views.files = () => {
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
             <div>
               <h2 style="margin:0;font-size:17px;">频道轻应用 <span style="font-size:12px;font-weight:400;color:var(--text-dim);">· QQ 频道原版</span></h2>
-              <div style="font-size:12px;color:var(--text-dim);">你在 QQ 频道内原版生成的轻应用：从频道帖子中提取链接，确认后投稿入库</div>
+              <div style="font-size:12px;color:var(--text-dim);">从你的 QQ 频道帖子中提取原版轻应用，确认后投稿</div>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">${appsActionBtns}</div>
           </div>
@@ -512,6 +521,39 @@ Views.files = () => {
     dz.addEventListener('drop', (e) => uploadFiles(e.dataTransfer.files));
   }
 
+  // 我的 AI 轻应用：站内生成并已提交的作品列表
+  function renderGenWorks(genWorks) {
+    const card = document.getElementById('gen-myworks-card');
+    const listEl = document.getElementById('gen-myworks-list');
+    if (!card || !listEl) return;
+    if (!genWorks.length) { card.style.display = 'none'; listEl.innerHTML = ''; return; }
+    card.style.display = '';
+    const isHtmlName = (name) => /\.(html?|htm)$/i.test(name || '');
+    listEl.innerHTML = genWorks.map((f) => `
+      <div class="file-row">
+        <div class="file-icon" style="background:#7c5cff;color:#fff;">${Icons.icon('app', 20)}</div>
+        <div class="file-info">
+          <div class="file-name">${escapeHtml(f.title || f.original_name)}</div>
+          <div class="file-meta">${formatSize(f.size)} · ${formatTime(f.uploaded_at)}</div>
+        </div>
+        <div class="file-actions">
+          ${isHtmlName(f.original_name) ? `<a class="btn btn-sm btn-primary" href="/preview.html?v=2#/file/${f.id}" target="_blank" rel="noopener">预览</a>` : ''}
+          <button class="btn btn-sm btn-ghost" data-gendel="${f.id}" data-name="${escapeHtml(f.title || f.original_name)}" style="color:var(--danger);">删除</button>
+        </div>
+      </div>`).join('');
+    listEl.querySelectorAll('[data-gendel]').forEach((b) => {
+      b.onclick = async () => {
+        const okDel = await confirm('确定删除「' + b.dataset.name + '」吗？删除后积分将回扣。', { danger: true });
+        if (!okDel) return;
+        try {
+          await API.del('/api/files/' + b.dataset.gendel);
+          toast('已删除');
+          loadFiles();
+        } catch (err) { toast(err.message || '删除失败'); }
+      };
+    });
+  }
+
   // 上传大小上限（MB），从 /api/auth/me 获取，用于上传前预检（避免 nginx 413 直接拦截）
   let maxUploadMb = null;
   async function getMaxUploadMb() {
@@ -662,13 +704,17 @@ Views.files = () => {
     const list = document.getElementById('file-list');
     if (!list) return;
     let files;
+    let genWorks = []; // 站内生成的 AI 轻应用（source='gen'）：归「AI 轻应用」栏，不混入项目文件
     try {
       const data = await API.get('/api/files');
-      files = data.files;
+      files = data.files || [];
+      genWorks = files.filter((f) => f.source === 'gen');
+      files = files.filter((f) => f.source !== 'gen');
     } catch (err) {
       list.innerHTML = `<div class="empty"><div class="empty-icon">${Icons.icon('error-circle', 26)}</div>${escapeHtml(err.message)}</div>`;
       return;
     }
+    renderGenWorks(genWorks);
     if (!files.length) {
       list.innerHTML = `<div class="empty"><div class="empty-icon">🗂️</div>暂无项目，快来上传第一份作品吧</div>`;
       return;

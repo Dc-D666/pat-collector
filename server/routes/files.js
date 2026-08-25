@@ -41,7 +41,7 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const rows = await query(
-      'SELECT id, original_name, size, mime_type, title, description, gameplay, audit_status, uploaded_at FROM files WHERE user_id = ? ORDER BY uploaded_at DESC, id DESC',
+      'SELECT id, original_name, size, mime_type, title, description, gameplay, audit_status, uploaded_at, source FROM files WHERE user_id = ? ORDER BY uploaded_at DESC, id DESC',
       [req.user.id]
     );
     res.json({ files: rows });
