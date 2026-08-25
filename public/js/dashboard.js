@@ -74,7 +74,7 @@ Views.files = () => {
             <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📺 预览你的小程序</div>
             <iframe id="gen-preview-frame" sandbox="allow-scripts allow-modals" style="width:100%;height:360px;border:1px solid var(--border);border-radius:10px;background:#fff;"></iframe>
             <div class="form-error" id="gen-commit-error"></div>
-            <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+            <div id="gen-preview-actions" style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
               <input id="gen-title" type="text" maxlength="100" placeholder="作品标题" style="flex:1;min-width:150px;padding:9px 10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" />
               <button class="btn" id="gen-regen" type="button">🔄 重新生成</button>
               <button class="btn btn-primary" id="gen-commit" type="button">✅ 满意，提交</button>
@@ -340,19 +340,25 @@ Views.files = () => {
       try {
         const d = await API.get('/api/gen/version/' + vid + '/token');
         curPreviewVersionId = vid;
-        showInlinePreview(d.preview_url);
+        showInlinePreview(d.preview_url, false); // 回看历史版本：只读，不显示提交/重新生成
         renderHistory();
         const v = (slotsData[curSlot].versions.find((x) => x.id === vid) || {});
         if (hintEl) hintEl.textContent = '👁 正在预览历史版本 v' + v.seq + '；点「开始生成」将基于最新版继续改进';
       } catch (err) { toast(err.message || '预览失败'); }
     }
 
-    function showInlinePreview(previewUrl) {
+    function showInlinePreview(previewUrl, showActions = true) {
       const box = document.getElementById('gen-preview-inline');
       if (!box) return;
       box.style.display = '';
       const frame = document.getElementById('gen-preview-frame');
       if (frame) frame.src = previewUrl;
+      // 操作行（重新生成/提交）仅对“当前草稿”有意义；回看历史版本时隐藏（只读），防止误提交过期草稿
+      const actionRow = document.getElementById('gen-preview-actions');
+      if (actionRow) actionRow.style.display = showActions ? '' : 'none';
+      const titleInput = document.getElementById('gen-title');
+      if (titleInput) titleInput.style.display = showActions ? '' : 'none';
+      bindPreviewActions();
       box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
