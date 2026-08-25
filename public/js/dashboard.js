@@ -56,15 +56,17 @@ Views.files = () => {
           <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
           <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
             <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
-            <label for="gen-model" style="font-size:12px;color:var(--text-dim);margin-left:auto;">模型</label>
-            <select id="gen-model" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);">
+            <span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">
+              <label for="gen-model" style="font-size:12px;color:var(--text-dim);">模型</label>
+              <select id="gen-model" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);">
               <option value="glm47" selected>GLM 4.7 Flash 30B</option>
               <option value="nemotron35">Nemotron 3.5 Lightning 30B</option>
               <option value="dots3note">Dots3-Note Preview 280B</option>
               <option value="nemotronultra">Nemotron 3 Ultra 550B</option>
               <option value="glm52">GLM-5.2 744B</option>
               <option value="inkling">Inkling 975B</option>
-            </select>
+              </select>
+            </span>
           </div>
           <div class="form-error" id="gen-error"></div>
           <textarea id="gen-log" rows="4" readonly placeholder="AI 输出结果将实时显示在这里…" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
@@ -81,33 +83,16 @@ Views.files = () => {
             </div>
           </div>
 
-          <!-- 我的 AI 轻应用（已提交的站内生成作品） -->
-          <div class="card" id="gen-myworks-card" style="display:none;">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-              <h2 style="margin:0;font-size:15px;">我的 AI 轻应用</h2>
-              <span style="font-size:12px;color:var(--text-dim);">已提交 · 计入「提交应用」积分 · 展示于全校作品展</span>
-            </div>
-            <div id="gen-myworks-list"></div>
-          </div>
-
-          <!-- 对话记录（版本链时间线，紧凑单行式） -->
-          <details id="gen-history-box" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;">
-            <summary style="font-size:13px;cursor:pointer;color:var(--text-dim);display:flex;align-items:center;gap:8px;padding:4px 0;">💬 对话记录与历史版本<span id="gen-slot-clear" class="btn btn-sm btn-ghost" style="padding:1px 8px;margin-left:auto;color:var(--danger);" role="button">清空此槽</span></summary>
-            <div id="gen-history" style="max-height:180px;overflow-y:auto;font-size:12.5px;line-height:1.9;"></div>
-          </details>
-
-          <!-- 内嵌预览区（不再用弹窗）：生成成功后展示，含预览/标题/提交/重生成 -->
-          <div id="gen-preview-inline" style="display:none;margin-top:12px;">
-            <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📺 预览你的小程序</div>
-            <iframe id="gen-preview-frame" sandbox="allow-scripts allow-modals" style="width:100%;height:min(60vh,480px);border:1px solid var(--border);border-radius:10px;background:#fff;"></iframe>
-            <div class="field" style="margin-top:10px;"><label>作品标题（提交后可参与全校作品展）</label><input id="gen-title" type="text" maxlength="100" placeholder="给作品起个名字" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
-            <div class="form-error" id="gen-commit-error"></div>
-            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-              <button class="btn btn-ghost" id="gen-regen" type="button">🔄 不满意，修改后重新生成</button>
-              <button class="btn btn-primary" id="gen-commit" type="button">✅ 满意，提交</button>
-            </div>
-          </div>
         </div>
+        <!-- 我的 AI 轻应用（已提交的站内生成作品）：gen-app-card 的兄弟卡 -->
+        <div class="card" id="gen-myworks-card" style="display:none;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+            <h2 style="margin:0;font-size:15px;">我的 AI 轻应用</h2>
+            <span style="font-size:12px;color:var(--text-dim);">已提交 · 展示于全校作品展</span>
+          </div>
+          <div id="gen-myworks-list"></div>
+        </div>
+
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
             <div>
