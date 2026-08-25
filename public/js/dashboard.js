@@ -47,15 +47,16 @@ Views.files = () => {
         <div class="card" id="gen-app-card" style="margin-bottom:14px;">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
             <h2 style="margin:0;font-size:17px;">✨ 一句话生成小程序</h2>
-            <span id="gen-quota" style="font-size:12px;color:var(--text-dim);"></span>
+            <span id="gen-quota" style="font-size:12px;color:var(--text-dim);">次数统计中…</span>
           </div>
           <div id="gen-slot-pills" style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
             <span style="font-size:12px;color:var(--text-dim);margin-right:2px;">作品槽：</span>
           </div>
           <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">描述你的想法，AI 生成一个能玩的小程序，作品计入「提交应用」积分</div>
           <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
-          <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
-            <label for="gen-model" style="font-size:12px;color:var(--text-dim);">生成模型</label>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+            <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
+            <label for="gen-model" style="font-size:12px;color:var(--text-dim);margin-left:auto;">模型</label>
             <select id="gen-model" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);">
               <option value="glm47" selected>GLM 4.7 Flash 30B</option>
               <option value="nemotron35">Nemotron 3.5 Lightning 30B</option>
@@ -65,15 +66,24 @@ Views.files = () => {
               <option value="inkling">Inkling 975B</option>
             </select>
           </div>
-          <textarea id="gen-log" rows="4" readonly placeholder="AI输出结果......" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
           <div class="form-error" id="gen-error"></div>
-          <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap;">
-            <button class="btn btn-primary" id="gen-start-btn" type="button">✨ 开始生成</button>
-            <span id="gen-hint" style="font-size:12px;color:var(--text-dim);"></span>
+          <textarea id="gen-log" rows="4" readonly placeholder="AI 输出结果将实时显示在这里…" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
+
+          <!-- 内嵌预览区（不再用弹窗）：生成成功后展示，含预览/标题/提交/重生成 -->
+          <div id="gen-preview-inline" style="display:none;margin-top:12px;">
+            <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📺 预览你的小程序</div>
+            <iframe id="gen-preview-frame" sandbox="allow-scripts allow-modals" style="width:100%;height:min(60vh,480px);border:1px solid var(--border);border-radius:10px;background:#fff;"></iframe>
+            <div class="field" style="margin-top:10px;"><label>作品标题</label><input id="gen-title" type="text" maxlength="100" placeholder="给作品起个名字" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;" /></div>
+            <div class="form-error" id="gen-commit-error"></div>
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+              <button class="btn btn-ghost" id="gen-regen" type="button">🔄 不满意，修改后重新生成</button>
+              <button class="btn btn-primary" id="gen-commit" type="button">✅ 满意，提交</button>
+            </div>
           </div>
+
           <!-- 对话记录（版本链时间线，紧凑单行式） -->
           <details id="gen-history-box" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;">
-            <summary style="font-size:13px;cursor:pointer;color:var(--text-dim);">💬 对话记录与历史版本</summary>
+            <summary style="font-size:13px;cursor:pointer;color:var(--text-dim);display:flex;align-items:center;gap:8px;padding:4px 0;">💬 对话记录与历史版本<span id="gen-slot-clear" class="btn btn-sm btn-ghost" style="padding:1px 8px;margin-left:auto;color:var(--danger);" role="button">清空此槽</span></summary>
             <div id="gen-history" style="max-height:180px;overflow-y:auto;font-size:12.5px;line-height:1.9;"></div>
           </details>
 
@@ -190,6 +200,42 @@ Views.files = () => {
       } catch (_) {}
     }
 
+    // 清空当前槽（confirm 后执行；不影响已提交作品）
+    function bindClearSlot() {
+      const clearBtn = document.getElementById('gen-slot-clear');
+      if (!clearBtn || clearBtn.dataset.bound) return;
+      clearBtn.dataset.bound = '1';
+      clearBtn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const vers = (slotsData[curSlot] || {}).versions || [];
+        if (!vers.length) { toast('该槽已是空的'); return; }
+        openModal(`
+          <h3 class="modal-title">清空槽${curSlot}</h3>
+          <p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">将删除该槽全部 ${vers.length} 个历史版本与对话记录，不影响已提交的作品。确定清空？</p>
+          <div class="modal-actions">
+            <button class="btn" id="gen-clear-cancel">取消</button>
+            <button class="btn" id="gen-clear-ok" style="background:var(--danger);color:#fff;">确认清空</button>
+          </div>`);
+        document.getElementById('gen-clear-cancel').onclick = closeModal;
+        document.getElementById('gen-clear-ok').onclick = async () => {
+          try {
+            await API.post('/api/gen/slots/' + curSlot + '/clear', '{}');
+            draftToken = '';
+            logEl.value = '';
+            logEl.style.display = 'none';
+            document.getElementById('gen-preview-inline').style.display = 'none';
+            closeModal();
+            await refreshSlots();
+            toast('槽' + curSlot + ' 已清空');
+          } catch (err) {
+            closeModal();
+            toast(err.message || '清空失败');
+          }
+        };
+      };
+    }
+
     // 今日剩余次数
     async function loadGenQuota() {
       const el = document.getElementById('gen-quota');
@@ -202,6 +248,7 @@ Views.files = () => {
       } catch (_) {}
     }
     loadGenQuota();
+    bindClearSlot();
 
     // ---- 创作槽：胶囊 + 对话记录渲染 ----
     function renderSlots() {
@@ -222,8 +269,8 @@ Views.files = () => {
       hint.style.cssText = 'font-size:12px;color:var(--text-dim);margin-left:4px;';
       const cur = slotsData[curSlot];
       hint.textContent = cur && cur.versions.length
-        ? '当前槽已迭代 ' + cur.versions.length + ' 版，AI 将基于最新版继续修改'
-        : '空槽：将从零开始创建';
+        ? `已迭代 ${cur.versions.length} 版`
+        : '空槽';
       box.appendChild(hint);
     }
 
@@ -254,6 +301,7 @@ Views.files = () => {
       } catch (_) {}
       renderSlots();
       renderHistory();
+      bindClearSlot();
     }
 
     function switchSlot(n) {
@@ -303,6 +351,7 @@ Views.files = () => {
       const idea = ideaEl.value.trim();
       if (!idea) { errEl.textContent = '请先用一句话描述你的想法'; errEl.classList.add('show'); return; }
       btn.disabled = true;
+      if (modelSel) modelSel.disabled = true; // 生成中锁定模型（当前请求已带所选值，切换易误解）
       btn.textContent = '⏳ AI 正在编写…';
       if (hintEl) hintEl.textContent = '约需 30 秒～ 3 分钟，可实时查看下方输出；同槽内将基于最新版继续迭代';
       logEl.style.display = '';
@@ -401,6 +450,7 @@ Views.files = () => {
         clearInterval(waitTimer);
         activeAbort = null;
         btn.disabled = false;
+        if (modelSel) modelSel.disabled = false;
         btn.textContent = '✨ 开始生成';
         if (hintEl && hintEl.textContent.startsWith('⏳')) hintEl.textContent = '';
       }
