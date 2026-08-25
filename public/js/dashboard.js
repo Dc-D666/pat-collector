@@ -52,7 +52,7 @@ Views.files = () => {
           <div id="gen-slot-pills" style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
             <span style="font-size:12px;color:var(--text-dim);margin-right:2px;">作品槽：</span>
           </div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">描述你的想法，AI 生成一个能玩的小程序，作品计入「提交应用」积分</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.7;">描述你的想法，AI 生成一个能玩的小程序</div>
           <textarea id="gen-idea" rows="3" maxlength="500" placeholder="一句话描述你的想法…" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;resize:vertical;"></textarea>
           <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
             <label for="gen-model" style="font-size:13px;color:var(--text);">选择模型</label>
@@ -72,6 +72,12 @@ Views.files = () => {
           <div class="form-error" id="gen-error"></div>
           <textarea id="gen-log" rows="4" readonly placeholder="AI 输出结果将实时显示在这里…" style="display:none;width:100%;margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12px;font-family:monospace;color:var(--text-dim);background:var(--bg);resize:vertical;overflow-y:auto;line-height:1.5;"></textarea>
 
+          <!-- 对话记录（版本链时间线，紧凑单行式） -->
+          <details id="gen-history-box" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;">
+            <summary style="font-size:13px;cursor:pointer;color:var(--text-dim);display:flex;align-items:center;gap:8px;padding:4px 0;">💬 对话记录与历史版本<span id="gen-slot-clear" class="btn btn-sm btn-ghost" style="padding:1px 8px;margin-left:auto;color:var(--danger);" role="button">清空此槽</span></summary>
+            <div id="gen-history" style="max-height:180px;overflow-y:auto;font-size:12.5px;line-height:1.9;"></div>
+          </details>
+
           <!-- 内嵌预览区（不再用弹窗）：生成成功后展示，含预览/标题/提交/重生成 -->
           <div id="gen-preview-inline" style="display:none;margin-top:12px;">
             <div style="font-size:13px;font-weight:600;margin-bottom:6px;">📺 预览你的小程序</div>
@@ -83,12 +89,6 @@ Views.files = () => {
               <button class="btn btn-primary" id="gen-commit" type="button">✅ 满意，提交</button>
             </div>
           </div>
-
-          <!-- 对话记录（版本链时间线，紧凑单行式） -->
-          <details id="gen-history-box" style="display:none;margin-top:10px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;">
-            <summary style="font-size:13px;cursor:pointer;color:var(--text-dim);display:flex;align-items:center;gap:8px;padding:4px 0;">💬 对话记录与历史版本<span id="gen-slot-clear" class="btn btn-sm btn-ghost" style="padding:1px 8px;margin-left:auto;color:var(--danger);" role="button">清空此槽</span></summary>
-            <div id="gen-history" style="max-height:180px;overflow-y:auto;font-size:12.5px;line-height:1.9;"></div>
-          </details>
         </div>
         <!-- 我的 AI 轻应用（已提交的站内生成作品）：gen-app-card 的兄弟卡 -->
         <div class="card" id="gen-myworks-card" style="display:none;margin-bottom:14px;">
@@ -290,13 +290,7 @@ Views.files = () => {
         b.onclick = () => switchSlot(n);
         box.appendChild(b);
       }
-      const hint = document.createElement('span');
-      hint.style.cssText = 'font-size:12px;color:var(--text-dim);margin-left:4px;';
-      const cur = slotsData[curSlot];
-      hint.textContent = cur && cur.versions.length
-        ? `已迭代 ${cur.versions.length} 版`
-        : '空槽';
-      box.appendChild(hint);
+
     }
 
     function renderHistory() {
