@@ -99,7 +99,7 @@ Views.activity = () => {
           </div>
           <div class="qa-item">
             <div class="qa-q">Q3 · 用什么工具创作？</div>
-            <div class="qa-a">入门用 QQ 频道里的「AI 轻应用」；进阶可用 Trae、GitHub Copilot 等（「AI 小学堂」第 3 章有教程）。</div>
+            <div class="qa-a">入门用本站「一句话生成小程序」，打字就行；进阶可用 Trae、扣子等 AI 编程工具（「AI 小学堂」第 2、3 章有教程）。</div>
           </div>
           <div class="qa-item">
             <div class="qa-q">Q4 · 一个人能提交几个作品？</div>

@@ -389,7 +389,7 @@ function renderTasks(tasks, articleId) {
         <span class="learn-tasks-progress" id="learn-tasks-progress">0 / ${tasks.length}</span>
       </div>
       <div class="learn-tasks-bar"><div class="learn-tasks-bar-fill" id="learn-tasks-bar-fill" style="width:0%"></div></div>
-      <div class="learn-tasks-hint">完成本章全部 ${tasks.length} 个任务，可领取 20 ${Icons.icon('star-filled', 12)} 积分</div>
+      <div class="learn-tasks-hint">完成本章全部 ${tasks.length} 个任务，可领取 15 ${Icons.icon('star-filled', 12)} 积分</div>
       ${tasks.map((t, i) => {
         if (t.type === 'action') {
           if (t.nfti) {
@@ -514,7 +514,7 @@ function renderTasks(tasks, articleId) {
 }
 
 // 上报任务完成：服务端记录（服务端会核验该任务的真实完成条件，需附带核验数据，如选择题答案/tiny_id）；
-// 一章全部完成后发整章积分（20 ⭐）
+// 一章全部完成后发整章积分（15 ⭐，P3 由 20 下调）
 async function reportTask(articleId, taskIndex, extra) {
   try {
     const data = await API.post('/api/points/task', JSON.stringify({ article_id: articleId, task_index: taskIndex, ...(extra || {}) }));
