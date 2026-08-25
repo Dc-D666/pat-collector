@@ -605,3 +605,45 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 - **GitHub OAuth 移动端链路需真人验证一次**：手机整页授权 → 回调结果页 → 自动回 /#/files → 状态刷新。
 - **emoji→TDesign 替换后有约 140 处 emoji 保留**（⭐ 已清除；✓/✅/❌/🥇🥈🥉/→/toast 部分）——如需继续替换，注意 toast/option/title 不支持 SVG。
 - **第 4 章选做标记是前端硬编码 `OPTIONAL_CHAPTERS=[4]`**：将来新增/调整选做章需同步 learn.js + seed-articles.js 两处。
+
+## 15. 2026-08-25 AI 轻应用改版：站内一句话生成 + 创作槽（本 session）
+
+### 15.1 背景与结论
+- **导火索**：腾讯频道下架轻应用创建功能 → 原第2章实操（appcheck）失效。
+- **方案文档**：`AI-SCHOOL-RESTRUCTURE-PLAN.md`（注意其中决策 D3「gen 不发分」**已被用户推翻**，现行口径见 15.3）。
+- **术语（用户拍板）**：**AI 轻应用**=站内一句话生成的作品；**频道轻应用**=QQ 频道原版生成的（识别投稿入口保留，位于 AI 轻应用 Tab 底部，只改名没动功能）。两者计分**完全等价**。
+
+### 15.2 新功能：站内一句话生成小程序
+- **端点**（`server/routes/gen.js`，挂 `/api/gen`）：
+  - `POST /app/stream`：SSE 流式生成（事件 `start`/`delta{reasoning}`/`done{draft_token,html,slot_no,version_seq}`/`error{code}`）。限流+全局并发≤3+kill-switch `settings.genapp_enabled`。
+  - `POST /commit`：草稿落库 `files(source='gen')`，发 `app_submit`（与频道轻应用共享 3 个名额）；删除/审核拒绝/误拒补发全链路对齐（files.js、admin.js、points.js 的 restoreAppSubmitInTx）。
+  - `GET /preview/:draft_token`、`/version-preview/:vtoken`：**凭自证令牌、无 Bearer**（iframe 原生导航带不了 Authorization 头！）。X-Frame-Options 覆盖全局 DENY 为 SAMEORIGIN。
+  - `GET /slots`、`GET /version/:id/token`、`POST /slots/:no/clear`、`GET /quota`：创作槽与次数。
+- **模型选择**（`utils/genApp.js` GEN_MODELS 白名单）：glm47 走智谱官方；glm52/gemma4/nemotron35/nemotronultra/dots3note/inkling 走 OpenRouter（`.env` OPENROUTER_API_KEY）。免费池上游 429 → 前端显著提醒「该模型暂不可用，请更换模型」（不静默回退，用户拍板）。**inkling 需带 coding-agent User-Agent**（OpenRouter 按客户端类型拦截，实测 claude-cli UA 可用）。
+- **思考模式**：GLM 4.7 显式开启；思考走 `delta.reasoning_content`，正文走 `delta.content`，前端分流展示、正文首片段清空思考。Nemotron 3.5 是**内联思考**（混在 content 里），前端已归一化（`<html` 出现前视为前置说明）。
+- **max_tokens=32000**、超时 240s（nginx `proxy_read_timeout 300s` 已覆盖，无需改）。
+- **创作槽**：每用户 5 槽（gen_slots/gen_versions 表），槽内版本链+对话记录；**服务端按槽取上一版做改进模式上下文（跨会话生效）**；prompt 顺序=代码在前、修改意见在最后（反序会被模型无视导致另起炉灶——实测踩坑）。未提交版本不占作品配额，7 天未动自动清理（jobs.js）。
+- **前端**（dashboard.js initGenApp，v90）：槽胶囊（从未使用则隐藏）、流式 log（等待期动态计时）、内嵌预览 360px（弃弹窗）、标题+双按钮一行、对话记录折叠时间线+历史版本只读回看+清空槽。
+- **测试期间不限次**：`GENAPP_DISABLE_DAILY_LIMIT=1`（默认开）。正式运营设 `0` 恢复，前端自动切回「今天还可生成 N/10 次」。
+
+### 15.3 计分等价口径（取代方案 D3，用户拍板）
+生成作品与频道轻应用**完全等价**：提交发 `app_submit` +15（共享每人 3 个名额）；用户删除、后台审核拒绝都回扣；审核误拒后通过会按原额补发（`restoreAppSubmitInTx`）。名额不释放（防刷分）。第2章 `genappcheck` 整章 +15 与作品计分互不影响。×1.2 加成是硬编码时间窗（8/20~24）已过期。
+
+### 15.4 教程改版（已执行上线）
+- 第2章实操改 `genappcheck`（核验 files.source='gen'，不限时间窗）；第3章 projectcheck **排除 gen 来源**；第4章 slug `ai-deploy→ai-project`（纯 3 道题）。
+- **seed 内置幂等改名**（`UPDATE slug='ai-project' WHERE slug='ai-deploy'` 在 upsert 前执行）——忘跑迁移 SQL 也不会丢进度。`scripts/migrate-2026-08-25-ai-school.sql` 仍保留作部署记录。
+
+### 15.5 本 session 踩坑（重要）
+1. **iframe 无法携带 Bearer 头**：预览端点最初要求登录，iframe 加载必 401 → 被 X-Frame-Options DENY 拦成「拒绝连接」。解法=自证令牌（HMAC 绑 uid+30min）。
+2. **全局 X-Frame-Options: DENY**（index.js R2-15）会拦截自家预览 iframe，子端点需单独覆盖 SAMEORIGIN。
+3. **`var`/`let` 作用域连环坑**：draftToken 声明在 onclick 内、弹窗按钮引用报 ReferenceError（按钮"无响应"）；waitTimer 用 var 但赋值在声明后被覆盖（计时器永不停止）。**教训：跨闭包引用的状态一律声明在 initGenApp 顶层。**
+4. **批量 python 编辑被整体拒绝时，部分修改可能已丢失**——曾导致 prevHtml 参数漏加（改进模式 500）、重复 catch（服务起不来全站 502）。**每次改路由文件必须 `node --check` 后再 pm2 restart。**
+5. **OpenRouter :free 模型共享池高峰期上游 429 频繁**；GLM 官方免费档也会排队（首 token 可能等 30s+，极端卡死 150s+）。
+6. **模型输出无 `</body>` 闭合**会导致 extractHtml 误判——已放宽为只要求 `<html…</html>`。
+7. **前端文字与后端规则要对齐**：学AI 任务提示"20⭐"实为 15⭐（P3 遗留）；活动页 FAQ 还在引导"频道 AI 轻应用"——本次已修，新增文案时注意。
+
+### 15.6 待办
+- [ ] 正式运营：`GENAPP_DISABLE_DAILY_LIMIT=0` 恢复限次。
+- [ ] 录制第2章新演示素材（旧 videos/ch2-create-app.mp4 已从教程移除引用）。
+- [ ] OpenRouter 免费池限流严重时考虑 BYOK（自己的上游 key）。
+- [ ] 频道轻应用识别入口建议加提示"腾讯已停止轻应用创建，此页保留历史作品"（方案 §6.3，未做）。
