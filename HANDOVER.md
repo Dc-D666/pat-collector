@@ -669,3 +669,12 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
    - taskVerify.js 错误文案同步更新；前端 learn.js 提示语更新；seed-articles.js 任务标题/desc 更新，且已直接改库（articles id=25 ai-real-app，库为准 seed 仅种子）。
    - 注意：GitHub 外链积分 +25（github_link）与本任务核验是两回事，互不影响。
 4. **缓存版本号**：class-wall.js → v65、learn.js → v72（index.html），微信/QQ 内置浏览器缓存极顽固，改前端必须递增。
+
+### 15.9 改动审查发现的三个 bug（已修复，教训记录）
+§15.8 的改动上线后复查发现：最初一次「三段编辑」因第三段锚点在原文件中出现两次被整体拒绝，导致只有补发的流式路由段生效，**前两段（import 行、/app 路由预检）从未落盘**：
+1. `auditGenIdea` 没进 import → 运行时 `ReferenceError`（`node --check` 查不出运行时标识符，服务能启动、正常生成不受影响，唯独预检拒绝路径才炸成 500）
+2. `/app` 非流式路由漏接预检（可绕过）
+3. 审计 reason 未按列宽截断：audit_logs.reason VARCHAR(200)，拼接前缀后可超长；本机 sql_mode 含 STRICT_TRANS_TABLES 会插入报错并被空 catch 吞掉（审计静默丢失）
+
+修复：import 补全、/app 接入预检、reason `.slice(0, 200)`。已用真实 HMAC 令牌对两个路由做端到端验证（闲聊→400 not_app 文案正确；正常需求→放行生成）。
+**铁律重申（同类第 9 条）：多段编辑被整体拒绝时，绝不能假设"部分生效"，必须逐段 grep 复核每一段是否落盘；改完路由除了 `node --check`，还要用真实请求打一遍新分支（尤其错误分支）。**

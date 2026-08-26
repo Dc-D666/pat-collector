@@ -210,7 +210,7 @@ async function auditGenIdea(idea, meta) {
       const { query } = require('../db');
       await query(
         'INSERT INTO audit_logs (kind, content, result, reason, user_id, ref_type, ref_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        ['gen_precheck', t.slice(0, 500), 'rejected', type + ': ' + (r.reason || ''), (meta && meta.userId) || null, '', 0]
+        ['gen_precheck', t.slice(0, 500), 'rejected', (type + ': ' + (r.reason || '')).slice(0, 200), (meta && meta.userId) || null, '', 0]
       );
     } catch (_) {}
     return { ok: false, type, reason: r.reason || '' };

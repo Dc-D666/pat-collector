@@ -12,7 +12,7 @@ const { query } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { rateLimit } = require('../utils/rateLimit');
 const { getSetting } = require('../utils/settings');
-const { reviewContent } = require('../utils/audit');
+const { reviewContent, auditGenIdea } = require('../utils/audit');
 const { grant } = require('../utils/points');
 const genApp = require('../utils/genApp');
 
@@ -104,12 +104,23 @@ async function assertEnabled(res) {
   return true;
 }
 
+// 预检拒绝的统一提示：not_app（闲聊等非应用需求）与 unsafe（违规内容）分开说清
+function precheckErrMsg(pre) {
+  return pre.type === 'not_app'
+    ? '这好像不是一个做小程序的需求～请描述你想做的应用，例如「做一个贪吃蛇游戏」'
+    : '需求未通过安全检查：' + (pre.reason || '包含违规内容，请修改后重试');
+}
+
 // 生成草稿：{idea} → {draft_token, preview_url}
 router.post('/app', requireAuth, dailyLimitMw, async (req, res, next) => {
   try {
     if (!(await assertEnabled(res))) return;
     const idea = String((req.body && req.body.idea) || '').trim();
     if (!idea) return res.status(400).json({ error: '请先描述你想做的小程序' });
+
+    // 预检（DeepSeek）：非应用生成式命令与违规提示词直接拒绝，不消耗并发信号量与生成资源
+    const pre = await auditGenIdea(idea, { userId: req.user.id });
+    if (!pre.ok) return res.status(400).json({ error: precheckErrMsg(pre), code: pre.type });
 
     await acquire();
     let html;
