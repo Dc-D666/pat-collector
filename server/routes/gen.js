@@ -144,6 +144,11 @@ router.post('/app/stream', requireAuth, dailyLimitMw, async (req, res, next) => 
     const idea = String((req.body && req.body.idea) || '').trim();
     if (!idea) return res.status(400).json({ error: '请先描述你想做的小程序' });
 
+    // 预检（DeepSeek）：非应用生成式命令与违规提示词直接拒绝。放在 writeHead 之前，
+    // 失败可正常返回 JSON 错误（前端 !res.ok 分支已兼容），不消耗并发信号量
+    const pre = await auditGenIdea(idea, { userId: req.user.id });
+    if (!pre.ok) return res.status(400).json({ error: precheckErrMsg(pre), code: pre.type });
+
     await acquire();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), config.genApp.timeoutMs + 10000);

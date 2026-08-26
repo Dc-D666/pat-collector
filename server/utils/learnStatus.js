@@ -63,15 +63,23 @@ async function getAppPostedStatus(userId, user) {
   return { posted, post_count: postCount, submitted };
 }
 
-// 第3章 project-status：最近 14 天是否上传过项目文件（无需 QQ 登录）
+// 第3章 project-status：最近 14 天内「上传过项目文件」或「提交过 GitHub 项目」任一即达成（无需 QQ 登录）
 // 2026-08-25：排除 source='gen'（站内一句话生成物），防第2章生成作品冒充第3章成果
+// 2026-08-25（二次改版）：GitHub 项目外链（links 表，verified=1）同样计入，与文件上传互为替代
 async function getProjectSubmitted(userId) {
-  const rows = await query(
-    "SELECT COUNT(*) AS cnt FROM files WHERE user_id = ? AND source != 'gen' AND uploaded_at >= (NOW() - INTERVAL 14 DAY)",
-    [userId]
-  );
-  const cnt = rows.length ? Number(rows[0].cnt) : 0;
-  return { submitted: cnt > 0, file_count: cnt };
+  const [fileRows, linkRows] = await Promise.all([
+    query(
+      "SELECT COUNT(*) AS cnt FROM files WHERE user_id = ? AND source != 'gen' AND uploaded_at >= (NOW() - INTERVAL 14 DAY)",
+      [userId]
+    ),
+    query(
+      "SELECT COUNT(*) AS cnt FROM links WHERE user_id = ? AND verified = 1 AND created_at >= (NOW() - INTERVAL 14 DAY)",
+      [userId]
+    ),
+  ]);
+  const fileCnt = fileRows.length ? Number(fileRows[0].cnt) : 0;
+  const linkCnt = linkRows.length ? Number(linkRows[0].cnt) : 0;
+  return { submitted: fileCnt > 0 || linkCnt > 0, file_count: fileCnt, link_count: linkCnt };
 }
 
 // 第2章 gen-status（2026-08-25）：是否提交过站内生成的小程序（不限时间窗，生成过一次即永久达成）

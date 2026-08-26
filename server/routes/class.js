@@ -97,7 +97,7 @@ router.get(
         // R2-5：仅展示已过审（reviewed）文件——pending 待审/flagged 违规均不公开；
         // R2-6：排除停用用户（u.status = 'active'）
         `SELECT u.id AS user_id, u.class_name, u.real_name, u.show_real_name, u.nickname,
-                f.id AS file_id, f.original_name, f.title, f.description, f.gameplay, f.size, f.uploaded_at
+                f.id AS file_id, f.original_name, f.title, f.description, f.gameplay, f.size, f.uploaded_at, f.source
          FROM users u
          JOIN files f ON f.user_id = u.id AND f.audit_status = 'reviewed' AND u.qq_tiny_id IS NOT NULL AND u.status = 'active'`
       ),
@@ -144,6 +144,7 @@ router.get(
         title_tag: titleMap.get(r.user_id) || '',
         title: r.title || r.original_name,
         original_name: r.original_name,
+        source: r.source || '',
         description: r.description,
         gameplay: r.gameplay,
         size: r.size,

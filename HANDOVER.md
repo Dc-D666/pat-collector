@@ -131,7 +131,7 @@ deploy/pat.weaxi.cn.http.conf  临时 HTTP 段（certbot 签发证书前使用�
 
 ### 学AI（`/api/learn` + `public/js/learn.js`）
 - 5 章教程存在 `articles` 表，正文 Markdown，**前端自研渲染器**（支持标题/列表/引用/代码块/表格/链接，先转义防 XSS）
-- 每章 `tasks` JSON 数组，任务类型：`quiz`(单选，**2026-08-21 起判分完全在服务端**，答案/解析不再下发前端，答错不泄露正确答案且有指数冷却防试错)、`action`(实操，带 `nfti`/`appcheck`/`projectcheck`/`tinyidcheck` 标记，**全部服务端核验**：NFTI 库查记录 / 站内有来源帖投稿或频道近 7 天发帖 / 近 14 天有上传 / tiny_id 与登录身份一致)；B站视频/本地 mp4 以媒体行嵌入正文（不是独立任务类型）
+- 每章 `tasks` JSON 数组，任务类型：`quiz`(单选，**2026-08-21 起判分完全在服务端**，答案/解析不再下发前端，答错不泄露正确答案且有指数冷却防试错)、`action`(实操，带 `nfti`/`appcheck`/`projectcheck`/`tinyidcheck` 标记，**全部服务端核验**：NFTI 库查记录 / 站内有来源帖投稿或频道近 7 天发帖 / 近 14 天有上传文件或 verified GitHub 项目任一（见 §15.8）/ tiny_id 与登录身份一致)；B站视频/本地 mp4 以媒体行嵌入正文（不是独立任务类型）
 - 文章页：阅读计时 ≥60s 上报积分；任务进度条 + 单选判分 + 实操打卡按钮。**服务端校验**：`GET /api/learn/:slug` 记录阅读开始（`utils/readTimer.js`，进程内 Map），`POST /api/points/read` 需已读 ≥60s 才发分；**`POST /api/points/task` 拒绝 quiz 类型**（强制走 `POST /api/points/quiz` 判分接口）；`/api/points/quiz` 防试错：答错按 10s→1min→5min→30min→60min 指数冷却
 - **章节完成人数 Tag**：`GET /api/learn` 每章返回 `completed_count`（完成该章全部文章的 `points_log reason='task'` 去重用户数），列表页显示「👥 N 人已完成」
 - 改教程内容：编辑 `seed-articles.js` 后 `node seed-articles.js`（**幂等 upsert**，按 slug 保留原 id，不清空学员进度；仅当某 slug 从脚本移除时才删除该文章）
@@ -631,6 +631,7 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 
 ### 15.4 教程改版（已执行上线）
 - 第2章实操改 `genappcheck`（核验 files.source='gen'，不限时间窗）；第3章 projectcheck **排除 gen 来源**；第4章 slug `ai-deploy→ai-project`（纯 3 道题）。
+- （§15.8 二次更新：第3章 projectcheck 现已计入 verified GitHub 项目，与文件上传任一即通过。）
 - **seed 内置幂等改名**（`UPDATE slug='ai-project' WHERE slug='ai-deploy'` 在 upsert 前执行）——忘跑迁移 SQL 也不会丢进度。`scripts/migrate-2026-08-25-ai-school.sql` 仍保留作部署记录。
 
 ### 15.5 本 session 踩坑（重要）
@@ -654,3 +655,17 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 - **「我的 AI 轻应用」是独立兄弟卡**（gen-app-card 与 频道轻应用卡 之间），列已提交的 source='gen' 作品（预览/删除）；项目文件列表已过滤掉 source='gen'。
 - **踩坑（同类第 8 条，务必记住）**：对 dashboard.js 这类长模板串做大段增删时——①锚点选错会把整张卡嵌进另一张卡内部（"我的AI轻应用"曾嵌进 gen-app-card）；②清理残留时边界切多会误删相邻块（对话记录折叠区曾被连根删掉，JS 引用还在所以不报错、入口凭空消失）；③重复块（旧 preview）残留会产生重复 id。**铁律：改前 grep 确认锚点唯一，改后再 grep 数块数、核对嵌套层级。**
 - **前端缓存**：dashboard.js/learn.js 等每次改动必须递增 index.html 里的 `?v=N`（微信/QQ 内置浏览器缓存极顽固），本 session 已递增到 dashboard v93。
+
+### 15.8 同 session 追加改动（生成预检层 + 作品展图标 + 第3章任务放宽）
+
+1. **「一句话生成」请求预检层（audit.js + routes/gen.js）**：
+   - 生成前先调 DeepSeek（deepseek-v4-flash，复用 DEEPSEEK_API_KEY）做两项判定：`is_app_request`（是否为应用生成式命令——"你好"等闲聊拒）、`safe`（提示词合规性）。合规才放行给生成模型。
+   - 新增 `reviewGenRequest()` / `auditGenIdea()`（audit.js）；`/api/gen/app` 与 `/app/stream` 在**占用并发信号量之前**预检，被拒不消耗资源。
+   - 拒绝文案分两类：`not_app`（闲聊/无关请求）与 `unsafe`（违规内容）；流式接口预检放在 writeHead 之前，失败走普通 JSON 400（前端 `!res.ok` 分支天然兼容，无需改前端）。
+   - 被拒请求落 audit_logs（kind='gen_precheck'）可追溯；尊重 DEEPSEEK_AUDIT + settings.audit_enabled 开关；AI 不可用降级放行（与其它审查一致）。
+2. **全校作品展轻应用图标统一**：站内生成作品（source='gen' 的 .html 文件）在作品展原来按扩展名显示 `code` 图标（闪电括号），与「我的项目」页的 `app` 四宫格不一致。修复：wall SQL 增查 `f.source` 并透传；class-wall.js 对 source==='gen' 改用 `{icon:'app', color:'#EDE6D6'}`。频道轻应用仍是 robot 图标。
+3. **第3章 projectcheck 放宽：文件上传或 GitHub 项目任一即通过**：
+   - `getProjectSubmitted()`（learnStatus.js）新增并行查询 `links` 表：`verified=1 AND created_at >= NOW()-INTERVAL 14 DAY` 与原 files 条件（排除 gen、14 天窗）互为替代，返回值增 `link_count`。
+   - taskVerify.js 错误文案同步更新；前端 learn.js 提示语更新；seed-articles.js 任务标题/desc 更新，且已直接改库（articles id=25 ai-real-app，库为准 seed 仅种子）。
+   - 注意：GitHub 外链积分 +25（github_link）与本任务核验是两回事，互不影响。
+4. **缓存版本号**：class-wall.js → v65、learn.js → v72（index.html），微信/QQ 内置浏览器缓存极顽固，改前端必须递增。

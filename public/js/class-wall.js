@@ -79,7 +79,9 @@ Views.classWall = async () => {
       const isFile = p.type === 'file';
       const isLink = p.type === 'link';
       const icon = isFile
-        ? getFileIcon(p.original_name || '')
+        ? (p.source === 'gen'
+            ? { icon: 'app', color: '#EDE6D6' } // 站内生成作品与「我的项目」页一致用 app 图标（2026-08-25）
+            : getFileIcon(p.original_name || ''))
         : (isLink ? { icon: 'link', color: '#E3E8F5' } : { icon: 'robot', color: '#EDE6D6' });
       // 全校公开：所有文件都可下载/预览（不再限同班）
       const canDl = isFile;

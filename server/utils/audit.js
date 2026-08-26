@@ -122,6 +122,103 @@ async function reviewDisplayText(text) {
   return _review(text, TEXT_SYSTEM_PROMPT, 2000);
 }
 
+// 「一句话生成小程序」请求预检（2026-08-25）：生成前先判定
+//   1) is_app_request：是否为应用生成式命令（闲聊如"你好"判 false，不浪费生成资源）
+//   2) safe：提示词本身是否违规（违规不放行给生成模型）
+const GEN_PRECHECK_SYSTEM_PROMPT = `你是「一句话生成小程序」功能的请求预检员。该功能只接受"用一句话描述一个网页小程序/小游戏/小工具的需求，由 AI 生成它"的指令。请对用户输入做两项判定：
+
+1. is_app_request：是否为明确的小程序/网页应用/小游戏/小工具的生成或迭代修改需求（如"做一个贪吃蛇游戏""做个番茄钟""给计算器加历史记录功能"）。纯闲聊、打招呼、提问咨询、与生成应用无关的请求（如"你好""今天天气怎么样""你是谁""帮我写作文"）判为 false。
+2. safe：内容是否合规。包含色情低俗、违法违规（赌博/诈骗/攻击性政治言论）、暴力血腥、辱骂歧视、广告营销引流等内容判为 false；其余一律判为 true。
+
+要求：
+- 判定 is_app_request 时适度宽松：只要能合理理解为对某个应用的需求（哪怕描述很短很简陋，如"做个计算器"）即判 true，避免误伤学生创意
+- 迭代修改指令（如"背景改成蓝色""加个音效""重新生成"）也是有效的应用需求，判 true
+- safe 判定从严：存在上述任一违规类型或其明显谐音/变形变体即判 false
+
+只输出 JSON 对象：{"is_app_request": true 或 false, "safe": true 或 false, "reason": "简要判断原因"}`;
+
+/**
+ * 调 DeepSeek 预检生成请求（返回三字段原始结果）
+ * @returns {Promise<{isAppRequest: boolean, safe: boolean, reason: string}>}
+ * @throws 接口不可用/超时/解析失败时抛错（调用方决定降级处理）
+ */
+async function reviewGenRequest(idea) {
+  const cfg = config.deepseek;
+  if (!cfg.apiKey) throw new Error('未配置 DEEPSEEK_API_KEY');
+  const content = String(idea || '').slice(0, 500);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
+  try {
+    const res = await fetch(cfg.baseUrl + '/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + cfg.apiKey,
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [
+          { role: 'system', content: GEN_PRECHECK_SYSTEM_PROMPT },
+          { role: 'user', content: '以下是待预检的用户输入：\n\n' + content },
+        ],
+        temperature: 0.1,
+        max_tokens: 200,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error('预检接口 HTTP ' + res.status + ' ' + body.slice(0, 200));
+    }
+    const data = await res.json();
+    const out = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    const m = String(out || '').match(/\{[\s\S]*\}/);
+    const parsed = m ? JSON.parse(m[0]) : null;
+    return {
+      isAppRequest: !!(parsed && parsed.is_app_request !== false), // 解析失败按是需求处理，只靠 safe 拦截
+      safe: !!(parsed && parsed.safe !== false),
+      reason: (parsed && parsed.reason) ? String(parsed.reason).slice(0, 200) : '',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 「一句话生成小程序」请求预检统一入口（/api/gen/app 与 /app/stream 共用）：
+ * 尊重 DEEPSEEK_AUDIT 与 settings.audit_enabled 开关；AI 不可用时降级放行（与其它审查一致）。
+ * 被拒请求写入 audit_logs（kind='gen_precheck'）可追溯。
+ * @returns {Promise<{ok: boolean, type?: 'not_app'|'unsafe', reason?: string}>}
+ */
+async function auditGenIdea(idea, meta) {
+  const t = String(idea || '').trim();
+  if (!t) return { ok: true };
+  if (!config.deepseek.auditEnabled) return { ok: true };
+  let auditOn = true;
+  try {
+    const auditRuntime = await getSetting('audit_enabled');
+    if (auditRuntime === '0') auditOn = false;
+  } catch (_) { /* 设置读取失败按开启处理 */ }
+  if (!auditOn) return { ok: true };
+  try {
+    const r = await reviewGenRequest(t);
+    if (r.safe && r.isAppRequest) return { ok: true };
+    const type = r.safe ? 'not_app' : 'unsafe'; // 合规但非应用需求 → not_app；违规 → unsafe
+    // 落库可追溯（O3 同口径）；记录失败不影响主流程
+    try {
+      const { query } = require('../db');
+      await query(
+        'INSERT INTO audit_logs (kind, content, result, reason, user_id, ref_type, ref_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ['gen_precheck', t.slice(0, 500), 'rejected', type + ': ' + (r.reason || ''), (meta && meta.userId) || null, '', 0]
+      );
+    } catch (_) {}
+    return { ok: false, type, reason: r.reason || '' };
+  } catch (_) {
+    return { ok: true }; // AI 不可用/超时降级放行
+  }
+}
+
 /**
  * 昵称合规审查统一入口（QQ 绑定 / 访客登记 / 修改资料共用）：
  * 尊重 DEEPSEEK_AUDIT 与 settings.audit_enabled 运行时开关；
@@ -176,4 +273,4 @@ async function auditDisplayText(text, meta) {
   }
 }
 
-module.exports = { reviewContent, reviewNickname, reviewDisplayText, auditNickname, auditDisplayText, SYSTEM_PROMPT, NICK_SYSTEM_PROMPT, TEXT_SYSTEM_PROMPT };
+module.exports = { reviewContent, reviewNickname, reviewDisplayText, auditNickname, auditDisplayText, reviewGenRequest, auditGenIdea, SYSTEM_PROMPT, NICK_SYSTEM_PROMPT, TEXT_SYSTEM_PROMPT, GEN_PRECHECK_SYSTEM_PROMPT };

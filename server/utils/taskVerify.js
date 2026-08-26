@@ -52,10 +52,10 @@ async function verifyTaskCompletion(task, user, payload) {
     return { ok: true };
   }
   if (task.projectcheck) {
-    // 第3章：最近 14 天上传过项目文件（排除 gen 来源，防第2章生成物冒充）
+    // 第3章：最近 14 天上传过项目文件（排除 gen 来源，防第2章生成物冒充）或提交过 GitHub 项目，任一即通过
     const st = await getProjectSubmitted(user.id);
     if (!st.submitted) {
-      return { ok: false, error: '未检测到最近上传的项目文件，请先到「我的项目」上传' };
+      return { ok: false, error: '未检测到近14天的项目提交记录，请先到「我的项目」上传项目文件，或连接 GitHub 提交一个项目' };
     }
     return { ok: true };
   }

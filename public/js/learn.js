@@ -730,10 +730,10 @@ async function initProjectTask(task) {
       task.dataset.done = '1';
       const btn = task.querySelector('.project-done-btn');
       if (btn) { btn.disabled = true; btn.textContent = '✓ 已完成'; btn.classList.add('task-done'); }
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">✓ 检测到你的项目文件，任务已自动完成</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">✓ 检测到你的项目提交记录，任务已自动完成</span>`;
       reportTask(parseInt(task.dataset.article, 10), parseInt(task.dataset.task, 10));
     } else {
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">上传项目文件后点「我已上传」，系统自动核验</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">上传项目文件或提交 GitHub 项目后点「我已上传」，系统自动核验</span>`;
     }
   } catch (_) { /* 静默 */ }
 }
