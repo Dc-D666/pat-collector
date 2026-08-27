@@ -1141,3 +1141,113 @@ body.route-activity #qq-banner-root { top: 64px; }
   box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
   letter-spacing: 0.03em;
 }
+
+/* AI 轻应用独立页（#/gen）：桌面双栏（左操作区 / 右预览区），窄屏单栏堆叠 */
+.gen-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) { .gen-layout { grid-template-columns: 1fr; } }
+.gen-layout .gen-pane { min-width: 0; }
+/* 预览区固定容器，生成结果实时展示；移动端不再固定高度，避免遮挡 */
+.gen-preview-frame {
+  width: 100%;
+  height: 460px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+@media (max-width: 768px) { .gen-preview-frame { height: 340px; } }
+/* 预览占位（未生成时） */
+.gen-preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 460px;
+  color: var(--text-dim);
+  gap: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  text-align: center;
+  padding: 16px;
+}
+@media (max-width: 768px) { .gen-preview-placeholder { min-height: 220px; } }
+
+/* AI 轻应用：三步流程式（输入→生成中→结果） */
+.gen-steps { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.gen-step {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 9999px;
+  font-size: 13px; color: var(--text-dim);
+  border: 1px solid var(--border); background: var(--bg);
+  transition: all .2s ease;
+}
+.gen-step .gen-step-num {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--border); color: var(--text-dim);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700; flex-shrink: 0;
+}
+.gen-step.active {
+  color: var(--text); border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+}
+.gen-step.active .gen-step-num { background: var(--primary); color: #fff; }
+.gen-step.done { color: var(--success); border-color: var(--success); }
+.gen-step.done .gen-step-num { background: var(--success); color: #fff; }
+.gen-step-arrow { color: var(--border); font-size: 14px; }
+
+/* 三步板块：默认隐藏，active 时显示 */
+.gen-phase { display: none; }
+.gen-phase.active { display: block; }
+
+/* 生成中状态条 */
+.gen-generating-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-radius: 10px;
+  background: color-mix(in srgb, var(--primary) 6%, var(--bg));
+  border: 1px solid var(--primary);
+  font-size: 13px; color: var(--text); margin-bottom: 10px;
+}
+.gen-spinner {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid transparent; border-top-color: var(--primary);
+  animation: gen-spin 0.8s linear infinite; flex-shrink: 0;
+}
+@keyframes gen-spin { to { transform: rotate(360deg); } }
+
+/* 我的创作（多作品草稿）卡片列表 */
+.gen-work-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.gen-work-card {
+  border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px;
+  cursor: pointer; text-align: left; transition: all .15s ease;
+  background: var(--surface); position: relative; overflow: hidden;
+}
+.gen-work-card:hover { border-color: var(--primary); }
+.gen-work-card.active { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 30%, transparent); }
+.gen-work-card .gwc-title { font-size: 13.5px; font-weight: 600; line-height: 1.5; margin-bottom: 3px; word-break: break-all; }
+.gen-work-card .gwc-meta { font-size: 11.5px; color: var(--text-dim); }
+.gen-work-card .gwc-tag {
+  position: absolute; top: 8px; right: 8px; font-size: 10px; color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  padding: 2px 6px; border-radius: 9999px; font-weight: 600;
+}
+.gen-work-card.empty {
+  border-style: dashed; color: var(--text-dim); background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 64px;
+  font-size: 13px;
+}
+.gen-work-card.empty:hover { color: var(--primary); border-color: var(--primary); }
+.gen-work-card.empty .gwc-plus { font-size: 20px; line-height: 1; margin-bottom: 4px; }
+.gen-work-card.empty .gwc-empty-text { font-size: 12px; color: var(--text-dim); }
+
+/* 大号按钮（AI 轻应用「开始生成」等主操作） */
+.btn-lg { padding: 12px 20px; font-size: 16px; border-radius: 14px; }
+
+/* 明显描边按钮（页头二级操作：我的创作 / 设置 / 返回） */
+.btn-outline { border: 1.5px solid var(--text-dim); background: var(--surface); color: var(--text); }
+.btn-outline:hover { border-color: var(--primary); color: var(--primary); background: var(--surface); }

@@ -15,6 +15,7 @@ window.Nav = (() => {
     const h = location.hash || '#/activity';
     if (h.startsWith('#/activity')) return 'activity';
     if (h.startsWith('#/files')) return 'files';
+    if (h.startsWith('#/gen')) return 'gen'; // AI 轻应用独立页：不进主导航，任何项都不高亮
     if (h.startsWith('#/class-wall')) return 'class-wall';
     if (h.startsWith('#/overview')) return 'overview';
     if (h.startsWith('#/learn')) return 'learn';

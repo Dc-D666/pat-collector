@@ -45,6 +45,22 @@ function providerCfg(modelId) {
       fallbackModel: g.fallbackModel || '',
     };
   }
+  if (sel.provider === 'sdu') {
+    // DeepSeek 官方 API（2026-08-27 替换山大智创广场 xplt）：OpenAI 兼容端点，公有云直接可达。
+    // baseUrl 如 `https://api.deepseek.com`（不含 /v1），统一在此补全为 /v1/chat/completions；
+    // 不静默回退（避免切回别的 provider）。
+    const rawBase = config.sdu.baseUrl.replace(/\/+$/, '');
+    return {
+      provider: 'sdu',
+      apiKey: config.sdu.apiKey,
+      baseUrl: rawBase,
+      apiPath: (rawBase.endsWith('/v1') ? '' : '/v1'),
+      model: sel.model, // 白名单里的模型名（如 deepseek-v4-flash）
+      fallbackModel: null,
+      // DeepSeek 是思考模型，等待超时放宽到 15 分钟（其余模型默认 4 分钟）
+      timeoutMs: config.genApp.deepseekTimeoutMs,
+    };
+  }
   return {
     provider: 'glm',
     apiKey: config.glm.apiKey,
@@ -61,23 +77,31 @@ function thinkingParam(model) {
 }
 
 // 模型白名单（2026-08-25）：用户可选的生成模型。id 为前端提交值（服务端白名单校验，绝不透传原始字符串）。
-// glm47 走智谱官方；其余走 OpenRouter（免费共享池，高峰期可能上游 429，自动回退官方 GLM）。
-// 模型白名单（2026-08-25）：用户可选的生成模型。id 为前端提交值（服务端白名单校验，绝不透传原始字符串）。
-// glm47 走智谱官方；其余走 OpenRouter 免费共享池（高峰期可能上游 429——前端显著提醒更换模型）。
-// inkling 特殊：OpenRouter 仅允许 agentic 客户端调用，请求时需携带 coding-agent 的 User-Agent（见 callChat/streamChat）。
+// glm47 走智谱官方；其余走 OpenRouter 免费共享池（高峰期可能上游 429——前端显著提醒更换模型）；
+// sdu-deepseek（2026-08-27）走 DeepSeek 官方 API，属「受限/有限免费层」。inkling 特殊：OpenRouter 仅允许
+// agentic 客户端调用，请求时需携带 coding-agent 的 User-Agent（见 callChat/streamChat）。
 const GEN_MODELS = {
-  'inkling':       { label: 'Inkling 975B',           provider: 'openrouter', model: 'thinkingmachines/inkling:free',        fallbackModel: null, agentUA: true },
-  'glm52':         { label: 'GLM-5.2 744B',           provider: 'openrouter', model: 'z-ai/glm-5.2:free',                    fallbackModel: null },
-  'nemotronultra': { label: 'Nemotron 3 Ultra 550B',  provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', fallbackModel: null },
-  'dots3note':     { label: 'Dots3-Note Preview 280B',provider: 'openrouter', model: 'dots-studio/dots-3-note-preview:free', fallbackModel: null },
-  'nemotron35':    { label: 'Nemotron 3.5 Lightning 30B', provider: 'openrouter', model: 'nvidia/nemotron-3.5-lightning:free', fallbackModel: null },
-  'glm47':         { label: 'GLM 4.7 Flash 30B',      provider: 'glm',        model: config.glm.model,                       fallbackModel: config.glm.fallbackModel },
+  // 无限次数免费层（tier:'unlimited'）：现有模型，供应商无固定额度，遇 429 换模型即可
+  'inkling':       { label: 'Inkling 975B',           provider: 'openrouter', model: 'thinkingmachines/inkling:free',        fallbackModel: null, agentUA: true, tier: 'unlimited', tierLabel: '无限免费层' },
+  'glm52':         { label: 'GLM-5.2 744B',           provider: 'openrouter', model: 'z-ai/glm-5.2:free',                    fallbackModel: null, tier: 'unlimited', tierLabel: '无限免费层' },
+  'nemotronultra': { label: 'Nemotron 3 Ultra 550B',  provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', fallbackModel: null, tier: 'unlimited', tierLabel: '无限免费层' },
+  'dots3note':     { label: 'Dots3-Note Preview 280B',provider: 'openrouter', model: 'dots-studio/dots-3-note-preview:free', fallbackModel: null, tier: 'unlimited', tierLabel: '无限免费层' },
+  'nemotron35':    { label: 'Nemotron 3.5 Lightning 30B', provider: 'openrouter', model: 'nvidia/nemotron-3.5-lightning:free', fallbackModel: null, tier: 'unlimited', tierLabel: '无限免费层' },
+  'glm47':         { label: 'GLM 4.7 Flash 30B',      provider: 'glm',        model: config.glm.model,                       fallbackModel: config.glm.fallbackModel, tier: 'unlimited', tierLabel: '无限免费层' },
+  // 有限次数免费层（tier:'quota'，走 DeepSeek 官方 API）：每人每天最多生成 SDU_MAX_DAILY 次（控制计费成本）
+  'sdu-deepseek':  { label: 'DeepSeek-V4-Flash',      provider: 'sdu',        model: config.sdu.models['sdu-deepseek'],      fallbackModel: null, tier: 'quota', tierLabel: '有限免费层' },
 };
 
 function resolveGenModel(id) {
   const m = GEN_MODELS[String(id || '')];
   if (m) return m;
   return GEN_MODELS['glm47']; // 非法值静默回默认，不报错
+}
+
+// 该模型的等待超时：DeepSeek(provider 'sdu') 用 deepseekTimeoutMs（15 分钟），其余用 genApp.timeoutMs
+function timeoutForModel(modelId) {
+  const cfg = providerCfg(modelId);
+  return cfg.timeoutMs || config.genApp.timeoutMs;
 }
 
 // 组装用户消息：带 prevHtml 时进入「改进模式」——把上一版代码作为上下文增量改进而非从零重写。
@@ -102,10 +126,11 @@ function apiHeaders(cfg) {
 }
 
 async function callChat(cfg, model, prompt, prevHtml) {
+  const timeoutMs = cfg.timeoutMs || config.genApp.timeoutMs;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.genApp.timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(cfg.baseUrl + '/chat/completions', {
+    const res = await fetch(cfg.baseUrl + (cfg.apiPath || '') + '/chat/completions', {
       method: 'POST',
       headers: apiHeaders(cfg),
       body: JSON.stringify({
@@ -160,8 +185,8 @@ function extractHtml(raw) {
 }
 
 // 生成入口：失败自动换回退模型重试一次；都失败抛错（路由层转友好文案）
-async function generateAppHtml(idea) {
-  const cfg = providerCfg();
+async function generateAppHtml(idea, modelId) {
+  const cfg = providerCfg(modelId);
   if (!cfg.apiKey) throw new Error('未配置生成模型 API Key');
   const prompt = String(idea || '').slice(0, config.genApp.maxIdeaChars);
 
@@ -186,7 +211,7 @@ async function generateAppHtml(idea) {
 // （reasoning_content = 思考过程，content = 正文；只把正文累计进返回值）
 // 失败自动换回退模型重试一次（仅限尚未收到任何增量时）
 async function streamChat(cfg, model, prompt, onDelta, signal, prevHtml) {
-  const res = await fetch(cfg.baseUrl + '/chat/completions', {
+  const res = await fetch(cfg.baseUrl + (cfg.apiPath || '') + '/chat/completions', {
     method: 'POST',
     headers: apiHeaders(cfg),
     body: JSON.stringify({
@@ -381,4 +406,4 @@ function verifyTokenSelf(token) {
   } catch (e) { return null; }
 }
 
-module.exports = { GEN_MODELS, resolveGenModel, genStoreDir, signToken, verifyTokenSelf, generateAppHtml, generateAppHtmlStream, draftTokenIssue, draftTokenVerify, draftTokenVerifySelf, saveDraft, draftPath, genTmpDir, userDraftDir, extractHtml };
+module.exports = { GEN_MODELS, resolveGenModel, timeoutForModel, genStoreDir, signToken, verifyTokenSelf, generateAppHtml, generateAppHtmlStream, draftTokenIssue, draftTokenVerify, draftTokenVerifySelf, saveDraft, draftPath, genTmpDir, userDraftDir, extractHtml };

@@ -7,6 +7,7 @@ window.App = (() => {
     club: () => Views.club(),
     login: () => Views.login(),
     files: () => Views.files(),
+    gen: () => Views.gen(),
     'class-wall': () => Views.classWall(),
     overview: () => Views.overview(),
     learn: () => Views.learnList(),

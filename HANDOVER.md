@@ -678,3 +678,51 @@ mysql -h127.0.0.1 -upat -p"$DB_PASSWORD" pat -e "SELECT * FROM points_log ORDER 
 
 修复：import 补全、/app 接入预检、reason `.slice(0, 200)`。已用真实 HMAC 令牌对两个路由做端到端验证（闲聊→400 not_app 文案正确；正常需求→放行生成）。
 **铁律重申（同类第 9 条）：多段编辑被整体拒绝时，绝不能假设"部分生效"，必须逐段 grep 复核每一段是否落盘；改完路由除了 `node --check`，还要用真实请求打一遍新分支（尤其错误分支）。**
+
+## 16. 2026-08-27 本 session：AI 轻应用独立页 `#/gen` + DeepSeek 官方切换 + 多轮 UI 迭代
+
+### 16.1 背景
+第 15 节的「一句话生成小程序」原本嵌在「我的项目」页（dashboard.js `Views.files` 的 gen-app-card 卡）。本 session 用户要求把它做成**独立页面**，并对零基础高中生重做体验；同时把生成模型从「山东大学智创模型广场（xplt）」切换为 DeepSeek 官方 API，并解决 DeepSeek 思考超时。
+
+### 16.2 独立页 `#/gen`（路由 + 全新视图）
+- 新增 `public/js/gen.js`：`Views.gen()`，独立页。`index.html` 引入，`app.js` 注册 `gen` 路由；`nav.js` currentKey 加 `#/gen` 返回 'gen'（不进主导航，任何项不高亮）。
+- dashboard.js **删掉**原 gen-app-card 的创作区 + gen-myworks 卡 + `initGenApp`/`renderGenWorks`，原位置替换为**引导入口卡**（标题 + 「进入 AI 轻应用」按钮跳 `#/gen`）。`loadFiles` 仍过滤 `source==='gen'`（gen 作品归独立页，不混入项目文件列表）。
+- 入口：我的项目 Tab2 顶部引导卡；`#/gen` 页头「← 返回我的项目」。learn.js 第2章引导文案同步改「我的项目 → ✨ AI 轻应用」。
+
+### 16.3 主流程与多轮 UI 迭代（面向零基础）
+用户多轮反馈「换汤不换药」「看不懂作品槽」「太啰嗦」后，最终定稿为一套**正向主流程**：
+- **三步 step 指示器**：① 描述想法 → ② AI 创作 → ③ 拿走你的作品；顶部高亮当前步，已完成步打勾。`setStep(n)` 控制 `.gen-step`/`.gen-phase`。
+- **Step1（描述想法）**：打开只看到「描述你想做的小程序」大输入框 + 「✨ 开始生成」大按钮（`.btn-lg`）+ 灵感示例。**多作品草稿、模型选择都收进页面顶部的次要按钮**（「🗂 我的创作」「⚙ 设置」浮层），不再是开场就要处理的概念。
+- **Step2（AI 创作）**：大加载卡（转圈 + 「AI 正在为你创作…」）；**代码输出默认折叠**在「▸ 查看创作过程」，防吓新手；有「← 修改描述」放弃按钮。
+- **Step3（拿走你的作品）**：大预览 iframe 是主角，下方「起个名字 / ↻ 改一改 / ✅ 我要提交」；「💬 对话记录」折叠区在底部。
+- **多作品草稿**：页头「🗂 我的创作」弹浮层卡片列表（显示最近描述+版本数，空卡「＋新建一个作品」，当前作品标「正在编辑」）。**后端仍是 5 槽（gen_slots/gen_versions），只改前端呈现**。
+- **模型选择**：收进「⚙ 设置」浮层下拉；**默认模型 `DEFAULT_MODEL='inkling'`（Inkling 975B）**，新手不用碰。
+- **灵感到 50 个**：`GEN_EXAMPLES` 扩到 50 个；每次随机展示 1-2 个（`showExamples`，用 `lastExampleIdx` 防连续重复）；加「换一批」刷新按钮（`Icons.icon('refresh')`，非 emoji）；标题图标用 `Icons.icon('gift')`。
+- **文案精简**：去掉了「模型名后可看说明」等莫名其妙/啰嗦句，整页文字大幅压缩。
+- **按钮描边**：页头三按钮（我的创作/设置/返回）用新增 `.btn-outline`（1.5px 沙褐实线框），不再是无边框 `btn-ghost`。
+
+### 16.4 DeepSeek 官方切换（替换山大智创广场 xplt）
+- 原 xplt 方案（SDU 配置走 `sdu-vpn` 容器 socat 转发 `127.0.0.1:4000`）**弃用**。`config.js` sdu 块默认改为 `baseUrl=https://api.deepseek.com`、`model=deepseek-v4-flash`；`.env` 的 `SDU_API_KEY` 换成官方 new key。
+- `genApp.js` providerCfg sdu 分支/baseUrl 补 `/v1` 逻辑保留；`routes/gen.js`、`gen.js` 注释里「xplt/LiteLLM/山大」措辞全部改为「DeepSeek 官方」。
+- 已实测：`deepseek-v4-flash` 官方端点可用（含流式 `delta.reasoning_content`/`delta.content`），模型名真实存在。
+- **`SDU-XPLT-MODEL-ACCESS-GUIDE.md` 含旧 xplt key，已加入 `.gitignore` 不推送**（改 key 后旧指引作废）。`.env.example` SDU 说明改为官方 API。
+
+### 16.5 DeepSeek 超时单独放宽到 15 分钟
+- 后端：`config.js` genApp 新增 `deepseekTimeoutMs`（默认 900000 = 15 分钟）；`genApp.js` 新增 `timeoutForModel(modelId)`（sdu→900000，其余→`genApp.timeoutMs`=240s），`callChat` 与 `routes/gen.js` 流式 timer 都按模型取。`.env.example` 补 `GENAPP_DEEPSEEK_TIMEOUT_MS`。
+- 前端：`gen.js` abort timer 按 `curModel==='sdu-deepseek'` 用 900s，其余 240s；等待提示「最长约 N 分钟」动态显示。
+- **注意**：nginx `proxy_read_timeout` 当前 `300s`，若 DeepSeek 思考超 5 分钟仍会被 nginx 掐断——本 session 未改 nginx（用户未确认），如需真正 15 分钟需把 deploy/pat.weaxi.cn.conf 调大。
+
+### 16.6 前端超长输出防崩溃
+- 生成流 `logEl.value` 累积设 `LOG_MAX=50000` 上限，超限截断只留最近一段；`scrollTop=scrollHeight` 改 `requestAnimationFrame` 节流。防 DeepSeek 超长输出把 textarea 拖垮。
+
+### 16.7 本 session 踩坑/注意
+1. **默认模型改 inkling 后，老用户 localStorage 里的 `gen_model` 仍会覆盖默认值**——仅对无缓存的新用户真正用默认。若想强行统一需清 localStorage 或改读取逻辑。
+2. **`inkling` 走 OpenRouter 免费池且需 `agentUA`**——`.env` OPENROUTER_API_KEY 已配置才可用；免费池高峰期可能 429（前端已提示换模型）。
+3. **模块化长模板改动务必 grep 锚点唯一 + 改后数 id**：gen.js 重构中曾出现 `getElementById` 与模板 id 不一致（如 `gen-works-list` 是浮层动态创建、非静态模板），靠 `comm ref/def` 校验兜住。
+4. **`node` 视图只在 `viewport` 容器填充**，`#/gen` 路由是系统内页（非 login/project），不隐藏主页壳（`is-auth` 不加，正确）。
+5. **缓存版本号**：本 session 改动多轮，最终 gen.js v9、style.css v71、app.js v62、nav.js v60、learn.js v73、dashboard.js v96。改前端必须再递增 index.html `?v=`。
+
+### 16.8 待办/风险
+- [ ] 确认是否调大 nginx `proxy_read_timeout`（≥900s）让 DeepSeek 15 分钟超时真正生效。
+- [ ] `SDU-XPLT-MODEL-ACCESS-GUIDE.md`（gitignored）可考虑删除，避免留旧 key 残留。
+- [ ] inkling 作为默认模型的稳定性观察：免费池 429 频率。

@@ -10,7 +10,6 @@ const express = require('express');
 const config = require('../config');
 const { query } = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { rateLimit } = require('../utils/rateLimit');
 const { getSetting } = require('../utils/settings');
 const { reviewContent, auditGenIdea } = require('../utils/audit');
 const { grant } = require('../utils/points');
@@ -18,20 +17,32 @@ const genApp = require('../utils/genApp');
 
 const router = express.Router();
 
-// 每日限流：测试期间禁用（genApp.dailyLimitDisabled），恢复限制时自动生效
-const dailyLimitMw = config.genApp.dailyLimitDisabled
-  ? (req, res, next) => next()
-  : rateLimit({ windowMs: 24 * 3600 * 1000, max: config.genApp.maxPerUserPerDay, keyFn: (r) => 'gen:' + r.user.id });
+// 「无限免费层」不限次（用户拍板：现有模型为无限次数）；「受限/有限免费层」（DeepSeek 官方 api，2026-08-27 由 xplt 切换而来）每人每天最多
+// config.sdu.maxPerUserPerDay 次（控制计费成本，不受测试开关影响）。分层限流在 handler 内按模型 tier 判断。
+const GEN_QUOTA_KIND = 'gen_app_quota';
+const GEN_UNLIMITED_KIND = 'gen_app';
 
-// 计次（用于前端展示“今天还可生成N次”）：成功产出草稿后记 audit_logs（kind=gen_app）
-async function recordGenUsage(userId) {
+// 计次：无限层记 gen_app，有限层记 gen_app_quota，两者独立计数（kind 区分）
+async function recordGenUsage(userId, kind) {
   try {
-    await query("INSERT INTO audit_logs (kind, content, result, user_id, ref_type, ref_id) VALUES ('gen_app', '一句话生成小程序', 'approved', ?, '', 0)", [userId]);
+    await query("INSERT INTO audit_logs (kind, content, result, user_id, ref_type, ref_id) VALUES (?, '一句话生成小程序', 'approved', ?, '', 0)", [kind || GEN_UNLIMITED_KIND, userId]);
   } catch (err) { console.warn('[gen] 记次失败（不影响生成）：', err.message); }
 }
-async function getGenUsedToday(userId) {
-  const rows = await query("SELECT COUNT(*) AS c FROM audit_logs WHERE user_id = ? AND kind = 'gen_app' AND result = 'approved' AND DATE(created_at) = CURDATE()", [userId]);
+async function getGenUsedToday(userId, kind) {
+  const rows = await query("SELECT COUNT(*) AS c FROM audit_logs WHERE user_id = ? AND kind = ? AND result = 'approved' AND DATE(created_at) = CURDATE()", [userId, kind]);
   return rows.length ? Number(rows[0].c) : 0;
+}
+// 分层限流：所选模型为有限层且今日已达上限时返回错误对象，否则返回 null（放行）
+async function assertDailyQuota(userId, modelId) {
+  const sel = genApp.resolveGenModel(modelId);
+  if (sel.tier !== 'quota') return null; // 无限免费层不限次
+  const used = await getGenUsedToday(userId, GEN_QUOTA_KIND);
+  if (used >= config.sdu.maxPerUserPerDay) {
+    const e = new Error(`有限免费层今天已用完（每天最多 ${config.sdu.maxPerUserPerDay} 次），可换无限免费层模型`);
+    e.code = 'QUOTA_EXCEEDED';
+    return e;
+  }
+  return null;
 }
 
 // ---- 创作槽（2026-08-25）：每用户 5 槽，每槽独立对话/版本链 ----
@@ -112,7 +123,7 @@ function precheckErrMsg(pre) {
 }
 
 // 生成草稿：{idea} → {draft_token, preview_url}
-router.post('/app', requireAuth, dailyLimitMw, async (req, res, next) => {
+router.post('/app', requireAuth, async (req, res, next) => {
   try {
     if (!(await assertEnabled(res))) return;
     const idea = String((req.body && req.body.idea) || '').trim();
@@ -122,10 +133,16 @@ router.post('/app', requireAuth, dailyLimitMw, async (req, res, next) => {
     const pre = await auditGenIdea(idea, { userId: req.user.id });
     if (!pre.ok) return res.status(400).json({ error: precheckErrMsg(pre), code: pre.type });
 
+    // 分层限流：有限层（quota，DeepSeek 官方 api）每人每天 maxPerUserPerDay 次；无限层不限次
+    const quotaErr = await assertDailyQuota(req.user.id, req.body && req.body.model);
+    if (quotaErr) return res.status(429).json({ error: quotaErr.message, code: quotaErr.code });
+
+    const modelId = String((req.body && req.body.model) || '') || 'glm47';
+
     await acquire();
     let html;
     try {
-      html = await genApp.generateAppHtml(idea);
+      html = await genApp.generateAppHtml(idea, modelId);
     } catch (err) {
       if (err.code === 'GEN_FORMAT') return res.status(422).json({ error: err.message });
       console.error('[gen] 生成失败：', err.message);
@@ -137,10 +154,13 @@ router.post('/app', requireAuth, dailyLimitMw, async (req, res, next) => {
     await fs.promises.rm(genApp.userDraftDir(req.user.id), { recursive: true, force: true }).catch(() => {});
     const filename = await genApp.saveDraft(req.user.id, html);
     const token = genApp.draftTokenIssue(req.user.id, filename);
+    const sel = genApp.resolveGenModel(modelId);
+    await recordGenUsage(req.user.id, sel.tier === 'quota' ? GEN_QUOTA_KIND : GEN_UNLIMITED_KIND);
     res.json({
       draft_token: token,
       preview_url: '/api/gen/preview/' + encodeURIComponent(token),
       expires_in_minutes: Math.round(config.genApp.draftTtlMs / 60000),
+      model_id: modelId,
     });
   } catch (err) {
     next(err);
@@ -149,7 +169,7 @@ router.post('/app', requireAuth, dailyLimitMw, async (req, res, next) => {
 
 // 流式生成（SSE）：逐段推送大模型输出，前端实时展示；完成后推送 draft_token
 // 事件格式：data: {"type":"delta","text":"…"} / {"type":"done",draft_token,…} / {"type":"error","message":"…"}
-router.post('/app/stream', requireAuth, dailyLimitMw, async (req, res, next) => {
+router.post('/app/stream', requireAuth, async (req, res, next) => {
   try {
     if (!(await assertEnabled(res))) return;
     const idea = String((req.body && req.body.idea) || '').trim();
@@ -160,9 +180,16 @@ router.post('/app/stream', requireAuth, dailyLimitMw, async (req, res, next) => 
     const pre = await auditGenIdea(idea, { userId: req.user.id });
     if (!pre.ok) return res.status(400).json({ error: precheckErrMsg(pre), code: pre.type });
 
+    // 分层限流：有限层（quota，DeepSeek 官方 api）每人每天 maxPerUserPerDay 次；无限层不限次
+    const quotaErr = await assertDailyQuota(req.user.id, req.body && req.body.model);
+    if (quotaErr) return res.status(429).json({ error: quotaErr.message, code: quotaErr.code });
+
+    const modelId = String((req.body && req.body.model) || '') || 'glm47';
+
     await acquire();
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), config.genApp.timeoutMs + 10000);
+    // 流式等待超时：按模型区分（DeepSeek 15 分钟，其余 4 分钟），额外 +10s 余量
+    const timer = setTimeout(() => controller.abort(), genApp.timeoutForModel(modelId) + 10000);
     let closed = false;
     req.on('close', () => { closed = true; controller.abort(); }); // 客户端断开则中止上游
     const send = (obj) => { if (!closed) res.write('data: ' + JSON.stringify(obj) + '\n\n'); };
@@ -187,11 +214,11 @@ router.post('/app/stream', requireAuth, dailyLimitMw, async (req, res, next) => 
         (t, isReasoning) => send({ type: 'delta', text: t, reasoning: !!isReasoning }),
         controller.signal,
         prevHtml,
-        req.body.model // 前端选择的模型 id（服务端白名单校验，非法值回默认）
+        modelId // 前端选择的模型 id（服务端白名单校验，非法值回默认）
       );
       // 新草稿覆盖旧草稿（一次只保留最新一份）
       await fs.promises.rm(genApp.userDraftDir(req.user.id), { recursive: true, force: true }).catch(() => {});
-      await recordGenUsage(req.user.id);
+      await recordGenUsage(req.user.id, genApp.resolveGenModel(modelId).tier === 'quota' ? GEN_QUOTA_KIND : GEN_UNLIMITED_KIND);
       const ver = await saveSlotVersion(req.user.id, slotNo, idea, html); // 持久化进对话记录
       const filename = await genApp.saveDraft(req.user.id, html); // 临时草稿：供「满意提交」走 commit 流程
       const token = genApp.draftTokenIssue(req.user.id, filename);
@@ -228,13 +255,42 @@ router.post('/app/stream', requireAuth, dailyLimitMw, async (req, res, next) => 
   }
 });
 
-// 今日生成次数（前端卡片展示“今天还可生成N次”；测试期间不限次）
+// 今日生成次数（前端卡片展示「今天还可生成N次」；无限层不限次，有限层按天计次）
 router.get('/quota', requireAuth, async (req, res, next) => {
   try {
-    const used = await getGenUsedToday(req.user.id);
-    res.json(config.genApp.dailyLimitDisabled
-      ? { unlimited: true, used_today: used }
-      : { unlimited: false, used_today: used, max_per_day: config.genApp.maxPerUserPerDay });
+    const unlimitedUsed = await getGenUsedToday(req.user.id, GEN_UNLIMITED_KIND);
+    const quotaUsed = await getGenUsedToday(req.user.id, GEN_QUOTA_KIND);
+    res.json({
+      unlimited: true, // 无限免费层不限次
+      used_today: unlimitedUsed,
+      quota: {
+        max_per_day: config.sdu.maxPerUserPerDay,
+        used_today: quotaUsed,
+        remaining: Math.max(0, config.sdu.maxPerUserPerDay - quotaUsed),
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+// 模型列表（前端下拉分层用）：返回各模型的 label/provider/tier/tierLabel/剩余次数
+router.get('/models', requireAuth, async (req, res, next) => {
+  try {
+    const quotaUsed = await getGenUsedToday(req.user.id, GEN_QUOTA_KIND);
+    const out = Object.entries(genApp.GEN_MODELS).map(([id, m]) => ({
+      id,
+      label: m.label,
+      provider: m.provider,
+      tier: m.tier || 'unlimited',
+      tierLabel: m.tierLabel || (m.tier === 'quota' ? '有限免费层' : '无限免费层'),
+    }));
+    res.json({
+      models: out,
+      quota: {
+        max_per_day: config.sdu.maxPerUserPerDay,
+        used_today: quotaUsed,
+        remaining: Math.max(0, config.sdu.maxPerUserPerDay - quotaUsed),
+      },
+    });
   } catch (err) { next(err); }
 });
 

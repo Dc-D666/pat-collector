@@ -715,7 +715,7 @@ async function initGenTask(task) {
       if (statusEl) statusEl.innerHTML = `<span style="color:var(--success);">✓ 检测到你提交的生成作品，任务已自动完成</span>`;
       reportTask(parseInt(task.dataset.article, 10), parseInt(task.dataset.task, 10));
     } else {
-      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">到「我的项目」→「✨ 一句话生成小程序」制作并提交后，点「我已生成」核验</span>`;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--text-dim);">到「我的项目」→「✨ AI 轻应用」制作并提交后，点「我已生成」核验</span>`;
     }
   } catch (_) { /* 静默 */ }
 }

@@ -165,6 +165,9 @@ const config = {
     model: process.env.GENAPP_MODEL || '',                     // 留空用各 provider 默认模型
     fallbackModel: process.env.GENAPP_FALLBACK_MODEL || '',    // 留空用各 provider 默认回退模型
     timeoutMs: parseInt(process.env.GENAPP_TIMEOUT_MS || '240000', 10), // 免费档排队可能超2分钟，放宽到4分钟
+    // DeepSeek 官方（sdu-deepseek，思考模型）等待超时：思考链很长，默认放宽到 15 分钟，
+    // 其余模型仍用上方的 timeoutMs（4 分钟）。可经 GENAPP_DEEPSEEK_TIMEOUT_MS 覆盖。
+    deepseekTimeoutMs: parseInt(process.env.GENAPP_DEEPSEEK_TIMEOUT_MS || '900000', 10),
     maxIdeaChars: 500,
     maxHtmlBytes: 1024 * 1024,
     maxPerUserPerDay: 10,      // 每人每天生成次数上限（rateLimit）
@@ -177,6 +180,18 @@ const config = {
   openrouter: {
     apiKey: process.env.OPENROUTER_API_KEY || '',
     baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+  },
+  // 「一句话生成小程序」受限模型源（2026-08-27 接入）：经 DeepSeek 官方 API。
+  // OpenAI 兼容端点 https://api.deepseek.com/v1/chat/completions，公有云可直接访问。
+  // 对应 GEN_MODELS 的 quota 层（模型 id 'sdu-deepseek'，label DeepSeek-V4-Flash）：
+  // 按「每人每天最多 maxPerUserPerDay 次」控制计费成本。baseUrl 不含 /v1 时代码自动补全。
+  sdu: {
+    apiKey: process.env.SDU_API_KEY || '',
+    baseUrl: process.env.SDU_BASE_URL || 'https://api.deepseek.com',
+    models: {
+      'sdu-deepseek': process.env.SDU_DEEPSEEK_MODEL || 'deepseek-v4-flash',
+    },
+    maxPerUserPerDay: parseInt(process.env.SDU_MAX_DAILY || '10', 10) || 10,
   },
   projectRoot: PROJECT_ROOT,
   classes: CLASSES,
